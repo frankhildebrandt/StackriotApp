@@ -21,11 +21,14 @@ final class AppModel: @unchecked Sendable {
         runtimeRootPath: AppPaths.nodeRuntimeRoot.path,
         npmCachePath: AppPaths.npmCacheDirectory.path
     )
+    var availableAgents: Set<AIAgentTool> = []
+    var runningAgentWorktreeIDs: Set<UUID> = []
 
     private let repositoryManager = RepositoryManager()
     private let worktreeManager = WorktreeManager()
     private let ideManager = IDEManager()
     private let sshKeyManager = SSHKeyManager()
+    private let agentManager = AIAgentManager()
     private let nodeTooling = NodeToolingService()
     private let nodeRuntimeManager = NodeRuntimeManager()
     private let makeTooling = MakeToolingService()
@@ -45,6 +48,12 @@ final class AppModel: @unchecked Sendable {
                 await nodeRuntimeManager.refreshDefaultRuntimeIfNeeded(force: false)
                 nodeRuntimeStatus = await nodeRuntimeManager.statusSnapshot()
                 await refreshAllRepositories(force: false)
+            }
+        }
+
+        if agentManager.onSessionsChanged == nil {
+            agentManager.onSessionsChanged = { [weak self] sessions in
+                self?.runningAgentWorktreeIDs = Set(sessions.keys)
             }
         }
     }
@@ -311,6 +320,38 @@ final class AppModel: @unchecked Sendable {
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
+    }
+
+    func checkAgentAvailability() async {
+        availableAgents = await agentManager.checkAvailability()
+    }
+
+    func launchAgent(for worktree: WorktreeRecord) {
+        guard worktree.assignedAgent != .none else { return }
+
+        do {
+            try agentManager.launchAgent(worktree.assignedAgent, for: worktree)
+            runningAgentWorktreeIDs = Set(agentManager.activeSessions.keys)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func assignAgent(_ tool: AIAgentTool, to worktree: WorktreeRecord, in modelContext: ModelContext) {
+        worktree.assignedAgent = tool
+        do {
+            try modelContext.save()
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func isAgentRunning(for worktree: WorktreeRecord) -> Bool {
+        runningAgentWorktreeIDs.contains(worktree.id)
+    }
+
+    func isAgentRunning(forRepository repository: ManagedRepository) -> Bool {
+        repository.worktrees.contains { runningAgentWorktreeIDs.contains($0.id) }
     }
 
     func runMakeTarget(

@@ -142,6 +142,7 @@ final class WorktreeRecord {
     var branchName: String
     var issueContext: String?
     var path: String
+    var assignedAgentRawValue: String
     var createdAt: Date
     var lastOpenedAt: Date?
     var repository: ManagedRepository?
@@ -151,6 +152,7 @@ final class WorktreeRecord {
         branchName: String,
         issueContext: String? = nil,
         path: String,
+        assignedAgentRawValue: String = AIAgentTool.none.rawValue,
         createdAt: Date = .now,
         lastOpenedAt: Date? = nil,
         repository: ManagedRepository? = nil
@@ -159,9 +161,15 @@ final class WorktreeRecord {
         self.branchName = branchName
         self.issueContext = issueContext
         self.path = path
+        self.assignedAgentRawValue = assignedAgentRawValue
         self.createdAt = createdAt
         self.lastOpenedAt = lastOpenedAt
         self.repository = repository
+    }
+
+    var assignedAgent: AIAgentTool {
+        get { AIAgentTool(rawValue: assignedAgentRawValue) ?? .none }
+        set { assignedAgentRawValue = newValue.rawValue }
     }
 }
 

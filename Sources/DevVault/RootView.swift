@@ -15,6 +15,7 @@ struct RootView: View {
                 repositories: repositories,
                 selectedRepositoryID: $appModel.selectedRepositoryID,
                 refreshingRepositoryIDs: appModel.refreshingRepositoryIDs,
+                isAgentRunningForRepository: appModel.isAgentRunning(forRepository:),
                 onAddRepository: appModel.presentCloneSheet,
                 onRefreshRepository: { repository in
                     Task {
@@ -43,6 +44,7 @@ struct RootView: View {
         .task {
             appModel.configure(modelContext: modelContext)
             appModel.selectInitialRepository(from: repositories)
+            await appModel.checkAgentAvailability()
         }
         .sheet(isPresented: $appModel.isCloneSheetPresented) {
             CloneRepositorySheet()
@@ -133,6 +135,7 @@ private struct SidebarView: View {
     let repositories: [ManagedRepository]
     @Binding var selectedRepositoryID: UUID?
     let refreshingRepositoryIDs: Set<UUID>
+    let isAgentRunningForRepository: (ManagedRepository) -> Bool
     let onAddRepository: () -> Void
     let onRefreshRepository: (ManagedRepository) -> Void
     let onRevealRepository: (ManagedRepository) -> Void
@@ -144,8 +147,13 @@ private struct SidebarView: View {
             Section("Repositories") {
                 ForEach(repositories) { repository in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(repository.displayName)
-                            .font(.headline)
+                        HStack(spacing: 8) {
+                            Text(repository.displayName)
+                                .font(.headline)
+                            if isAgentRunningForRepository(repository) {
+                                AgentActivityDot()
+                            }
+                        }
                         Text(repository.primaryRemote?.url ?? repository.remoteURL ?? "No remote configured")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -373,8 +381,13 @@ private struct RepositoryDetailView: View {
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text(worktree.branchName)
-                                        .font(.headline)
+                                    HStack(spacing: 8) {
+                                        Text(worktree.branchName)
+                                            .font(.headline)
+                                        if appModel.isAgentRunning(for: worktree) {
+                                            AgentActivityDot()
+                                        }
+                                    }
                                     Text(worktree.path)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -432,6 +445,18 @@ private struct RepositoryDetailView: View {
                 .font(.title3.weight(.semibold))
 
             VStack(alignment: .leading, spacing: 14) {
+                AgentAssignmentRow(
+                    worktree: worktree,
+                    availableAgents: appModel.availableAgents,
+                    isRunning: appModel.isAgentRunning(for: worktree),
+                    onAssign: { tool in
+                        appModel.assignAgent(tool, to: worktree, in: modelContext)
+                    },
+                    onLaunch: {
+                        appModel.launchAgent(for: worktree)
+                    }
+                )
+
                 HStack(spacing: 12) {
                     Button("Open Cursor") {
                         Task {
@@ -551,6 +576,81 @@ private struct RepositoryDetailView: View {
         formatter.unitsStyle = .short
         return formatter
     }()
+}
+
+private struct AgentAssignmentRow: View {
+    let worktree: WorktreeRecord
+    let availableAgents: Set<AIAgentTool>
+    let isRunning: Bool
+    let onAssign: (AIAgentTool) -> Void
+    let onLaunch: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Picker(
+                "AI Agent",
+                selection: Binding(
+                    get: { worktree.assignedAgent },
+                    set: { onAssign($0) }
+                )
+            ) {
+                ForEach(AIAgentTool.allCases) { tool in
+                    Text(label(for: tool)).tag(tool)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 220)
+
+            if worktree.assignedAgent != .none {
+                Button {
+                    onLaunch()
+                } label: {
+                    Label(
+                        isRunning ? "Running" : "Launch Agent",
+                        systemImage: isRunning ? "terminal.fill" : "terminal"
+                    )
+                }
+                .buttonStyle(.bordered)
+                .disabled(isRunning)
+                .tint(isRunning ? .purple : .accentColor)
+            }
+
+            if isRunning {
+                AgentActivityDot()
+            }
+
+            Spacer()
+        }
+    }
+
+    private func label(for tool: AIAgentTool) -> String {
+        guard tool != .none else {
+            return tool.displayName
+        }
+
+        if availableAgents.contains(tool) {
+            return tool.displayName
+        }
+
+        return "\(tool.displayName) (not found)"
+    }
+}
+
+private struct AgentActivityDot: View {
+    @State private var pulsing = false
+
+    var body: some View {
+        Circle()
+            .fill(Color.purple)
+            .frame(width: 8, height: 8)
+            .scaleEffect(pulsing ? 1.35 : 0.85)
+            .opacity(pulsing ? 1.0 : 0.5)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    pulsing = true
+                }
+            }
+    }
 }
 
 private struct RunConsoleView: View {
