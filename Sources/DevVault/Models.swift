@@ -142,7 +142,7 @@ final class WorktreeRecord {
     var branchName: String
     var issueContext: String?
     var path: String
-    var assignedAgentRawValue: String
+    @Transient var assignedAgentRawValue: String = AIAgentTool.none.rawValue
     var createdAt: Date
     var lastOpenedAt: Date?
     var repository: ManagedRepository?
