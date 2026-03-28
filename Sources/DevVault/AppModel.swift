@@ -51,11 +51,6 @@ final class AppModel: @unchecked Sendable {
             }
         }
 
-        if agentManager.onSessionsChanged == nil {
-            agentManager.onSessionsChanged = { [weak self] sessions in
-                self?.runningAgentWorktreeIDs = Set(sessions.keys)
-            }
-        }
     }
 
     func selectInitialRepository(from repositories: [ManagedRepository]) {
@@ -326,12 +321,33 @@ final class AppModel: @unchecked Sendable {
         availableAgents = await agentManager.checkAvailability()
     }
 
-    func launchAgent(for worktree: WorktreeRecord) {
-        guard worktree.assignedAgent != .none else { return }
+    func launchAgent(_ tool: AIAgentTool, for worktree: WorktreeRecord, in modelContext: ModelContext) {
+        guard tool != .none else { return }
 
         do {
-            try agentManager.launchAgent(worktree.assignedAgent, for: worktree)
-            runningAgentWorktreeIDs = Set(agentManager.activeSessions.keys)
+            worktree.assignedAgent = tool
+            try modelContext.save()
+
+            guard let repository = worktree.repository else {
+                throw DevVaultError.worktreeUnavailable
+            }
+
+            let shell = ProcessInfo.processInfo.environment["SHELL"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let loginShell = (shell?.isEmpty == false ? shell! : "/bin/zsh")
+            let shellCommand = tool.launchCommand(in: worktree.path)
+            let descriptor = CommandExecutionDescriptor(
+                title: tool.displayName,
+                actionKind: .aiAgent,
+                executable: "/usr/bin/script",
+                arguments: ["-q", "/dev/null", loginShell, "-ilc", shellCommand],
+                displayCommandLine: tool.launchCommand(in: worktree.path),
+                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                repositoryID: repository.id,
+                worktreeID: worktree.id,
+                runtimeRequirement: nil
+            )
+            startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+            refreshRunningAgentWorktrees()
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
@@ -365,6 +381,7 @@ final class AppModel: @unchecked Sendable {
             actionKind: .makeTarget,
             executable: "make",
             arguments: [target],
+            displayCommandLine: nil,
             currentDirectoryURL: URL(fileURLWithPath: worktree.path),
             repositoryID: repository.id,
             worktreeID: worktree.id,
@@ -384,6 +401,7 @@ final class AppModel: @unchecked Sendable {
             actionKind: .npmScript,
             executable: "npm",
             arguments: ["run", script],
+            displayCommandLine: nil,
             currentDirectoryURL: URL(fileURLWithPath: worktree.path),
             repositoryID: repository.id,
             worktreeID: worktree.id,
@@ -543,7 +561,7 @@ final class AppModel: @unchecked Sendable {
         worktree: WorktreeRecord?,
         modelContext: ModelContext
     ) {
-        let commandLine = ([descriptor.executable] + descriptor.arguments).joined(separator: " ")
+        let commandLine = descriptor.displayCommandLine ?? ([descriptor.executable] + descriptor.arguments).joined(separator: " ")
         let run = RunRecord(
             actionKind: descriptor.actionKind,
             title: descriptor.title,
@@ -591,6 +609,7 @@ final class AppModel: @unchecked Sendable {
         run.status = wasCancelled ? .cancelled : (exitCode == 0 ? .succeeded : .failed)
         activeRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
+        refreshRunningAgentWorktrees()
         save(modelContext)
     }
 
@@ -601,7 +620,17 @@ final class AppModel: @unchecked Sendable {
         run.status = .failed
         activeRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
+        refreshRunningAgentWorktrees()
         save(modelContext)
+    }
+
+    func sendInput(_ input: String, to run: RunRecord) {
+        guard activeRunIDs.contains(run.id) else { return }
+        let text = input.trimmingCharacters(in: .newlines)
+        guard !text.isEmpty else { return }
+
+        runningProcesses[run.id]?.send(text + "\n")
+        handleRunOutput(runID: run.id, chunk: "> \(text)\n")
     }
 
     private func runRecord(with id: UUID) -> RunRecord? {
@@ -755,6 +784,17 @@ final class AppModel: @unchecked Sendable {
             nodeRuntimeStatus = await nodeRuntimeManager.statusSnapshot()
             handleRunFailure(runID: runID, message: error.localizedDescription)
         }
+    }
+
+    private func refreshRunningAgentWorktrees() {
+        runningAgentWorktreeIDs = Set(
+            activeRunIDs.compactMap { runID in
+                guard let run = runRecord(with: runID), run.actionKind == .aiAgent else {
+                    return nil
+                }
+                return run.worktree?.id
+            }
+        )
     }
 }
 

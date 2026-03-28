@@ -134,10 +134,12 @@ struct CommandResult: Sendable {
 
 final class RunningProcess: @unchecked Sendable {
     fileprivate let process: Process
+    private let stdinPipe: Pipe
     fileprivate var wasCancelled = false
 
-    init(process: Process) {
+    init(process: Process, stdinPipe: Pipe) {
         self.process = process
+        self.stdinPipe = stdinPipe
     }
 
     func cancel() {
@@ -145,6 +147,11 @@ final class RunningProcess: @unchecked Sendable {
         if process.isRunning {
             process.terminate()
         }
+    }
+
+    func send(_ input: String) {
+        guard process.isRunning, let data = input.data(using: .utf8) else { return }
+        stdinPipe.fileHandleForWriting.write(data)
     }
 }
 
@@ -164,11 +171,13 @@ enum CommandRunner {
         process.currentDirectoryURL = currentDirectoryURL
         process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
 
+        let stdinPipe = Pipe()
         let outputPipe = Pipe()
+        process.standardInput = stdinPipe
         process.standardOutput = outputPipe
         process.standardError = outputPipe
 
-        let runningProcess = RunningProcess(process: process)
+        let runningProcess = RunningProcess(process: process, stdinPipe: stdinPipe)
         outputPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty, let string = String(data: data, encoding: .utf8) else {
@@ -205,8 +214,10 @@ enum CommandRunner {
             process.currentDirectoryURL = currentDirectoryURL
             process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
 
+            let stdinPipe = Pipe()
             let stdoutPipe = Pipe()
             let stderrPipe = Pipe()
+            process.standardInput = stdinPipe
             process.standardOutput = stdoutPipe
             process.standardError = stderrPipe
 
@@ -826,7 +837,11 @@ final class AIAgentManager {
         let appleScript = """
         tell application \"Terminal\"
             activate
-            do script \"\(command.appleScriptEscaped)\"
+            if (count of windows) is 0 then
+                do script \"\(command.appleScriptEscaped)\"
+            else
+                do script \"\(command.appleScriptEscaped)\" in front window
+            end if
         end tell
         """
 
@@ -842,26 +857,31 @@ final class AIAgentManager {
         }
 
         let pid = try waitForPID(at: pidFile)
+        let sessionID = UUID()
         let state = AgentSessionState(
+            id: sessionID,
             worktreeID: worktree.id,
             tool: tool,
             pid: pid,
             startedAt: .now,
             phase: .running
         )
-        activeSessions[worktree.id] = state
+        activeSessions[sessionID] = state
         onSessionsChanged?(activeSessions)
 
-        startPolling(pid: pid, worktreeID: worktree.id)
+        startPolling(pid: pid, sessionID: sessionID)
         return state
     }
 
     func isAgentRunning(for worktreeID: UUID) -> Bool {
-        if let session = activeSessions[worktreeID], case .running = session.phase {
-            return true
+        activeSessions.values.contains { session in
+            session.worktreeID == worktreeID && {
+                if case .running = session.phase {
+                    return true
+                }
+                return false
+            }()
         }
-
-        return false
     }
 
     func isAgentRunning(forAnyWorktreeIn repository: ManagedRepository) -> Bool {
@@ -885,7 +905,7 @@ final class AIAgentManager {
         throw DevVaultError.commandFailed("Agent launch timed out while waiting for PID.")
     }
 
-    private func startPolling(pid: pid_t, worktreeID: UUID) {
+    private func startPolling(pid: pid_t, sessionID: UUID) {
         Task { [weak self] in
             while true {
                 try? await Task.sleep(for: .seconds(2))
@@ -894,14 +914,14 @@ final class AIAgentManager {
                     guard let self else { return }
                     let processIsAlive = kill(pid, 0) == 0 || errno == EPERM
                     if !processIsAlive {
-                        self.activeSessions.removeValue(forKey: worktreeID)
+                        self.activeSessions.removeValue(forKey: sessionID)
                         self.onSessionsChanged?(self.activeSessions)
                     }
                 }
 
                 let shouldContinue = await MainActor.run { [weak self] in
                     guard let self else { return false }
-                    return self.activeSessions[worktreeID] != nil
+                    return self.activeSessions[sessionID] != nil
                 }
 
                 if !shouldContinue {
@@ -992,6 +1012,7 @@ struct NodeToolingService {
             actionKind: .installDependencies,
             executable: executable,
             arguments: arguments,
+            displayCommandLine: nil,
             currentDirectoryURL: worktreeURL,
             repositoryID: repositoryID,
             worktreeID: worktree.id,

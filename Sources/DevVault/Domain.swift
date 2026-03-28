@@ -23,6 +23,7 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     case makeTarget
     case npmScript
     case installDependencies
+    case aiAgent
 
     var id: String { rawValue }
 }
@@ -157,6 +158,7 @@ struct CommandExecutionDescriptor: Sendable {
     let actionKind: ActionKind
     let executable: String
     let arguments: [String]
+    let displayCommandLine: String?
     let currentDirectoryURL: URL?
     let repositoryID: UUID
     let worktreeID: UUID?
@@ -281,6 +283,7 @@ enum AppPreferences {
 }
 
 struct AgentSessionState: Sendable {
+    let id: UUID
     let worktreeID: UUID
     let tool: AIAgentTool
     var pid: pid_t

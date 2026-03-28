@@ -449,11 +449,8 @@ private struct RepositoryDetailView: View {
                     worktree: worktree,
                     availableAgents: appModel.availableAgents,
                     isRunning: appModel.isAgentRunning(for: worktree),
-                    onAssign: { tool in
-                        appModel.assignAgent(tool, to: worktree, in: modelContext)
-                    },
-                    onLaunch: {
-                        appModel.launchAgent(for: worktree)
+                    onLaunch: { tool in
+                        appModel.launchAgent(tool, for: worktree, in: modelContext)
                     }
                 )
 
@@ -582,57 +579,68 @@ private struct AgentAssignmentRow: View {
     let worktree: WorktreeRecord
     let availableAgents: Set<AIAgentTool>
     let isRunning: Bool
-    let onAssign: (AIAgentTool) -> Void
-    let onLaunch: () -> Void
+    let onLaunch: (AIAgentTool) -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Picker(
-                "AI Agent",
-                selection: Binding(
-                    get: { worktree.assignedAgent },
-                    set: { onAssign($0) }
-                )
-            ) {
-                ForEach(AIAgentTool.allCases) { tool in
-                    Text(label(for: tool)).tag(tool)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("AI Agents")
+                .font(.headline)
+
+            if installedAgents.isEmpty {
+                Text("No supported local agent CLI was detected.")
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 10) {
+                    ForEach(installedAgents) { tool in
+                        if tool == worktree.assignedAgent {
+                            Button {
+                                onLaunch(tool)
+                            } label: {
+                                Label(tool.displayName, systemImage: icon(for: tool))
+                            }
+                            .buttonStyle(.borderedProminent)
+                        } else {
+                            Button {
+                                onLaunch(tool)
+                            } label: {
+                                Label(tool.displayName, systemImage: icon(for: tool))
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+
+                    if isRunning {
+                        Label("Running", systemImage: "terminal.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        AgentActivityDot()
+                    }
+
+                    Spacer()
                 }
             }
-            .pickerStyle(.menu)
-            .frame(width: 220)
-
-            if worktree.assignedAgent != .none {
-                Button {
-                    onLaunch()
-                } label: {
-                    Label(
-                        isRunning ? "Running" : "Launch Agent",
-                        systemImage: isRunning ? "terminal.fill" : "terminal"
-                    )
-                }
-                .buttonStyle(.bordered)
-                .disabled(isRunning)
-                .tint(isRunning ? .purple : .accentColor)
-            }
-
-            if isRunning {
-                AgentActivityDot()
-            }
-
-            Spacer()
         }
     }
 
-    private func label(for tool: AIAgentTool) -> String {
-        guard tool != .none else {
-            return tool.displayName
+    private var installedAgents: [AIAgentTool] {
+        AIAgentTool.allCases.filter { tool in
+            tool != .none && availableAgents.contains(tool)
         }
+    }
 
-        if availableAgents.contains(tool) {
-            return tool.displayName
+    private func icon(for tool: AIAgentTool) -> String {
+        switch tool {
+        case .none:
+            "circle"
+        case .claudeCode:
+            "sparkles.rectangle.stack"
+        case .codex:
+            "terminal"
+        case .githubCopilot:
+            "chevron.left.forwardslash.chevron.right"
+        case .cursorCLI:
+            "cursorarrow.click.2"
         }
-
-        return "\(tool.displayName) (not found)"
     }
 }
 
@@ -656,6 +664,7 @@ private struct AgentActivityDot: View {
 private struct RunConsoleView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
+    @State private var pendingInput = ""
 
     let run: RunRecord?
     let activeRunIDs: Set<UUID>
@@ -679,12 +688,30 @@ private struct RunConsoleView: View {
                     }
                 }
 
-                TextEditor(text: .constant(run.outputText))
-                    .font(.system(.body, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .padding(12)
-                    .background(.black.opacity(0.9), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .foregroundStyle(.white)
+                VStack(spacing: 12) {
+                    TextEditor(text: .constant(run.outputText))
+                        .font(.system(.body, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                        .padding(12)
+                        .background(.black.opacity(0.9), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .foregroundStyle(.white)
+
+                    if activeRunIDs.contains(run.id) {
+                        HStack(spacing: 12) {
+                            TextField("Send input to session", text: $pendingInput)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit {
+                                    submitInput(for: run)
+                                }
+
+                            Button("Send") {
+                                submitInput(for: run)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(pendingInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+                }
             } else {
                 ContentUnavailableView("No Run Selected", systemImage: "terminal", description: Text("Select a run from the repository history to inspect logs and exit state."))
             }
@@ -698,6 +725,12 @@ private struct RunConsoleView: View {
                 endPoint: .bottom
             )
         )
+    }
+
+    private func submitInput(for run: RunRecord) {
+        let text = pendingInput
+        pendingInput = ""
+        appModel.sendInput(text, to: run)
     }
 }
 

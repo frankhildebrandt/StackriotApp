@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:DevVault}",
+            "name": "Debug DevVault",
+            "target": "DevVault",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug DevVault"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:DevVault}",
+            "name": "Release DevVault",
+            "target": "DevVault",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release DevVault"
+        }
+    ]
+}
