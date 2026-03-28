@@ -5,13 +5,16 @@ import SwiftData
 final class ManagedRepository {
     var id: UUID
     var displayName: String
-    var remoteURL: String
+    var remoteURL: String?
     var bareRepositoryPath: String
     var defaultBranch: String
     var createdAt: Date
     var updatedAt: Date
+    var lastFetchedAt: Date?
     var statusRawValue: String
     var lastErrorMessage: String?
+    @Relationship(deleteRule: .cascade, inverse: \RepositoryRemote.repository)
+    var remotes: [RepositoryRemote]
     @Relationship(deleteRule: .cascade, inverse: \WorktreeRecord.repository)
     var worktrees: [WorktreeRecord]
     @Relationship(deleteRule: .cascade, inverse: \ActionTemplateRecord.repository)
@@ -22,11 +25,12 @@ final class ManagedRepository {
     init(
         id: UUID = UUID(),
         displayName: String,
-        remoteURL: String,
+        remoteURL: String? = nil,
         bareRepositoryPath: String,
         defaultBranch: String,
         createdAt: Date = .now,
         updatedAt: Date = .now,
+        lastFetchedAt: Date? = nil,
         status: RepositoryHealth = .ready,
         lastErrorMessage: String? = nil
     ) {
@@ -37,8 +41,10 @@ final class ManagedRepository {
         self.defaultBranch = defaultBranch
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.lastFetchedAt = lastFetchedAt
         self.statusRawValue = status.rawValue
         self.lastErrorMessage = lastErrorMessage
+        self.remotes = []
         self.worktrees = []
         self.actionTemplates = []
         self.runs = []
@@ -47,6 +53,86 @@ final class ManagedRepository {
     var status: RepositoryHealth {
         get { RepositoryHealth(rawValue: statusRawValue) ?? .broken }
         set { statusRawValue = newValue.rawValue }
+    }
+
+    var primaryRemote: RepositoryRemote? {
+        remotes.sorted {
+            if $0.name == "origin" { return true }
+            if $1.name == "origin" { return false }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }.first
+    }
+}
+
+@Model
+final class RepositoryRemote {
+    var id: UUID
+    var name: String
+    var url: String
+    var canonicalURL: String
+    var fetchEnabled: Bool
+    var createdAt: Date
+    var updatedAt: Date
+    var repository: ManagedRepository?
+    var sshKey: StoredSSHKey?
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        url: String,
+        canonicalURL: String,
+        fetchEnabled: Bool = true,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        repository: ManagedRepository? = nil,
+        sshKey: StoredSSHKey? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.url = url
+        self.canonicalURL = canonicalURL
+        self.fetchEnabled = fetchEnabled
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.repository = repository
+        self.sshKey = sshKey
+    }
+}
+
+@Model
+final class StoredSSHKey {
+    var id: UUID
+    var displayName: String
+    var kindRawValue: String
+    var publicKey: String
+    var privateKeyRef: String
+    var createdAt: Date
+    var updatedAt: Date
+    @Relationship(deleteRule: .nullify, inverse: \RepositoryRemote.sshKey)
+    var remotes: [RepositoryRemote]
+
+    init(
+        id: UUID = UUID(),
+        displayName: String,
+        kind: SSHKeyKind,
+        publicKey: String,
+        privateKeyRef: String,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.kindRawValue = kind.rawValue
+        self.publicKey = publicKey
+        self.privateKeyRef = privateKeyRef
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.remotes = []
+    }
+
+    var kind: SSHKeyKind {
+        get { SSHKeyKind(rawValue: kindRawValue) ?? .imported }
+        set { kindRawValue = newValue.rawValue }
     }
 }
 

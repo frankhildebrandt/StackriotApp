@@ -15,6 +15,7 @@
 		A00000000000000000000006 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000016 /* Models.swift */; };
 		A00000000000000000000007 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000017 /* RootView.swift */; };
 		A00000000000000000000008 /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000018 /* Services.swift */; };
+		A00000000000000000000009 /* NodeRuntimeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000019 /* NodeRuntimeManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +28,7 @@
 		A00000000000000000000016 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		A00000000000000000000017 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		A00000000000000000000018 /* Services.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services.swift; sourceTree = "<group>"; };
+		A00000000000000000000019 /* NodeRuntimeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeRuntimeManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -59,6 +61,7 @@
 				A00000000000000000000014 /* DevVaultApp.swift */,
 				A00000000000000000000015 /* Domain.swift */,
 				A00000000000000000000016 /* Models.swift */,
+				A00000000000000000000019 /* NodeRuntimeManager.swift */,
 				A00000000000000000000017 /* RootView.swift */,
 				A00000000000000000000018 /* Services.swift */,
 			);
@@ -135,6 +138,7 @@
 				A00000000000000000000004 /* DevVaultApp.swift in Sources */,
 				A00000000000000000000005 /* Domain.swift in Sources */,
 				A00000000000000000000006 /* Models.swift in Sources */,
+				A00000000000000000000009 /* NodeRuntimeManager.swift in Sources */,
 				A00000000000000000000007 /* RootView.swift in Sources */,
 				A00000000000000000000008 /* Services.swift in Sources */,
 			);

@@ -13,6 +13,8 @@ struct DevVaultApp: App {
         .defaultSize(width: 1480, height: 920)
         .modelContainer(for: [
             ManagedRepository.self,
+            RepositoryRemote.self,
+            StoredSSHKey.self,
             WorktreeRecord.self,
             ActionTemplateRecord.self,
             RunRecord.self,
@@ -23,7 +25,16 @@ struct DevVaultApp: App {
 
         Settings {
             SettingsView()
+                .environment(appModel)
         }
+        .modelContainer(for: [
+            ManagedRepository.self,
+            RepositoryRemote.self,
+            StoredSSHKey.self,
+            WorktreeRecord.self,
+            ActionTemplateRecord.self,
+            RunRecord.self,
+        ])
 
         Window("About DevVault", id: "about") {
             AboutView()

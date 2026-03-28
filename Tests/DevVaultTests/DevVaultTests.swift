@@ -9,6 +9,12 @@ struct DevVaultTests {
     }
 
     @Test
+    func canonicalRemoteURLNormalizesGitLocations() {
+        #expect(RepositoryManager.canonicalRemoteURL(from: "https://GitHub.com/OpenAI/example.git") == "https://github.com/OpenAI/example")
+        #expect(RepositoryManager.canonicalRemoteURL(from: "git@GitHub.com:OpenAI/example.git") == "git@github.com:/OpenAI/example")
+    }
+
+    @Test
     func makeTargetParserExtractsConcreteTargets() {
         let contents = """
         .PHONY: build test
@@ -42,9 +48,264 @@ struct DevVaultTests {
     }
 
     @Test
-    func repositoryCloneAndWorktreeCreationWorkLocally() async throws {
-        let origin = try temporaryDirectory(named: "origin")
-        let remote = origin.appendingPathComponent("sample.git")
+    func appManagedNodePathsStayInsideApplicationSupport() {
+        let supportRoot = AppPaths.applicationSupportDirectory.path
+        #expect(AppPaths.nodeRuntimeRoot.path.hasPrefix(supportRoot))
+        #expect(AppPaths.nvmDirectory.path.hasPrefix(supportRoot))
+        #expect(AppPaths.nodeVersionsRoot.path.hasPrefix(supportRoot))
+        #expect(AppPaths.npmCacheDirectory.path.hasPrefix(supportRoot))
+        #expect(AppPaths.corepackCacheDirectory.path.hasPrefix(supportRoot))
+        #expect(AppPaths.runtimeTemporaryDirectory.path.hasPrefix(supportRoot))
+    }
+
+    @Test
+    func nodeVersionRequirementPrefersPackageEngines() throws {
+        let root = try temporaryDirectory(named: "node-engines")
+        try """
+        {
+          "engines": {
+            "node": "20"
+          }
+        }
+        """.write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+        try "18\n".write(to: root.appendingPathComponent(".nvmrc"), atomically: true, encoding: .utf8)
+
+        let requirement = NodeToolingService().runtimeRequirement(for: root, defaultVersionSpec: "lts/*")
+        #expect(requirement.nodeVersionSpec == "20")
+        #expect(requirement.versionSource == .packageEngines)
+    }
+
+    @Test
+    func nodeVersionRequirementFallsBackToNvmrc() throws {
+        let root = try temporaryDirectory(named: "node-nvmrc")
+        try "18.19.0\n".write(to: root.appendingPathComponent(".nvmrc"), atomically: true, encoding: .utf8)
+
+        let requirement = NodeToolingService().runtimeRequirement(for: root, defaultVersionSpec: "lts/*")
+        #expect(requirement.nodeVersionSpec == "18.19.0")
+        #expect(requirement.versionSource == .nvmrc)
+    }
+
+    @Test
+    func nodeVersionRequirementFallsBackToDefaultLTS() throws {
+        let root = try temporaryDirectory(named: "node-default")
+
+        let requirement = NodeToolingService().runtimeRequirement(for: root, defaultVersionSpec: "lts/*")
+        #expect(requirement.nodeVersionSpec == "lts/*")
+        #expect(requirement.versionSource == .defaultLTS)
+    }
+
+    @Test
+    func packageManagerSelectionUsesKnownLockfiles() throws {
+        let tooling = NodeToolingService()
+
+        let pnpmRoot = try temporaryDirectory(named: "pnpm")
+        FileManager.default.createFile(atPath: pnpmRoot.appendingPathComponent("pnpm-lock.yaml").path, contents: Data())
+        #expect(tooling.packageManager(in: pnpmRoot) == .pnpm)
+
+        let yarnRoot = try temporaryDirectory(named: "yarn")
+        FileManager.default.createFile(atPath: yarnRoot.appendingPathComponent("yarn.lock").path, contents: Data())
+        #expect(tooling.packageManager(in: yarnRoot) == .yarn)
+
+        let npmRoot = try temporaryDirectory(named: "npm")
+        #expect(tooling.packageManager(in: npmRoot) == .npm)
+    }
+
+    @Test
+    func nodeVersionResolverSupportsMinimumComparatorRanges() {
+        let resolver = NodeVersionSpecResolver()
+        let resolved = resolver.resolveInstallableSpec(
+            for: ">=22.12.0",
+            availableVersions: ["v22.11.0", "v22.12.0", "v22.13.1", "v23.0.0"]
+        )
+        #expect(resolved == "v23.0.0")
+    }
+
+    @Test
+    func nodeVersionResolverSupportsCompoundRanges() {
+        let resolver = NodeVersionSpecResolver()
+        let resolved = resolver.resolveInstallableSpec(
+            for: ">=22.12.0 <23",
+            availableVersions: ["v22.11.0", "v22.12.0", "v22.13.1", "v23.0.0"]
+        )
+        #expect(resolved == "v22.13.1")
+    }
+
+    @Test
+    func managedNodeRuntimePreparesEnvironmentInsideAppPaths() async throws {
+        let manager = NodeRuntimeManager()
+        let root = try temporaryDirectory(named: "managed-runtime")
+        let descriptor = CommandExecutionDescriptor(
+            title: "npm install",
+            actionKind: .installDependencies,
+            executable: "npm",
+            arguments: ["--version"],
+            currentDirectoryURL: root,
+            repositoryID: UUID(),
+            worktreeID: nil,
+            runtimeRequirement: NodeRuntimeRequirement(
+                packageManager: .npm,
+                nodeVersionSpec: AppPreferences.nodeDefaultVersionSpec,
+                versionSource: .defaultLTS
+            )
+        )
+
+        let prepared = try await manager.prepareExecution(for: descriptor)
+        #expect(prepared.environment["NVM_DIR"] == AppPaths.nvmDirectory.path)
+        #expect(prepared.environment["NPM_CONFIG_CACHE"] == AppPaths.npmCacheDirectory.path)
+        #expect(prepared.environment["npm_config_cache"] == AppPaths.npmCacheDirectory.path)
+        #expect(prepared.executable.hasPrefix(AppPaths.applicationSupportDirectory.path))
+
+        let nodePath = URL(fileURLWithPath: prepared.environment["NVM_BIN"] ?? "")
+            .appendingPathComponent("node")
+            .path
+        let result = try await CommandRunner.runCollected(
+            executable: nodePath,
+            arguments: ["--version"],
+            environment: prepared.environment
+        )
+        #expect(result.exitCode == 0)
+        #expect(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("v"))
+    }
+
+    @Test
+    func managedNodeRuntimeSerializesParallelPreparation() async throws {
+        let manager = NodeRuntimeManager()
+        let root = try temporaryDirectory(named: "parallel-runtime")
+        let descriptor = CommandExecutionDescriptor(
+            title: "npm install",
+            actionKind: .installDependencies,
+            executable: "npm",
+            arguments: ["install"],
+            currentDirectoryURL: root,
+            repositoryID: UUID(),
+            worktreeID: nil,
+            runtimeRequirement: NodeRuntimeRequirement(
+                packageManager: .npm,
+                nodeVersionSpec: AppPreferences.nodeDefaultVersionSpec,
+                versionSource: .defaultLTS
+            )
+        )
+
+        let results = try await withThrowingTaskGroup(of: PreparedCommandExecution.self) { group in
+            group.addTask { try await manager.prepareExecution(for: descriptor) }
+            group.addTask { try await manager.prepareExecution(for: descriptor) }
+
+            var prepared: [PreparedCommandExecution] = []
+            for try await value in group {
+                prepared.append(value)
+            }
+            return prepared
+        }
+
+        #expect(results.count == 2)
+        #expect(Set(results.map(\.executable)).count == 1)
+        #expect(Set(results.compactMap { $0.environment["NVM_BIN"] }).count == 1)
+    }
+
+    @Test
+    func backgroundNodeRefreshUpdatesStatus() async {
+        let manager = NodeRuntimeManager()
+        await manager.refreshDefaultRuntimeIfNeeded(force: true)
+        let status = await manager.statusSnapshot()
+
+        #expect(status.lastUpdatedAt != nil)
+        #expect(!status.runtimeRootPath.isEmpty)
+        #expect(!status.npmCachePath.isEmpty)
+        #expect(status.bootstrapState == "Ready" || status.bootstrapState == "Error")
+    }
+
+    @Test
+    func makeTargetsAreDiscoveredFromCommonMakefileNames() throws {
+        let root = try temporaryDirectory(named: "make-targets")
+        let makefile = root.appendingPathComponent("GNUmakefile")
+        try """
+        build:
+        \t@swift build
+        """.write(to: makefile, atomically: true, encoding: .utf8)
+
+        let targets = MakeToolingService().discoverTargets(in: root)
+        #expect(targets == ["build"])
+    }
+
+    @Test
+    func repositoryCloneRefreshPublishAndDeleteWorkLocally() async throws {
+        let remoteOne = try await createSeededRemote(named: "origin")
+        let remoteTwo = try await createSeededRemote(named: "upstream")
+
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remoteOne.remote, preferredName: "Sample")
+        #expect(FileManager.default.fileExists(atPath: cloneInfo.bareRepositoryPath.path))
+        #expect(cloneInfo.defaultBranch == "main")
+
+        try await RepositoryManager().addRemote(
+            name: "upstream",
+            url: remoteTwo.remote.path,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath
+        )
+
+        let refresh = await RepositoryManager().refreshRepository(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            remotes: [
+                RemoteExecutionContext(name: "origin", url: remoteOne.remote.path, fetchEnabled: true, privateKeyRef: nil),
+                RemoteExecutionContext(name: "upstream", url: remoteTwo.remote.path, fetchEnabled: true, privateKeyRef: nil),
+            ]
+        )
+        #expect(refresh.status == .ready)
+        #expect(refresh.fetchedAt != nil)
+
+        let disabledRefresh = await RepositoryManager().refreshRepository(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            remotes: [
+                RemoteExecutionContext(name: "origin", url: remoteOne.remote.path, fetchEnabled: true, privateKeyRef: nil),
+                RemoteExecutionContext(name: "broken", url: "/definitely/missing.git", fetchEnabled: false, privateKeyRef: nil),
+            ]
+        )
+        #expect(disabledRefresh.status == .ready)
+
+        let worktreeInfo = try await WorktreeManager().createWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            branchName: "feature/tests",
+            sourceBranch: cloneInfo.defaultBranch
+        )
+
+        #expect(FileManager.default.fileExists(atPath: worktreeInfo.path.path))
+        try "more".write(to: worktreeInfo.path.appendingPathComponent("CHANGELOG.md"), atomically: true, encoding: .utf8)
+        try await runGit(["-C", worktreeInfo.path.path, "add", "."], currentDirectoryURL: worktreeInfo.path)
+        try await runGit(["-C", worktreeInfo.path.path, "config", "user.email", "tests@example.com"], currentDirectoryURL: worktreeInfo.path)
+        try await runGit(["-C", worktreeInfo.path.path, "config", "user.name", "DevVault Tests"], currentDirectoryURL: worktreeInfo.path)
+        try await runGit(["-C", worktreeInfo.path.path, "config", "commit.gpgsign", "false"], currentDirectoryURL: worktreeInfo.path)
+        try await runGit(["-C", worktreeInfo.path.path, "commit", "-m", "Publish"], currentDirectoryURL: worktreeInfo.path)
+
+        let publishedBranch = try await RepositoryManager().publishCurrentBranch(
+            worktreePath: worktreeInfo.path,
+            remote: RemoteExecutionContext(name: "origin", url: remoteOne.remote.path, fetchEnabled: true, privateKeyRef: nil)
+        )
+        #expect(publishedBranch == "feature/tests")
+
+        let branchCheck = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["--git-dir", remoteOne.remote.path, "show-ref", "--verify", "--quiet", "refs/heads/feature/tests"]
+        )
+        #expect(branchCheck.exitCode == 0)
+
+        try await RepositoryManager().deleteRepository(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            worktreePaths: [worktreeInfo.path]
+        )
+        #expect(!FileManager.default.fileExists(atPath: cloneInfo.bareRepositoryPath.path))
+        #expect(!FileManager.default.fileExists(atPath: worktreeInfo.path.path))
+    }
+
+    @Test
+    func sshKeyGenerationProducesReusableMaterial() async throws {
+        let material = try await SSHKeyManager().generateKey(displayName: "Test Key", comment: "tests@example.com")
+        #expect(!material.publicKey.isEmpty)
+        #expect(!material.privateKeyData.isEmpty)
+    }
+
+    private func createSeededRemote(named name: String) async throws -> (root: URL, remote: URL) {
+        let origin = try temporaryDirectory(named: name)
+        let remote = origin.appendingPathComponent("\(name).git")
         let checkout = origin.appendingPathComponent("checkout")
 
         try await runGit(["init", "--bare", remote.path], currentDirectoryURL: origin)
@@ -58,19 +319,7 @@ struct DevVaultTests {
         try await runGit(["-C", checkout.path, "push", "origin", "HEAD:main"], currentDirectoryURL: origin)
         try await runGit(["-C", remote.path, "symbolic-ref", "HEAD", "refs/heads/main"], currentDirectoryURL: origin)
 
-        let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remote, preferredName: "Sample")
-        #expect(FileManager.default.fileExists(atPath: cloneInfo.bareRepositoryPath.path))
-        #expect(cloneInfo.defaultBranch == "main")
-
-        let worktreeInfo = try await WorktreeManager().createWorktree(
-            bareRepositoryPath: cloneInfo.bareRepositoryPath,
-            repositoryName: cloneInfo.displayName,
-            branchName: "feature/tests",
-            sourceBranch: cloneInfo.defaultBranch
-        )
-
-        #expect(FileManager.default.fileExists(atPath: worktreeInfo.path.path))
-        #expect(FileManager.default.fileExists(atPath: worktreeInfo.path.appendingPathComponent("README.md").path))
+        return (origin, remote)
     }
 
     private func temporaryDirectory(named name: String) throws -> URL {
@@ -89,4 +338,5 @@ struct DevVaultTests {
         )
         #expect(result.exitCode == 0, "git \(arguments.joined(separator: " ")) failed: \(result.stderr)")
     }
+
 }

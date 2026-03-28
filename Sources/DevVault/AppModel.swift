@@ -9,22 +9,43 @@ final class AppModel: @unchecked Sendable {
     var selectedRunID: UUID?
     var cloneDraft = CloneRepositoryDraft()
     var worktreeDraft = WorktreeDraft()
-    var isCloneSheetPresented = false
-    var isWorktreeSheetPresented = false
     var pendingErrorMessage: String?
     var activeRunIDs: Set<UUID> = []
+    var refreshingRepositoryIDs: Set<UUID> = []
+    var isCloneSheetPresented = false
+    var isWorktreeSheetPresented = false
+    var remoteManagementRepositoryID: UUID?
+    var pendingRepositoryDeletionID: UUID?
+    var publishDraft = PublishBranchDraft()
+    var nodeRuntimeStatus = NodeRuntimeStatusSnapshot(
+        runtimeRootPath: AppPaths.nodeRuntimeRoot.path,
+        npmCachePath: AppPaths.npmCacheDirectory.path
+    )
 
     private let repositoryManager = RepositoryManager()
     private let worktreeManager = WorktreeManager()
     private let ideManager = IDEManager()
+    private let sshKeyManager = SSHKeyManager()
     private let nodeTooling = NodeToolingService()
+    private let nodeRuntimeManager = NodeRuntimeManager()
     private let makeTooling = MakeToolingService()
     private var runningProcesses: [UUID: RunningProcess] = [:]
     private var storedModelContext: ModelContext?
+    private var autoRefreshTask: Task<Void, Never>?
+    private var nodeRuntimeRefreshTask: Task<Void, Never>?
 
     func configure(modelContext: ModelContext) {
         if storedModelContext == nil {
             storedModelContext = modelContext
+            migrateLegacyRepositoriesIfNeeded(in: modelContext)
+            startAutoRefreshLoopIfNeeded()
+            startNodeRuntimeRefreshLoopIfNeeded()
+            Task {
+                nodeRuntimeStatus = await nodeRuntimeManager.statusSnapshot()
+                await nodeRuntimeManager.refreshDefaultRuntimeIfNeeded(force: false)
+                nodeRuntimeStatus = await nodeRuntimeManager.statusSnapshot()
+                await refreshAllRepositories(force: false)
+            }
         }
     }
 
@@ -41,6 +62,18 @@ final class AppModel: @unchecked Sendable {
     func selectedRepository() -> ManagedRepository? {
         guard let repositoryID = selectedRepositoryID else { return nil }
         return repositoryRecord(with: repositoryID)
+    }
+
+    func repositoryRecord(with id: UUID) -> ManagedRepository? {
+        guard let modelContext = storedModelContext else { return nil }
+        let descriptor = FetchDescriptor<ManagedRepository>(predicate: #Predicate { $0.id == id })
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    func worktreeRecord(with id: UUID) -> WorktreeRecord? {
+        guard let modelContext = storedModelContext else { return nil }
+        let descriptor = FetchDescriptor<WorktreeRecord>(predicate: #Predicate { $0.id == id })
+        return try? modelContext.fetch(descriptor).first
     }
 
     func run(for runs: [RunRecord]) -> RunRecord? {
@@ -66,10 +99,43 @@ final class AppModel: @unchecked Sendable {
         presentWorktreeSheet(for: repository)
     }
 
+    func presentRemoteManagement(for repository: ManagedRepository) {
+        remoteManagementRepositoryID = repository.id
+    }
+
+    func dismissRemoteManagement() {
+        remoteManagementRepositoryID = nil
+    }
+
+    func requestRepositoryDeletion(_ repository: ManagedRepository) {
+        pendingRepositoryDeletionID = repository.id
+    }
+
+    func clearRepositoryDeletionRequest() {
+        pendingRepositoryDeletionID = nil
+    }
+
+    func presentPublishSheet(for repository: ManagedRepository, worktree: WorktreeRecord) {
+        publishDraft = PublishBranchDraft(repositoryID: repository.id, worktreeID: worktree.id, remoteName: repository.primaryRemote?.name ?? "")
+    }
+
+    func dismissPublishSheet() {
+        publishDraft = PublishBranchDraft()
+    }
+
     func cloneRepository(in modelContext: ModelContext) async {
         do {
-            guard let remoteURL = URL(string: cloneDraft.remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            let rawRemote = cloneDraft.remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard
+                let canonicalURL = RepositoryManager.canonicalRemoteURL(from: rawRemote),
+                let remoteURL = URL(string: rawRemote)
+            else {
                 throw DevVaultError.invalidRemoteURL
+            }
+
+            if let duplicate = repository(withCanonicalRemoteURL: canonicalURL, in: modelContext) {
+                selectedRepositoryID = duplicate.id
+                throw DevVaultError.duplicateRepository(rawRemote)
             }
 
             let info = try await repositoryManager.cloneBareRepository(
@@ -79,32 +145,58 @@ final class AppModel: @unchecked Sendable {
 
             let repository = ManagedRepository(
                 displayName: info.displayName,
-                remoteURL: info.remoteURL.absoluteString,
+                remoteURL: rawRemote,
                 bareRepositoryPath: info.bareRepositoryPath.path,
                 defaultBranch: info.defaultBranch
             )
 
+            let remote = RepositoryRemote(
+                name: info.initialRemoteName,
+                url: rawRemote,
+                canonicalURL: canonicalURL,
+                repository: repository
+            )
+
+            repository.remotes.append(remote)
             repository.actionTemplates = defaultTemplates(for: repository)
             modelContext.insert(repository)
+            modelContext.insert(remote)
             try modelContext.save()
 
             selectedRepositoryID = repository.id
             isCloneSheetPresented = false
+            await refresh(repository, in: modelContext)
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
     }
 
-    func refresh(_ repository: ManagedRepository, in modelContext: ModelContext) {
-        let status = repositoryManager.refreshStatus(for: URL(fileURLWithPath: repository.bareRepositoryPath))
-        repository.status = status
-        repository.updatedAt = .now
+    func refresh(_ repository: ManagedRepository, in modelContext: ModelContext) async {
+        guard !refreshingRepositoryIDs.contains(repository.id) else { return }
+        refreshingRepositoryIDs.insert(repository.id)
+        defer { refreshingRepositoryIDs.remove(repository.id) }
 
-        do {
-            try modelContext.save()
-        } catch {
-            pendingErrorMessage = error.localizedDescription
+        let status = repositoryManager.refreshStatus(for: URL(fileURLWithPath: repository.bareRepositoryPath))
+        guard status == .ready else {
+            repository.status = status
+            repository.updatedAt = .now
+            repository.lastErrorMessage = "Repository missing or invalid."
+            save(modelContext)
+            return
         }
+
+        let contexts = repository.remotes.map(remoteExecutionContext(for:))
+        let result = await repositoryManager.refreshRepository(
+            bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
+            remotes: contexts
+        )
+
+        repository.status = result.status
+        repository.defaultBranch = result.defaultBranch
+        repository.lastFetchedAt = result.fetchedAt ?? repository.lastFetchedAt
+        repository.lastErrorMessage = result.errorMessage
+        repository.updatedAt = .now
+        save(modelContext)
     }
 
     func refreshSelectedRepository() {
@@ -116,7 +208,19 @@ final class AppModel: @unchecked Sendable {
             return
         }
 
-        refresh(repository, in: modelContext)
+        Task {
+            await refresh(repository, in: modelContext)
+        }
+    }
+
+    func refreshAllRepositories(force: Bool) async {
+        guard let modelContext = storedModelContext else { return }
+        if !force, !AppPreferences.autoRefreshEnabled { return }
+        let descriptor = FetchDescriptor<ManagedRepository>(sortBy: [SortDescriptor(\.displayName)])
+        guard let repositories = try? modelContext.fetch(descriptor) else { return }
+        for repository in repositories {
+            await refresh(repository, in: modelContext)
+        }
     }
 
     func createWorktree(for repository: ManagedRepository, in modelContext: ModelContext) async {
@@ -165,6 +269,32 @@ final class AppModel: @unchecked Sendable {
         }
     }
 
+    func deleteRepository(_ repository: ManagedRepository, in modelContext: ModelContext) async {
+        do {
+            try await repositoryManager.deleteRepository(
+                bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
+                worktreePaths: repository.worktrees.map { URL(fileURLWithPath: $0.path) }
+            )
+
+            modelContext.delete(repository)
+            try modelContext.save()
+            if selectedRepositoryID == repository.id {
+                selectedRepositoryID = nil
+            }
+            clearRepositoryDeletionRequest()
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func revealRepositoryInFinder(_ repository: ManagedRepository) async {
+        do {
+            try await ideManager.revealInFinder(path: URL(fileURLWithPath: repository.bareRepositoryPath))
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
     func availableMakeTargets(for worktree: WorktreeRecord) -> [String] {
         makeTooling.discoverTargets(in: URL(fileURLWithPath: worktree.path))
     }
@@ -196,7 +326,8 @@ final class AppModel: @unchecked Sendable {
             arguments: [target],
             currentDirectoryURL: URL(fileURLWithPath: worktree.path),
             repositoryID: repository.id,
-            worktreeID: worktree.id
+            worktreeID: worktree.id,
+            runtimeRequirement: nil
         )
         startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
     }
@@ -214,7 +345,8 @@ final class AppModel: @unchecked Sendable {
             arguments: ["run", script],
             currentDirectoryURL: URL(fileURLWithPath: worktree.path),
             repositoryID: repository.id,
-            worktreeID: worktree.id
+            worktreeID: worktree.id,
+            runtimeRequirement: nodeTooling.runtimeRequirement(for: URL(fileURLWithPath: worktree.path))
         )
         startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
     }
@@ -234,8 +366,131 @@ final class AppModel: @unchecked Sendable {
         run.status = .cancelled
         run.endedAt = .now
         activeRunIDs.remove(run.id)
+        save(modelContext)
+    }
+
+    func saveRemote(
+        name: String,
+        url: String,
+        fetchEnabled: Bool,
+        sshKey: StoredSSHKey?,
+        for repository: ManagedRepository,
+        editing remote: RepositoryRemote?,
+        in modelContext: ModelContext
+    ) async {
         do {
+            let canonicalURL = try canonicalRemoteURL(from: url)
+            try ensureRemoteURLIsUnique(canonicalURL, excluding: remote?.id, modelContext: modelContext)
+
+            if let remote {
+                try await repositoryManager.updateRemote(
+                    previousName: remote.name,
+                    newName: name,
+                    url: url,
+                    bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath)
+                )
+                remote.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                remote.url = url.trimmingCharacters(in: .whitespacesAndNewlines)
+                remote.canonicalURL = canonicalURL
+                remote.fetchEnabled = fetchEnabled
+                remote.sshKey = sshKey
+                remote.updatedAt = .now
+            } else {
+                try await repositoryManager.addRemote(
+                    name: name,
+                    url: url,
+                    bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath)
+                )
+                let newRemote = RepositoryRemote(
+                    name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                    url: url.trimmingCharacters(in: .whitespacesAndNewlines),
+                    canonicalURL: canonicalURL,
+                    fetchEnabled: fetchEnabled,
+                    repository: repository,
+                    sshKey: sshKey
+                )
+                repository.remotes.append(newRemote)
+                modelContext.insert(newRemote)
+            }
+
+            repository.updatedAt = .now
             try modelContext.save()
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func removeRemote(_ remote: RepositoryRemote, from repository: ManagedRepository, in modelContext: ModelContext) async {
+        do {
+            try await repositoryManager.removeRemote(
+                name: remote.name,
+                bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath)
+            )
+            modelContext.delete(remote)
+            repository.updatedAt = .now
+            try modelContext.save()
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func importSSHKey(from sourceURL: URL, in modelContext: ModelContext) async {
+        do {
+            let material = try await sshKeyManager.importKey(from: sourceURL, displayName: nil)
+            try storeSSHKey(material, in: modelContext)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func generateSSHKey(displayName: String, comment: String, in modelContext: ModelContext) async {
+        do {
+            let material = try await sshKeyManager.generateKey(displayName: displayName, comment: comment)
+            try storeSSHKey(material, in: modelContext)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func rebuildManagedNodeRuntime() {
+        Task {
+            await nodeRuntimeManager.rebuildManagedRuntime()
+            nodeRuntimeStatus = await nodeRuntimeManager.statusSnapshot()
+        }
+    }
+
+    func removeSSHKey(_ key: StoredSSHKey, in modelContext: ModelContext) {
+        for remote in key.remotes {
+            remote.sshKey = nil
+            remote.updatedAt = .now
+        }
+        KeychainSSHKeyStore.delete(reference: key.privateKeyRef)
+        modelContext.delete(key)
+        save(modelContext)
+    }
+
+    func publishSelectedBranch(in modelContext: ModelContext) async {
+        do {
+            guard
+                let repositoryID = publishDraft.repositoryID,
+                let worktreeID = publishDraft.worktreeID,
+                let repository = repositoryRecord(with: repositoryID),
+                let worktree = worktreeRecord(with: worktreeID)
+            else {
+                throw DevVaultError.worktreeUnavailable
+            }
+
+            guard let remote = repository.remotes.first(where: { $0.name == publishDraft.remoteName }) else {
+                throw DevVaultError.remoteNameRequired
+            }
+
+            let branch = try await repositoryManager.publishCurrentBranch(
+                worktreePath: URL(fileURLWithPath: worktree.path),
+                remote: remoteExecutionContext(for: remote)
+            )
+            pendingErrorMessage = "Published \(branch) to \(remote.name)."
+            dismissPublishSheet()
+            _ = modelContext
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
@@ -263,28 +518,11 @@ final class AppModel: @unchecked Sendable {
         do {
             try modelContext.save()
             let runID = run.id
-
-            let handle = try CommandRunner.start(
-                executable: descriptor.executable,
-                arguments: descriptor.arguments,
-                currentDirectoryURL: descriptor.currentDirectoryURL,
-                onOutput: { [weak self] chunk in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        self.handleRunOutput(runID: runID, chunk: chunk)
-                    }
-                },
-                onTermination: { [weak self] exitCode, wasCancelled in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        self.handleRunTermination(runID: runID, exitCode: exitCode, wasCancelled: wasCancelled)
-                    }
-                }
-            )
-
-            runningProcesses[runID] = handle
             activeRunIDs.insert(runID)
             selectedRunID = runID
+            Task { [weak self] in
+                await self?.launchRun(runID: runID, descriptor: descriptor)
+            }
         } catch {
             modelContext.delete(run)
             pendingErrorMessage = error.localizedDescription
@@ -312,12 +550,17 @@ final class AppModel: @unchecked Sendable {
         run.status = wasCancelled ? .cancelled : (exitCode == 0 ? .succeeded : .failed)
         activeRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
+        save(modelContext)
+    }
 
-        do {
-            try modelContext.save()
-        } catch {
-            pendingErrorMessage = error.localizedDescription
-        }
+    private func handleRunFailure(runID: UUID, message: String) {
+        guard let run = runRecord(with: runID), let modelContext = storedModelContext else { return }
+        run.outputText += "\n\(message)\n"
+        run.endedAt = .now
+        run.status = .failed
+        activeRunIDs.remove(runID)
+        runningProcesses.removeValue(forKey: runID)
+        save(modelContext)
     }
 
     private func runRecord(with id: UUID) -> RunRecord? {
@@ -326,10 +569,151 @@ final class AppModel: @unchecked Sendable {
         return try? modelContext.fetch(descriptor).first
     }
 
-    private func repositoryRecord(with id: UUID) -> ManagedRepository? {
-        guard let modelContext = storedModelContext else { return nil }
-        let descriptor = FetchDescriptor<ManagedRepository>(predicate: #Predicate { $0.id == id })
-        return try? modelContext.fetch(descriptor).first
+    private func migrateLegacyRepositoriesIfNeeded(in modelContext: ModelContext) {
+        let descriptor = FetchDescriptor<ManagedRepository>()
+        guard let repositories = try? modelContext.fetch(descriptor) else { return }
+        var didChange = false
+
+        for repository in repositories where repository.remotes.isEmpty {
+            guard
+                let remoteURL = repository.remoteURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+                let canonicalURL = RepositoryManager.canonicalRemoteURL(from: remoteURL)
+            else {
+                continue
+            }
+
+            let remote = RepositoryRemote(
+                name: "origin",
+                url: remoteURL,
+                canonicalURL: canonicalURL,
+                repository: repository
+            )
+            repository.remotes.append(remote)
+            modelContext.insert(remote)
+            didChange = true
+        }
+
+        if didChange {
+            save(modelContext)
+        }
+    }
+
+    private func repository(withCanonicalRemoteURL canonicalURL: String, in modelContext: ModelContext) -> ManagedRepository? {
+        let descriptor = FetchDescriptor<RepositoryRemote>(predicate: #Predicate { $0.canonicalURL == canonicalURL })
+        return try? modelContext.fetch(descriptor).first?.repository
+    }
+
+    private func canonicalRemoteURL(from url: String) throws -> String {
+        guard let canonicalURL = RepositoryManager.canonicalRemoteURL(from: url) else {
+            throw DevVaultError.invalidRemoteURL
+        }
+        return canonicalURL
+    }
+
+    private func ensureRemoteURLIsUnique(_ canonicalURL: String, excluding remoteID: UUID?, modelContext: ModelContext) throws {
+        let descriptor = FetchDescriptor<RepositoryRemote>(predicate: #Predicate { $0.canonicalURL == canonicalURL })
+        let remotes = try modelContext.fetch(descriptor)
+        if remotes.contains(where: { $0.id != remoteID }) {
+            throw DevVaultError.duplicateRepository(canonicalURL)
+        }
+    }
+
+    private func save(_ modelContext: ModelContext) {
+        do {
+            try modelContext.save()
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func storeSSHKey(_ material: SSHKeyMaterial, in modelContext: ModelContext) throws {
+        let reference = UUID().uuidString
+        try KeychainSSHKeyStore.store(privateKeyData: material.privateKeyData, reference: reference)
+        let key = StoredSSHKey(
+            displayName: material.displayName,
+            kind: material.kind,
+            publicKey: material.publicKey,
+            privateKeyRef: reference
+        )
+        modelContext.insert(key)
+        save(modelContext)
+    }
+
+    private func remoteExecutionContext(for remote: RepositoryRemote) -> RemoteExecutionContext {
+        RemoteExecutionContext(
+            name: remote.name,
+            url: remote.url,
+            fetchEnabled: remote.fetchEnabled,
+            privateKeyRef: remote.sshKey?.privateKeyRef
+        )
+    }
+
+    private func startAutoRefreshLoopIfNeeded() {
+        guard autoRefreshTask == nil else { return }
+
+        autoRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                let interval = AppPreferences.autoRefreshInterval
+                try? await Task.sleep(for: .seconds(interval))
+                if Task.isCancelled {
+                    return
+                }
+                await self.refreshAllRepositories(force: false)
+            }
+        }
+    }
+
+    private func startNodeRuntimeRefreshLoopIfNeeded() {
+        guard nodeRuntimeRefreshTask == nil else { return }
+
+        nodeRuntimeRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                let interval = AppPreferences.nodeAutoUpdateInterval
+                try? await Task.sleep(for: .seconds(interval))
+                if Task.isCancelled {
+                    return
+                }
+                await self.nodeRuntimeManager.refreshDefaultRuntimeIfNeeded(force: false)
+                self.nodeRuntimeStatus = await self.nodeRuntimeManager.statusSnapshot()
+            }
+        }
+    }
+
+    private func launchRun(runID: UUID, descriptor: CommandExecutionDescriptor) async {
+        do {
+            if descriptor.runtimeRequirement != nil {
+                handleRunOutput(runID: runID, chunk: "[devvault] Preparing managed Node runtime…\n")
+            }
+
+            let prepared = try await nodeRuntimeManager.prepareExecution(for: descriptor)
+            nodeRuntimeStatus = await nodeRuntimeManager.statusSnapshot()
+
+            let handle = try CommandRunner.start(
+                executable: prepared.executable,
+                arguments: prepared.arguments,
+                currentDirectoryURL: descriptor.currentDirectoryURL,
+                environment: prepared.environment,
+                onOutput: { [weak self] chunk in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        self.handleRunOutput(runID: runID, chunk: chunk)
+                    }
+                },
+                onTermination: { [weak self] exitCode, wasCancelled in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        self.handleRunTermination(runID: runID, exitCode: exitCode, wasCancelled: wasCancelled)
+                    }
+                }
+            )
+
+            runningProcesses[runID] = handle
+        } catch {
+            nodeRuntimeStatus = await nodeRuntimeManager.statusSnapshot()
+            handleRunFailure(runID: runID, message: error.localizedDescription)
+        }
     }
 }
 
@@ -346,6 +730,12 @@ struct WorktreeDraft {
     init(sourceBranch: String = "") {
         self.sourceBranch = sourceBranch
     }
+}
+
+struct PublishBranchDraft {
+    var repositoryID: UUID?
+    var worktreeID: UUID?
+    var remoteName = ""
 }
 
 private extension String {

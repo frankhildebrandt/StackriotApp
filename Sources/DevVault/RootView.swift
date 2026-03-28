@@ -14,12 +14,22 @@ struct RootView: View {
             SidebarView(
                 repositories: repositories,
                 selectedRepositoryID: $appModel.selectedRepositoryID,
+                refreshingRepositoryIDs: appModel.refreshingRepositoryIDs,
                 onAddRepository: appModel.presentCloneSheet,
                 onRefreshRepository: { repository in
-                    appModel.refresh(repository, in: modelContext)
-                }
+                    Task {
+                        await appModel.refresh(repository, in: modelContext)
+                    }
+                },
+                onRevealRepository: { repository in
+                    Task {
+                        await appModel.revealRepositoryInFinder(repository)
+                    }
+                },
+                onManageRemotes: appModel.presentRemoteManagement,
+                onDeleteRepository: appModel.requestRepositoryDeletion
             )
-            .navigationSplitViewColumnWidth(min: 260, ideal: 300)
+            .navigationSplitViewColumnWidth(min: 280, ideal: 340)
         } content: {
             if let repository = appModel.repository(for: repositories) {
                 RepositoryDetailView(repository: repository)
@@ -42,7 +52,67 @@ struct RootView: View {
                 CreateWorktreeSheet(repository: repository)
             }
         }
-        .alert("Operation Failed", isPresented: Binding(
+        .sheet(isPresented: Binding(
+            get: { appModel.remoteManagementRepositoryID != nil },
+            set: { newValue in
+                if !newValue {
+                    appModel.dismissRemoteManagement()
+                }
+            }
+        )) {
+            if
+                let repositoryID = appModel.remoteManagementRepositoryID,
+                let repository = appModel.repositoryRecord(with: repositoryID)
+            {
+                RemoteManagementSheet(repository: repository)
+                    .environment(appModel)
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { appModel.publishDraft.repositoryID != nil && appModel.publishDraft.worktreeID != nil },
+            set: { newValue in
+                if !newValue {
+                    appModel.dismissPublishSheet()
+                }
+            }
+        )) {
+            if
+                let repositoryID = appModel.publishDraft.repositoryID,
+                let worktreeID = appModel.publishDraft.worktreeID,
+                let repository = appModel.repositoryRecord(with: repositoryID),
+                let worktree = appModel.worktreeRecord(with: worktreeID)
+            {
+                PublishBranchSheet(repository: repository, worktree: worktree)
+                    .environment(appModel)
+            }
+        }
+        .confirmationDialog("Delete repository?", isPresented: Binding(
+            get: { appModel.pendingRepositoryDeletionID != nil },
+            set: { newValue in
+                if !newValue {
+                    appModel.clearRepositoryDeletionRequest()
+                }
+            }
+        )) {
+            if
+                let repositoryID = appModel.pendingRepositoryDeletionID,
+                let repository = appModel.repositoryRecord(with: repositoryID)
+            {
+                Button("Delete Repository", role: .destructive) {
+                    Task {
+                        await appModel.deleteRepository(repository, in: modelContext)
+                    }
+                }
+            }
+        } message: {
+            if
+                let repositoryID = appModel.pendingRepositoryDeletionID,
+                let repository = appModel.repositoryRecord(with: repositoryID)
+            {
+                Text("This removes the bare repository and all associated worktrees for \(repository.displayName).")
+            }
+        }
+        .alert("DevVault", isPresented: Binding(
             get: { appModel.pendingErrorMessage != nil },
             set: { newValue in
                 if !newValue {
@@ -62,8 +132,12 @@ struct RootView: View {
 private struct SidebarView: View {
     let repositories: [ManagedRepository]
     @Binding var selectedRepositoryID: UUID?
+    let refreshingRepositoryIDs: Set<UUID>
     let onAddRepository: () -> Void
     let onRefreshRepository: (ManagedRepository) -> Void
+    let onRevealRepository: (ManagedRepository) -> Void
+    let onManageRemotes: (ManagedRepository) -> Void
+    let onDeleteRepository: (ManagedRepository) -> Void
 
     var body: some View {
         List(selection: $selectedRepositoryID) {
@@ -72,19 +146,38 @@ private struct SidebarView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(repository.displayName)
                             .font(.headline)
-                        Text(repository.remoteURL)
+                        Text(repository.primaryRemote?.url ?? repository.remoteURL ?? "No remote configured")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                        Label(repository.status.rawValue.capitalized, systemImage: statusSymbol(for: repository.status))
-                            .font(.caption)
-                            .foregroundStyle(repository.status == .ready ? .green : .orange)
+                        Text(repository.bareRepositoryPath)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                        HStack(spacing: 8) {
+                            Label(repository.status.rawValue.capitalized, systemImage: statusSymbol(for: repository.status))
+                                .font(.caption)
+                                .foregroundStyle(repository.status == .ready ? .green : .orange)
+                            if refreshingRepositoryIDs.contains(repository.id) {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
                     }
                     .padding(.vertical, 6)
                     .tag(repository.id)
                     .contextMenu {
+                        Button("Show in Finder") {
+                            onRevealRepository(repository)
+                        }
                         Button("Refresh") {
                             onRefreshRepository(repository)
+                        }
+                        Button("Manage Remotes") {
+                            onManageRemotes(repository)
+                        }
+                        Button("Delete Repository", role: .destructive) {
+                            onDeleteRepository(repository)
                         }
                     }
                 }
@@ -201,15 +294,45 @@ private struct RepositoryDetailView: View {
 
     private var repositoryHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(repository.remoteURL)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(repository.primaryRemote?.url ?? repository.remoteURL ?? "No remote configured")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Text(repository.bareRepositoryPath)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .textSelection(.enabled)
+                }
+                Spacer()
+                HStack(spacing: 10) {
+                    Button("Refresh") {
+                        Task {
+                            await appModel.refresh(repository, in: modelContext)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("Manage Remotes") {
+                        appModel.presentRemoteManagement(for: repository)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
 
             HStack(spacing: 12) {
                 StatChip(title: "Default Branch", value: repository.defaultBranch)
+                StatChip(title: "Remotes", value: "\(repository.remotes.count)")
                 StatChip(title: "Worktrees", value: "\(repository.worktrees.count)")
                 StatChip(title: "Runs", value: "\(repository.runs.count)")
+                StatChip(title: "Last Fetch", value: repository.lastFetchedAt.map { Self.relativeDateFormatter.localizedString(for: $0, relativeTo: .now) } ?? "Never")
+            }
+
+            if let error = repository.lastErrorMessage?.nilIfBlank {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
             }
         }
         .padding(20)
@@ -287,6 +410,9 @@ private struct RepositoryDetailView: View {
                                     await appModel.openIDE(.vscode, for: worktree, in: modelContext)
                                 }
                             }
+                            Button("Publish Branch") {
+                                appModel.presentPublishSheet(for: repository, worktree: worktree)
+                            }
                             Button("Remove Worktree", role: .destructive) {
                                 worktreePendingRemoval = worktree
                             }
@@ -323,6 +449,11 @@ private struct RepositoryDetailView: View {
 
                     Button("Install Dependencies") {
                         pendingDependencyMode = .install
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Publish Branch") {
+                        appModel.presentPublishSheet(for: repository, worktree: worktree)
                     }
                     .buttonStyle(.bordered)
                 }
@@ -414,6 +545,12 @@ private struct RepositoryDetailView: View {
             .gray
         }
     }
+
+    private static let relativeDateFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
 }
 
 private struct RunConsoleView: View {
@@ -546,6 +683,231 @@ private struct CreateWorktreeSheet: View {
     }
 }
 
+private struct RemoteManagementSheet: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Query(sort: \StoredSSHKey.displayName) private var sshKeys: [StoredSSHKey]
+
+    let repository: ManagedRepository
+    @State private var editingRemote: RepositoryRemote?
+    @State private var remotePendingRemoval: RepositoryRemote?
+    @State private var isEditorPresented = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Manage Remotes")
+                        .font(.title2.weight(.semibold))
+                    Text(repository.displayName)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done") {
+                    dismiss()
+                }
+            }
+
+            if repository.remotes.isEmpty {
+                ContentUnavailableView("No Remotes", systemImage: "network", description: Text("Add a remote to enable refreshes and publishing."))
+                    .frame(maxWidth: .infinity, minHeight: 220)
+            } else {
+                List {
+                    ForEach(repository.remotes.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })) { remote in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(remote.name)
+                                    .font(.headline)
+                                if !remote.fetchEnabled {
+                                    Text("Fetch Off")
+                                        .font(.caption2.weight(.medium))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(.thinMaterial, in: Capsule())
+                                }
+                                Spacer()
+                                Button("Edit") {
+                                    editingRemote = remote
+                                    isEditorPresented = true
+                                }
+                                Button("Remove", role: .destructive) {
+                                    remotePendingRemoval = remote
+                                }
+                            }
+                            Text(remote.url)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                            Text(remote.sshKey?.displayName ?? "No SSH key assigned")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                .frame(minHeight: 260)
+            }
+
+            HStack {
+                Button {
+                    editingRemote = nil
+                    isEditorPresented = true
+                } label: {
+                    Label("Add Remote", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+
+                Spacer()
+
+                if sshKeys.isEmpty {
+                    Text("SSH keys are managed in Settings.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 700, height: 520)
+        .sheet(isPresented: $isEditorPresented) {
+            RemoteEditorSheet(repository: repository, remote: editingRemote)
+                .environment(appModel)
+        }
+        .confirmationDialog("Remove remote?", item: $remotePendingRemoval) { remote in
+            Button("Remove", role: .destructive) {
+                Task {
+                    await appModel.removeRemote(remote, from: repository, in: modelContext)
+                }
+            }
+        } message: { remote in
+            Text("Remove \(remote.name) from \(repository.displayName)?")
+        }
+    }
+}
+
+private struct RemoteEditorSheet: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Query(sort: \StoredSSHKey.displayName) private var sshKeys: [StoredSSHKey]
+
+    let repository: ManagedRepository
+    let remote: RepositoryRemote?
+
+    @State private var name = ""
+    @State private var url = ""
+    @State private var fetchEnabled = true
+    @State private var selectedSSHKeyID: UUID?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(remote == nil ? "Add Remote" : "Edit Remote")
+                .font(.title2.weight(.semibold))
+
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+            TextField("URL", text: $url)
+                .textFieldStyle(.roundedBorder)
+            Toggle("Use this remote during refresh", isOn: $fetchEnabled)
+
+            Picker("SSH Key", selection: $selectedSSHKeyID) {
+                Text("None").tag(nil as UUID?)
+                ForEach(sshKeys) { key in
+                    Text(key.displayName).tag(Optional(key.id))
+                }
+            }
+
+            if let key = sshKeys.first(where: { $0.id == selectedSSHKeyID }) {
+                Text(key.publicKey)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    dismiss()
+                }
+                Button("Save") {
+                    Task {
+                        let key = sshKeys.first(where: { $0.id == selectedSSHKeyID })
+                        await appModel.saveRemote(
+                            name: name,
+                            url: url,
+                            fetchEnabled: fetchEnabled,
+                            sshKey: key,
+                            for: repository,
+                            editing: remote,
+                            in: modelContext
+                        )
+                        dismiss()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+        .background(.regularMaterial)
+        .task {
+            name = remote?.name ?? ""
+            url = remote?.url ?? ""
+            fetchEnabled = remote?.fetchEnabled ?? true
+            selectedSSHKeyID = remote?.sshKey?.id
+        }
+    }
+}
+
+private struct PublishBranchSheet: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
+    let repository: ManagedRepository
+    let worktree: WorktreeRecord
+
+    var body: some View {
+        @Bindable var appModel = appModel
+
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Publish Branch")
+                .font(.title2.weight(.semibold))
+
+            Text(worktree.path)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            Picker("Remote", selection: $appModel.publishDraft.remoteName) {
+                ForEach(repository.remotes.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })) { remote in
+                    Text("\(remote.name) (\(remote.url))").tag(remote.name)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    dismiss()
+                }
+                Button("Publish") {
+                    Task {
+                        await appModel.publishSelectedBranch(in: modelContext)
+                        dismiss()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(appModel.publishDraft.remoteName.isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 560)
+        .background(.regularMaterial)
+    }
+}
+
 private struct StatChip: View {
     let title: String
     let value: String
@@ -621,23 +983,16 @@ private extension View {
         @ViewBuilder actions: @escaping (Item) -> some View,
         @ViewBuilder message: @escaping (Item) -> some View
     ) -> some View {
-        let isPresented = Binding(
+        confirmationDialog(title, isPresented: Binding(
             get: { item.wrappedValue != nil },
-            set: { newValue in
-                if !newValue {
-                    item.wrappedValue = nil
-                }
-            }
-        )
+            set: { if !$0 { item.wrappedValue = nil } }
+        ), presenting: item.wrappedValue, actions: actions, message: message)
+    }
+}
 
-        return confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible) {
-            if let value = item.wrappedValue {
-                actions(value)
-            }
-        } message: {
-            if let value = item.wrappedValue {
-                message(value)
-            }
-        }
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
