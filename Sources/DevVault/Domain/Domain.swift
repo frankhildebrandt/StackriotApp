@@ -300,6 +300,19 @@ enum WorktreeIntegrationResult: Sendable {
 struct TerminalTabBookkeeping: Sendable {
     private(set) var tabs: [UUID: TerminalTabState] = [:]
     private(set) var selectedRunIDsByWorktree: [UUID: UUID] = [:]
+    private(set) var planTabSelectedWorktrees: Set<UUID> = []
+
+    mutating func selectPlanTab(for worktreeID: UUID) {
+        planTabSelectedWorktrees.insert(worktreeID)
+    }
+
+    mutating func deselectPlanTab(for worktreeID: UUID) {
+        planTabSelectedWorktrees.remove(worktreeID)
+    }
+
+    func isPlanTabSelected(for worktreeID: UUID) -> Bool {
+        planTabSelectedWorktrees.contains(worktreeID)
+    }
 
     mutating func activate(runID: UUID, worktreeID: UUID, viewedAt: Date = .now) {
         var tab = tabs[runID] ?? TerminalTabState(runID: runID, worktreeID: worktreeID)
@@ -335,6 +348,7 @@ struct TerminalTabBookkeeping: Sendable {
     mutating func removeWorktree(_ worktreeID: UUID) {
         tabs = tabs.filter { $0.value.worktreeID != worktreeID }
         selectedRunIDsByWorktree.removeValue(forKey: worktreeID)
+        planTabSelectedWorktrees.remove(worktreeID)
     }
 
     func tabState(for runID: UUID) -> TerminalTabState? {

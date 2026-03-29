@@ -148,6 +148,26 @@ struct RepositoryDetailView: View {
                     ForEach(worktrees) { worktree in
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(alignment: .top, spacing: 12) {
+                                if autoSyncAvailable(for: worktree) {
+                                    Button {
+                                        Task {
+                                            await appModel.syncWorktreeFromMain(
+                                                worktree,
+                                                repository: repository,
+                                                strategy: .rebase,
+                                                modelContext: modelContext
+                                            )
+                                        }
+                                    } label: {
+                                        Image(systemName: "arrow.clockwise")
+                                            .foregroundStyle(.orange)
+                                            .imageScale(.medium)
+                                            .frame(width: 18, height: 18)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("\(worktree.branchName) jetzt mit \(repository.defaultBranch) synchronisieren")
+                                }
+
                                 Rectangle()
                                     .fill(selectedWorktree?.id == worktree.id ? Color.accentColor : Color.clear)
                                     .frame(width: 2)
@@ -194,7 +214,7 @@ struct RepositoryDetailView: View {
 
                                 Spacer()
 
-                                if !worktree.isDefaultBranchWorkspace {
+                                if showsIntegrationButton(for: worktree) {
                                     Button {
                                         appModel.integrationDraft = IntegrationDraft(
                                             prTitle: worktree.branchName
@@ -315,6 +335,24 @@ struct RepositoryDetailView: View {
         AIAgentTool.allCases.filter { tool in
             tool != .none && appModel.availableAgents.contains(tool)
         }
+    }
+
+    private func autoSyncAvailable(for worktree: WorktreeRecord) -> Bool {
+        guard !worktree.isDefaultBranchWorkspace else { return false }
+        guard worktree.lifecycleState == .active else { return false }
+        let status = appModel.worktreeStatuses[worktree.id]
+        return (status?.behindCount ?? 0) > 0
+            && !(status?.hasUncommittedChanges ?? false)
+            && !(status?.hasConflicts ?? false)
+    }
+
+    private func showsIntegrationButton(for worktree: WorktreeRecord) -> Bool {
+        guard !worktree.isDefaultBranchWorkspace else { return false }
+        if worktree.lifecycleState == .integrating {
+            return true
+        }
+        let status = appModel.worktreeStatuses[worktree.id]
+        return (status?.aheadCount ?? 0) > 0
     }
 
     private func worktreeTitle(for worktree: WorktreeRecord) -> String {

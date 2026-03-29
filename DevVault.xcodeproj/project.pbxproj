@@ -70,6 +70,8 @@
 		E0000000000000000000003C /* RepositoryProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000003C /* RepositoryProject.swift */; };
 		E0000000000000000000003D /* GitHubCLIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000003D /* GitHubCLIService.swift */; };
 		E0000000000000000000003E /* IntegrateWorktreeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000003E /* IntegrateWorktreeSheet.swift */; };
+		E0000000000000000000003F /* AppModel+Plans.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000003F /* AppModel+Plans.swift */; };
+		E00000000000000000000040 /* PlanEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000040 /* PlanEditorView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -136,6 +138,8 @@
 		D0000000000000000000003C /* RepositoryProject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryProject.swift; sourceTree = "<group>"; };
 		D0000000000000000000003D /* GitHubCLIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubCLIService.swift; sourceTree = "<group>"; };
 		D0000000000000000000003E /* IntegrateWorktreeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrateWorktreeSheet.swift; sourceTree = "<group>"; };
+		D0000000000000000000003F /* AppModel+Plans.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Plans.swift"; sourceTree = "<group>"; };
+		D00000000000000000000040 /* PlanEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanEditorView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -198,6 +202,7 @@
 				D00000000000000000000004 /* AppModel+AgentsNode.swift */,
 				D00000000000000000000038 /* AppModel+Namespaces.swift */,
 				D00000000000000000000005 /* AppModel+Persistence.swift */,
+				D0000000000000000000003F /* AppModel+Plans.swift */,
 				D00000000000000000000006 /* AppModel+RemotesSSH.swift */,
 				D00000000000000000000007 /* AppModel+Repositories.swift */,
 				D00000000000000000000008 /* AppModel+Runs.swift */,
@@ -315,6 +320,7 @@
 			children = (
 				D00000000000000000000013 /* RunConsoleColumn.swift */,
 				D00000000000000000000014 /* RunConsoleView.swift */,
+				D00000000000000000000040 /* PlanEditorView.swift */,
 				D00000000000000000000015 /* TerminalTabChip.swift */,
 				D00000000000000000000016 /* TerminalTabStrip.swift */,
 			);
@@ -430,6 +436,7 @@
 				E00000000000000000000007 /* AppModel+Repositories.swift in Sources */,
 				E00000000000000000000008 /* AppModel+Runs.swift in Sources */,
 				E00000000000000000000009 /* AppModel+Worktrees.swift in Sources */,
+				E0000000000000000000003F /* AppModel+Plans.swift in Sources */,
 				E0000000000000000000000A /* AppModel.swift in Sources */,
 				E0000000000000000000000B /* AppServices.swift in Sources */,
 				E0000000000000000000000C /* Drafts.swift in Sources */,
@@ -442,6 +449,7 @@
 				E00000000000000000000012 /* RootView.swift in Sources */,
 				E00000000000000000000013 /* RunConsoleColumn.swift in Sources */,
 				E00000000000000000000014 /* RunConsoleView.swift in Sources */,
+				E00000000000000000000040 /* PlanEditorView.swift in Sources */,
 				E00000000000000000000015 /* TerminalTabChip.swift in Sources */,
 				E00000000000000000000016 /* TerminalTabStrip.swift in Sources */,
 				E00000000000000000000017 /* ActionPillGroup.swift in Sources */,

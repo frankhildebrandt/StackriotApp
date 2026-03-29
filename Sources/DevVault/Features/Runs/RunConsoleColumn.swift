@@ -35,7 +35,13 @@ struct RunConsoleColumn: View {
 
                 // Terminal Tabs + Console
                 let tabs = appModel.visibleTabs(for: worktree, in: repository)
-                if tabs.isEmpty {
+                let isPlanSelected = appModel.isPlanTabSelected(for: worktree)
+
+                TerminalTabStrip(repository: repository, worktree: worktree, tabs: tabs)
+
+                if isPlanSelected {
+                    PlanEditorView(worktree: worktree, repository: repository)
+                } else if tabs.isEmpty {
                     ContentUnavailableView(
                         "No Tabs for This Worktree",
                         systemImage: "rectangle.stack",
@@ -43,7 +49,6 @@ struct RunConsoleColumn: View {
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    TerminalTabStrip(repository: repository, worktree: worktree, tabs: tabs)
                     RunConsoleView(
                         run: appModel.selectedTab(for: worktree, in: repository),
                         activeRunIDs: appModel.activeRunIDs

@@ -75,6 +75,7 @@ extension AppModel {
             try modelContext.save()
 
             selectedWorktreeIDsByRepository[repository.id] = worktree.id
+            terminalTabs.selectPlanTab(for: worktree.id)
             isWorktreeSheetPresented = false
             await refreshWorktreeStatuses(for: repository)
         } catch {

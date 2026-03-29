@@ -189,6 +189,7 @@ final class AppModel: @unchecked Sendable {
         if let repositoryID = run.repository?.id {
             selectedWorktreeIDsByRepository[repositoryID] = worktreeID
         }
+        terminalTabs.deselectPlanTab(for: worktreeID)
         terminalTabs.activate(runID: run.id, worktreeID: worktreeID)
     }
 
