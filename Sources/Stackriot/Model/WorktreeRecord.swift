@@ -80,6 +80,10 @@ final class WorktreeRecord {
         set { lifecycleStateRaw = newValue.rawValue }
     }
 
+    var allowsSyncFromDefaultBranch: Bool {
+        lifecycleState == .active || lifecycleState == .merged
+    }
+
     var shouldDeleteOnMerge: Bool {
         get { deleteOnMerge ?? false }
         set { deleteOnMerge = newValue }

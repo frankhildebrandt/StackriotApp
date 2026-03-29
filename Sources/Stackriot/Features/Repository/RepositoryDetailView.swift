@@ -221,7 +221,7 @@ struct RepositoryDetailView: View {
 
     private func autoSyncAvailable(for worktree: WorktreeRecord) -> Bool {
         guard !worktree.isDefaultBranchWorkspace else { return false }
-        guard worktree.lifecycleState == .active else { return false }
+        guard worktree.allowsSyncFromDefaultBranch else { return false }
         let status = appModel.worktreeStatuses[worktree.id]
         return (status?.behindCount ?? 0) > 0
             && !(status?.hasUncommittedChanges ?? false)

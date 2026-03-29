@@ -4,6 +4,7 @@ struct WorkspaceDiffFileList: View {
     let files: [WorkspaceDiffFile]
     let emptyTitle: String
     let emptyDescription: String
+    var usesVerticalScrollView = true
 
     var body: some View {
         if files.isEmpty {
@@ -12,17 +13,30 @@ struct WorkspaceDiffFileList: View {
                 systemImage: "checkmark.circle",
                 description: Text(emptyDescription)
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: usesVerticalScrollView ? .infinity : nil
+            )
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    ForEach(files) { file in
-                        DiffFileSection(file: file)
+            Group {
+                if usesVerticalScrollView {
+                    ScrollView {
+                        fileSections
                     }
+                } else {
+                    fileSections
                 }
-                .padding(16)
             }
         }
+    }
+
+    private var fileSections: some View {
+        LazyVStack(alignment: .leading, spacing: 12) {
+            ForEach(files) { file in
+                DiffFileSection(file: file)
+            }
+        }
+        .padding(16)
     }
 }
 

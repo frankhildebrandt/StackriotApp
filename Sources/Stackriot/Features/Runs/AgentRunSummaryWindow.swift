@@ -129,9 +129,9 @@ struct AgentRunSummaryWindow: View {
                 WorkspaceDiffFileList(
                     files: diffSnapshot.files,
                     emptyTitle: "Kein Changelog verfuegbar",
-                    emptyDescription: "Im zugehörigen Worktree gibt es aktuell keine lokalen Änderungen."
+                    emptyDescription: "Im zugehörigen Worktree gibt es aktuell keine lokalen Änderungen.",
+                    usesVerticalScrollView: false
                 )
-                .frame(minHeight: 160, maxHeight: 360)
                 .background(.clear)
             }
         }
