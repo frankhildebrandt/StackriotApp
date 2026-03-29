@@ -279,6 +279,63 @@ struct StackriotTests {
     }
 
     @Test
+    @MainActor
+    func ensureSelectedWorktreeActivatesSpecialTabForInitialSelection() {
+        let appModel = AppModel()
+        let repository = ManagedRepository(
+            displayName: "Stackriot",
+            bareRepositoryPath: "/tmp/repo.git",
+            defaultBranch: "main"
+        )
+        let defaultWorktree = WorktreeRecord(
+            branchName: "main",
+            isDefaultBranchWorkspace: true,
+            path: "/tmp/main",
+            repository: repository
+        )
+        let featureWorktree = WorktreeRecord(
+            branchName: "feature/plan-default",
+            path: "/tmp/feature",
+            repository: repository
+        )
+        repository.worktrees = [featureWorktree, defaultWorktree]
+
+        appModel.ensureSelectedWorktree(in: repository)
+
+        #expect(appModel.selectedWorktreeID(for: repository) == defaultWorktree.id)
+        #expect(appModel.isPlanTabSelected(for: defaultWorktree))
+    }
+
+    @Test
+    @MainActor
+    func selectWorktreeActivatesSpecialTabForNonDefaultWorktree() {
+        let appModel = AppModel()
+        let repository = ManagedRepository(
+            displayName: "Stackriot",
+            bareRepositoryPath: "/tmp/repo.git",
+            defaultBranch: "main"
+        )
+        let defaultWorktree = WorktreeRecord(
+            branchName: "main",
+            isDefaultBranchWorkspace: true,
+            path: "/tmp/main",
+            repository: repository
+        )
+        let featureWorktree = WorktreeRecord(
+            branchName: "feature/plan-default",
+            path: "/tmp/feature",
+            repository: repository
+        )
+        repository.worktrees = [defaultWorktree, featureWorktree]
+
+        appModel.selectWorktree(featureWorktree, in: repository)
+
+        #expect(appModel.selectedWorktreeID(for: repository) == featureWorktree.id)
+        #expect(appModel.isPlanTabSelected(for: featureWorktree))
+        #expect(!appModel.isPlanTabSelected(for: defaultWorktree))
+    }
+
+    @Test
     func backgroundNodeRefreshUpdatesStatus() async {
         let manager = NodeRuntimeManager()
         await manager.refreshDefaultRuntimeIfNeeded(force: true)

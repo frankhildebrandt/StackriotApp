@@ -43,6 +43,7 @@ extension AppModel {
             let runID = run.id
             activeRunIDs.insert(runID)
             if let worktree {
+                terminalTabs.deselectPlanTab(for: worktree.id)
                 terminalTabs.activate(runID: runID, worktreeID: worktree.id)
                 selectedWorktreeIDsByRepository[repository.id] = worktree.id
             }
