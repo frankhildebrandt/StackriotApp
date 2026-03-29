@@ -11,6 +11,8 @@ struct AppServices {
     let nodeRuntimeManager: NodeRuntimeManager
     let makeTooling: MakeToolingService
     let worktreeStatusService: WorktreeStatusService
+    let devToolDiscovery: DevToolDiscoveryService
+    let runConfigurationDiscovery: RunConfigurationDiscoveryService
 
     static let production = AppServices(
         repositoryManager: RepositoryManager(),
@@ -21,6 +23,8 @@ struct AppServices {
         nodeTooling: NodeToolingService(),
         nodeRuntimeManager: NodeRuntimeManager(),
         makeTooling: MakeToolingService(),
-        worktreeStatusService: WorktreeStatusService()
+        worktreeStatusService: WorktreeStatusService(),
+        devToolDiscovery: DevToolDiscoveryService(),
+        runConfigurationDiscovery: RunConfigurationDiscoveryService()
     )
 }

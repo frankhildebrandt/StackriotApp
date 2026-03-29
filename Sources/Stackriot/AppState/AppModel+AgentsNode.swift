@@ -2,22 +2,26 @@ import Foundation
 import SwiftData
 
 extension AppModel {
-    func availableMakeTargets(for worktree: WorktreeRecord) -> [String] {
-        services.makeTooling.discoverTargets(in: URL(fileURLWithPath: worktree.path))
+    func availableRunConfigurations(for worktree: WorktreeRecord) -> [RunConfiguration] {
+        services.runConfigurationDiscovery.discoverRunConfigurations(in: URL(fileURLWithPath: worktree.path))
     }
 
-    func availableNPMScripts(for worktree: WorktreeRecord) -> [String] {
-        services.nodeTooling.discoverScripts(in: URL(fileURLWithPath: worktree.path))
+    func availableDevTools(for worktree: WorktreeRecord) -> [SupportedDevTool] {
+        services.devToolDiscovery.availableTools(in: URL(fileURLWithPath: worktree.path))
     }
 
-    func openIDE(_ ide: SupportedIDE, for worktree: WorktreeRecord, in modelContext: ModelContext) async {
+    func openDevTool(_ tool: SupportedDevTool, for worktree: WorktreeRecord, in modelContext: ModelContext) async {
         do {
-            try await services.ideManager.open(ide, path: URL(fileURLWithPath: worktree.path))
+            try await services.ideManager.open(tool, worktreeURL: URL(fileURLWithPath: worktree.path))
             worktree.lastOpenedAt = .now
             try modelContext.save()
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
+    }
+
+    func openIDE(_ tool: SupportedDevTool, for worktree: WorktreeRecord, in modelContext: ModelContext) async {
+        await openDevTool(tool, for: worktree, in: modelContext)
     }
 
     func openTerminal(for worktree: WorktreeRecord, in modelContext: ModelContext) {
@@ -41,6 +45,32 @@ extension AppModel {
         )
         startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
     }
+
+    func launchRunConfiguration(
+        _ configuration: RunConfiguration,
+        in worktree: WorktreeRecord,
+        repository: ManagedRepository,
+        modelContext: ModelContext
+    ) async {
+        let availableTools = Set(availableDevTools(for: worktree))
+        if let descriptor = services.runConfigurationDiscovery.makeExecutionDescriptor(
+            for: configuration,
+            worktree: worktree,
+            repositoryID: repository.id,
+            availableTools: availableTools
+        ) {
+            startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+            return
+        }
+
+        if let preferredDevTool = configuration.preferredDevTool, availableTools.contains(preferredDevTool) {
+            await openDevTool(preferredDevTool, for: worktree, in: modelContext)
+            return
+        }
+
+        pendingErrorMessage = StackriotError.runConfigurationUnavailable(configuration.name).localizedDescription
+    }
+
 
     func runGitCommit(message: String, in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) {
         let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)

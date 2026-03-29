@@ -29,7 +29,7 @@ actor NodeRuntimeManager {
             return PreparedCommandExecution(
                 executable: descriptor.executable,
                 arguments: descriptor.arguments,
-                environment: [:]
+                environment: descriptor.environment
             )
         }
 
@@ -39,14 +39,14 @@ actor NodeRuntimeManager {
             return PreparedCommandExecution(
                 executable: runtime.npmBinaryPath,
                 arguments: descriptor.arguments,
-                environment: runtime.environment
+                environment: runtime.environment.merging(descriptor.environment) { _, new in new }
             )
         case .pnpm, .yarn:
             try await enableCorepack(in: runtime)
             return PreparedCommandExecution(
                 executable: runtime.corepackBinaryPath,
                 arguments: [requirement.packageManager.rawValue] + descriptor.arguments,
-                environment: runtime.environment
+                environment: runtime.environment.merging(descriptor.environment) { _, new in new }
             )
         }
     }
