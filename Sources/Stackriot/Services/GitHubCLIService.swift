@@ -3,6 +3,7 @@ import Foundation
 /// Service fuer GitHub CLI (`gh`) Operationen — Issue-Lesen, PR erstellen und Status abrufen.
 struct GitHubCLIService {
     typealias CommandExecutor = @Sendable (_ executable: String, _ arguments: [String], _ currentDirectoryURL: URL?, _ environment: [String: String]) async throws -> CommandResult
+    typealias EnvironmentProvider = @Sendable () async -> [String: String]
 
     struct PRInfo: Sendable {
         let number: Int
@@ -16,9 +17,14 @@ struct GitHubCLIService {
     }
 
     private let runCommand: CommandExecutor
+    private let environmentProvider: EnvironmentProvider
 
-    init(runCommand: @escaping CommandExecutor = GitHubCLIService.liveCommand) {
+    init(
+        runCommand: @escaping CommandExecutor = GitHubCLIService.liveCommand,
+        environmentProvider: @escaping EnvironmentProvider = GitHubCLIService.liveEnvironment
+    ) {
         self.runCommand = runCommand
+        self.environmentProvider = environmentProvider
     }
 
     // MARK: - Availability
@@ -26,7 +32,7 @@ struct GitHubCLIService {
     /// `true` wenn `gh` CLI im PATH vorhanden ist.
     func isGHAvailable() async -> Bool {
         do {
-            let result = try await runCommand("which", ["gh"], nil, [:])
+            let result = try await runCommand("which", ["gh"], nil, await commandEnvironment())
             return result.exitCode == 0
         } catch {
             return false
@@ -36,7 +42,7 @@ struct GitHubCLIService {
     /// `true` wenn `gh auth status` erfolgreich ist (User ist eingeloggt).
     func isAuthenticated() async -> Bool {
         do {
-            let result = try await runCommand("gh", ["auth", "status"], nil, [:])
+            let result = try await runCommand("gh", ["auth", "status"], nil, await commandEnvironment())
             return result.exitCode == 0
         } catch {
             return false
@@ -91,10 +97,11 @@ struct GitHubCLIService {
         guard !trimmedQuery.isEmpty else { return [] }
 
         let target = try repositoryTargetOrThrow(for: repository)
+        let environment = await commandEnvironment()
         var results: [GitHubIssueSearchResult] = []
 
         if let issueNumber = Self.issueNumber(from: trimmedQuery),
-           let exactMatch = try await loadIssueSearchResult(number: issueNumber, repositoryTarget: target)
+           let exactMatch = try await loadIssueSearchResult(number: issueNumber, repositoryTarget: target, environment: environment)
         {
             results.append(exactMatch)
         }
@@ -109,7 +116,7 @@ struct GitHubCLIService {
                 "--json", "number,title,url,state",
             ],
             nil,
-            [:]
+            environment
         )
 
         guard listResult.exitCode == 0 else {
@@ -126,6 +133,7 @@ struct GitHubCLIService {
     @MainActor
     func loadIssue(number: Int, in repository: ManagedRepository) async throws -> GitHubIssueDetails {
         let target = try repositoryTargetOrThrow(for: repository)
+        let environment = await commandEnvironment()
         let result = try await runCommand(
             "gh",
             [
@@ -134,7 +142,7 @@ struct GitHubCLIService {
                 "--json", "number,title,body,url,labels,comments",
             ],
             nil,
-            [:]
+            environment
         )
 
         guard result.exitCode == 0 else {
@@ -180,6 +188,7 @@ struct GitHubCLIService {
         body: String,
         baseBranch: String
     ) async throws -> PRInfo {
+        let environment = await commandEnvironment()
         let result = try await runCommand(
             "gh",
             [
@@ -190,7 +199,7 @@ struct GitHubCLIService {
                 "--json", "number,url",
             ],
             worktreePath,
-            [:]
+            environment
         )
 
         guard result.exitCode == 0 else {
@@ -209,11 +218,12 @@ struct GitHubCLIService {
 
     /// Gibt den aktuellen Status eines Pull Requests zurueck.
     func getPRStatus(worktreePath: URL, prNumber: Int) async throws -> PRStatus {
+        let environment = await commandEnvironment()
         let result = try await runCommand(
             "gh",
             ["pr", "view", "\(prNumber)", "--json", "state"],
             worktreePath,
-            [:]
+            environment
         )
 
         guard result.exitCode == 0 else {
@@ -256,7 +266,15 @@ struct GitHubCLIService {
         )
     }
 
-    private func loadIssueSearchResult(number: Int, repositoryTarget: String) async throws -> GitHubIssueSearchResult? {
+    private static func liveEnvironment() async -> [String: String] {
+        ["PATH": await ShellEnvironment.loginShellPath()]
+    }
+
+    private func loadIssueSearchResult(
+        number: Int,
+        repositoryTarget: String,
+        environment: [String: String]
+    ) async throws -> GitHubIssueSearchResult? {
         let result = try await runCommand(
             "gh",
             [
@@ -265,7 +283,7 @@ struct GitHubCLIService {
                 "--json", "number,title,url,state",
             ],
             nil,
-            [:]
+            environment
         )
 
         guard result.exitCode == 0 else {
@@ -339,6 +357,10 @@ struct GitHubCLIService {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let digits = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed
         return Int(digits)
+    }
+
+    private func commandEnvironment() async -> [String: String] {
+        await environmentProvider()
     }
 }
 

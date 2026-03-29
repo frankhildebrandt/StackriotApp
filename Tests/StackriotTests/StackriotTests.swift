@@ -1083,30 +1083,54 @@ struct StackriotTests {
         )
         repository.remotes = [origin]
 
-        let missingCLI = GitHubCLIService { executable, arguments, _, _ in
-            if executable == "which", arguments == ["gh"] {
+        let missingCLI = GitHubCLIService(
+            runCommand: { executable, arguments, _, _ in
+                if executable == "which", arguments == ["gh"] {
+                    return CommandResult(stdout: "", stderr: "", exitCode: 1)
+                }
+                Issue.record("Unexpected command: \(executable) \(arguments.joined(separator: " "))")
                 return CommandResult(stdout: "", stderr: "", exitCode: 1)
-            }
-            Issue.record("Unexpected command: \(executable) \(arguments.joined(separator: " "))")
-            return CommandResult(stdout: "", stderr: "", exitCode: 1)
-        }
+            },
+            environmentProvider: { ["PATH": "/opt/homebrew/bin:/usr/bin:/bin"] }
+        )
         let missingCLIStatus = await missingCLI.issueReadiness(for: repository)
         #expect(!missingCLIStatus.isAvailable)
         #expect(missingCLIStatus.message.contains("gh"))
 
-        let missingAuth = GitHubCLIService { executable, arguments, _, _ in
-            if executable == "which", arguments == ["gh"] {
-                return CommandResult(stdout: "/usr/local/bin/gh\n", stderr: "", exitCode: 0)
+        actor EnvironmentRecorder {
+            private var values: [[String: String]] = []
+
+            func append(_ value: [String: String]) {
+                values.append(value)
             }
-            if executable == "gh", arguments == ["auth", "status"] {
-                return CommandResult(stdout: "", stderr: "not logged in", exitCode: 1)
+
+            func snapshot() -> [[String: String]] {
+                values
             }
-            Issue.record("Unexpected command: \(executable) \(arguments.joined(separator: " "))")
-            return CommandResult(stdout: "", stderr: "", exitCode: 1)
         }
+
+        let recorder = EnvironmentRecorder()
+        let expectedPATH = "/opt/homebrew/bin:/usr/bin:/bin"
+        let missingAuth = GitHubCLIService(
+            runCommand: { executable, arguments, _, environment in
+                await recorder.append(environment)
+                if executable == "which", arguments == ["gh"] {
+                    return CommandResult(stdout: "/usr/local/bin/gh\n", stderr: "", exitCode: 0)
+                }
+                if executable == "gh", arguments == ["auth", "status"] {
+                    return CommandResult(stdout: "", stderr: "not logged in", exitCode: 1)
+                }
+                Issue.record("Unexpected command: \(executable) \(arguments.joined(separator: " "))")
+                return CommandResult(stdout: "", stderr: "", exitCode: 1)
+            },
+            environmentProvider: { ["PATH": expectedPATH] }
+        )
         let missingAuthStatus = await missingAuth.issueReadiness(for: repository)
         #expect(!missingAuthStatus.isAvailable)
         #expect(missingAuthStatus.message.contains("auth"))
+        let recordedEnvironments = await recorder.snapshot()
+        #expect(recordedEnvironments.count == 2)
+        #expect(recordedEnvironments.allSatisfy { $0["PATH"] == expectedPATH })
 
         let localRepository = makeRepository(name: "Local")
         let upstream = RepositoryRemote(
