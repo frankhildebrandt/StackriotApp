@@ -157,9 +157,8 @@ extension AppModel {
 
             let shell = ProcessInfo.processInfo.environment["SHELL"]?.trimmingCharacters(in: .whitespacesAndNewlines)
             let loginShell = (shell?.isEmpty == false ? shell! : "/bin/zsh")
-            // If a prompt is provided, prefer the tool's dedicated prompt-flag command (e.g. `copilot -p`)
-            // which exits cleanly after completion. For tools without a prompt flag the interactive
-            // launch command is used and the prompt is written to PTY stdin as before.
+            // If a prompt is provided, prefer the tool's dedicated non-interactive command when one
+            // exists. Only fall back to PTY stdin injection for tools that lack an automation mode.
             let promptText = initialPrompt?.nonEmpty
             let shellCommand: String
             let stdinText: String?
@@ -181,6 +180,7 @@ extension AppModel {
             let descriptor = CommandExecutionDescriptor(
                 title: tool.displayName,
                 actionKind: .aiAgent,
+                showsAgentIndicator: promptText != nil,
                 executable: loginShell,
                 arguments: ["-ilc", shellCommand],
                 displayCommandLine: shellCommand,

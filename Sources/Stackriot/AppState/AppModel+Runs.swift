@@ -36,6 +36,8 @@ extension AppModel {
         run.status = .cancelled
         run.endedAt = .now
         activeRunIDs.remove(run.id)
+        delegatedAgentRunIDs.remove(run.id)
+        refreshRunningAgentWorktrees()
         save(modelContext)
     }
 
@@ -67,6 +69,14 @@ extension AppModel {
             try modelContext.save()
             let runID = run.id
             activeRunIDs.insert(runID)
+            if descriptor.actionKind == .aiAgent {
+                if descriptor.showsAgentIndicator {
+                    delegatedAgentRunIDs.insert(runID)
+                } else {
+                    delegatedAgentRunIDs.remove(runID)
+                }
+                refreshRunningAgentWorktrees()
+            }
             if let worktree {
                 terminalTabs.deselectPlanTab(for: worktree.id)
                 terminalTabs.activate(runID: runID, worktreeID: worktree.id)
@@ -103,6 +113,7 @@ extension AppModel {
         run.exitCode = Int(exitCode)
         run.status = wasCancelled ? .cancelled : (exitCode == 0 ? .succeeded : .failed)
         activeRunIDs.remove(runID)
+        delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
         terminalTabs.markCompleted(runID: runID)
         scheduleAutoHideIfNeeded(for: runID)
@@ -127,6 +138,7 @@ extension AppModel {
         run.endedAt = .now
         run.status = .failed
         activeRunIDs.remove(runID)
+        delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
         terminalTabs.markCompleted(runID: runID)
         scheduleAutoHideIfNeeded(for: runID)
@@ -142,6 +154,8 @@ extension AppModel {
 
     func scheduleAutoHideIfNeeded(for runID: UUID) {
         cancelAutoHide(for: runID)
+        guard let run = runRecord(with: runID) else { return }
+        guard run.actionKind != .aiAgent else { return }
 
         let mode = AppPreferences.terminalTabRetentionMode
         switch mode {
@@ -243,6 +257,7 @@ extension AppModel {
                 guard let run = runRecord(with: runID), run.actionKind == .aiAgent else {
                     return nil
                 }
+                guard delegatedAgentRunIDs.contains(runID) else { return nil }
                 return run.worktree?.id
             }
         )
@@ -260,13 +275,15 @@ extension AppModel {
 
     private func summarizeAgentRun(runID: UUID) {
         guard !summarizingRunIDs.contains(runID) else { return }
-        summarizingRunIDs.insert(runID)
-        dismissedAISummaryRunIDs.remove(runID)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.summarizingRunIDs.remove(runID) }
             guard let run = self.runRecord(with: runID), let modelContext = self.storedModelContext else { return }
+            guard run.actionKind == .aiAgent else { return }
+
+            self.summarizingRunIDs.insert(runID)
+            self.dismissedAISummaryRunIDs.remove(runID)
+            defer { self.summarizingRunIDs.remove(runID) }
 
             do {
                 let summary = try await self.services.aiProviderService.summarizeAgentRun(

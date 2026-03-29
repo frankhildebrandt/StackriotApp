@@ -422,18 +422,18 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
     }
 
     /// Starts the agent with a pre-filled task prompt.
-    /// For tools that support a `--prompt`/`-p` flag, uses that for reliable non-interactive
-    /// execution. Falls back to the interactive launch command for tools without this support.
+    /// For tools that support a documented non-interactive mode, prefer that over PTY stdin
+    /// injection so scripted runs behave predictably.
     func launchCommandWithPrompt(_ prompt: String, in path: String) -> String {
         switch self {
         case .none:
             ""
         case .claudeCode:
-            // claude reads stdin naturally when launched via PTY; use --message flag for clarity
-            "cd \(path.shellEscaped) && claude --message \(prompt.shellEscaped)"
+            // Claude Code uses print mode for automation. Permissions must be non-interactive.
+            "cd \(path.shellEscaped) && claude -p --dangerously-skip-permissions \(prompt.shellEscaped)"
         case .codex:
-            // codex has no direct --prompt flag; initial prompt is injected via PTY stdin
-            launchCommand(in: path)
+            // Codex CLI uses `exec` in automation contexts; `--full-auto` enables edits.
+            "cd \(path.shellEscaped) && codex exec --full-auto \(prompt.shellEscaped)"
         case .githubCopilot:
             // copilot -p executes the task and exits cleanly; --allow-all-tools enables agentic execution
             "cd \(path.shellEscaped) && copilot -p \(prompt.shellEscaped) --allow-all-tools"
@@ -557,6 +557,7 @@ struct CreatedWorktreeInfo: Sendable {
 struct CommandExecutionDescriptor: Sendable {
     let title: String
     let actionKind: ActionKind
+    let showsAgentIndicator: Bool
     let executable: String
     let arguments: [String]
     let displayCommandLine: String?
@@ -570,6 +571,7 @@ struct CommandExecutionDescriptor: Sendable {
     init(
         title: String,
         actionKind: ActionKind,
+        showsAgentIndicator: Bool = false,
         executable: String,
         arguments: [String],
         displayCommandLine: String? = nil,
@@ -582,6 +584,7 @@ struct CommandExecutionDescriptor: Sendable {
     ) {
         self.title = title
         self.actionKind = actionKind
+        self.showsAgentIndicator = showsAgentIndicator
         self.executable = executable
         self.arguments = arguments
         self.displayCommandLine = displayCommandLine
@@ -636,6 +639,7 @@ struct TerminalTabState: Sendable {
     let worktreeID: UUID
     var isVisible = true
     var isPinned = false
+    var openedAt: Date?
     var lastViewedAt: Date?
     var completedAt: Date?
     var closedAt: Date?
@@ -724,6 +728,9 @@ struct TerminalTabBookkeeping: Sendable {
 
     mutating func activate(runID: UUID, worktreeID: UUID, viewedAt: Date = .now) {
         var tab = tabs[runID] ?? TerminalTabState(runID: runID, worktreeID: worktreeID)
+        if tab.isVisible == false || tab.openedAt == nil {
+            tab.openedAt = viewedAt
+        }
         tab.isVisible = true
         tab.closedAt = nil
         tab.lastViewedAt = viewedAt
@@ -778,7 +785,7 @@ struct TerminalTabBookkeeping: Sendable {
     }
 
     private func compareTabs(_ lhs: TerminalTabState, _ rhs: TerminalTabState) -> Bool {
-        switch (lhs.lastViewedAt, rhs.lastViewedAt) {
+        switch (lhs.openedAt, rhs.openedAt) {
         case let (left?, right?) where left != right:
             return left > right
         case (_?, nil):

@@ -144,6 +144,20 @@ struct StackriotTests {
     }
 
     @Test
+    func aiAgentPromptCommandsUseDocumentedAutomationModes() {
+        let path = "/tmp/example repo"
+        let prompt = "Fix failing tests"
+
+        let claude = AIAgentTool.claudeCode.launchCommandWithPrompt(prompt, in: path)
+        #expect(claude.contains("claude -p --dangerously-skip-permissions"))
+        #expect(claude.contains(prompt.shellEscaped))
+
+        let codex = AIAgentTool.codex.launchCommandWithPrompt(prompt, in: path)
+        #expect(codex.contains("codex exec --full-auto"))
+        #expect(codex.contains(prompt.shellEscaped))
+    }
+
+    @Test
     func nodeVersionResolverSupportsMinimumComparatorRanges() {
         let resolver = NodeVersionSpecResolver()
         let resolved = resolver.resolveInstallableSpec(
@@ -276,6 +290,21 @@ struct StackriotTests {
 
         #expect(tabs.visibleRunIDs(for: worktreeID) == [newerRun, olderRun])
         #expect(tabs.selectedVisibleRunID(for: worktreeID) == newerRun)
+    }
+
+    @Test
+    func terminalTabBookkeepingKeepsVisibleOrderWhenSelectingExistingTab() {
+        let worktreeID = UUID()
+        let firstRun = UUID()
+        let secondRun = UUID()
+        var tabs = TerminalTabBookkeeping()
+
+        tabs.activate(runID: firstRun, worktreeID: worktreeID, viewedAt: Date(timeIntervalSince1970: 10))
+        tabs.activate(runID: secondRun, worktreeID: worktreeID, viewedAt: Date(timeIntervalSince1970: 20))
+        tabs.activate(runID: firstRun, worktreeID: worktreeID, viewedAt: Date(timeIntervalSince1970: 30))
+
+        #expect(tabs.visibleRunIDs(for: worktreeID) == [secondRun, firstRun])
+        #expect(tabs.selectedVisibleRunID(for: worktreeID) == firstRun)
     }
 
     @Test
@@ -1296,6 +1325,115 @@ struct StackriotTests {
         #expect(run.aiSummaryText?.contains("Exit-Code 0") == true)
         #expect(appModel.shouldShowAISummary(for: run))
         appModel.dismissAISummary(for: run)
+        #expect(!appModel.shouldShowAISummary(for: run))
+    }
+
+    @MainActor
+    @Test
+    func completedAgentRunsDoNotAutoHideTerminalTabs() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let repository = makeRepository(name: "AgentRetention")
+        let worktree = WorktreeRecord(branchName: "bug/7-retention", path: "/tmp/agent-retention", repository: repository)
+        let run = RunRecord(
+            actionKind: .aiAgent,
+            title: "Codex",
+            commandLine: "codex exec",
+            outputText: "$ codex exec\nDone\n",
+            status: .running,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        repository.worktrees = [worktree]
+        repository.runs = [run]
+        modelContext.insert(repository)
+        modelContext.insert(worktree)
+        modelContext.insert(run)
+        try modelContext.save()
+
+        let defaults = UserDefaults.standard
+        let previousMode = defaults.string(forKey: AppPreferences.terminalTabRetentionModeKey)
+        defaults.set(TerminalTabRetentionMode.runningOnly.rawValue, forKey: AppPreferences.terminalTabRetentionModeKey)
+        defer {
+            if let previousMode {
+                defaults.set(previousMode, forKey: AppPreferences.terminalTabRetentionModeKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.terminalTabRetentionModeKey)
+            }
+        }
+
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+        appModel.terminalTabs.activate(runID: run.id, worktreeID: worktree.id)
+        appModel.activeRunIDs.insert(run.id)
+
+        appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
+
+        let tabState = appModel.tabState(for: run)
+        #expect(tabState?.isVisible == true)
+    }
+
+    @MainActor
+    @Test
+    func nonAgentRunsDoNotProduceAISummary() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let repository = makeRepository(name: "BuildSummary")
+        let worktree = WorktreeRecord(branchName: "main", path: "/tmp/build-summary", repository: repository)
+        let run = RunRecord(
+            actionKind: .makeTarget,
+            title: "make test",
+            commandLine: "make test",
+            outputText: "$ make test\nok\n",
+            status: .running,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        repository.worktrees = [worktree]
+        repository.runs = [run]
+        modelContext.insert(repository)
+        modelContext.insert(worktree)
+        modelContext.insert(run)
+        try modelContext.save()
+
+        let services = AppServices(
+            repositoryManager: RepositoryManager(),
+            worktreeManager: WorktreeManager(),
+            gitHubCLIService: GitHubCLIService(),
+            aiProviderService: AIProviderService(
+                configurationProvider: {
+                    AIProviderConfiguration(
+                        provider: .openAI,
+                        apiKey: "test-key",
+                        model: "gpt-5.4-mini",
+                        baseURL: "https://api.openai.com/v1"
+                    )
+                },
+                runSummaryGenerator: { title, _, _, exitCode, _ in
+                    AIRunSummary(
+                        title: "\(title) fertig",
+                        summary: "Exit-Code \(exitCode ?? -1)"
+                    )
+                }
+            ),
+            ideManager: IDEManager(),
+            sshKeyManager: SSHKeyManager(),
+            agentManager: AIAgentManager(),
+            nodeTooling: NodeToolingService(),
+            nodeRuntimeManager: NodeRuntimeManager(),
+            makeTooling: MakeToolingService(),
+            worktreeStatusService: WorktreeStatusService(),
+            devToolDiscovery: DevToolDiscoveryService(),
+            runConfigurationDiscovery: RunConfigurationDiscoveryService()
+        )
+        let appModel = AppModel(services: services)
+        appModel.storedModelContext = modelContext
+
+        appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(run.aiSummaryTitle == nil)
+        #expect(run.aiSummaryText == nil)
         #expect(!appModel.shouldShowAISummary(for: run))
     }
 
