@@ -1,6 +1,6 @@
-# DevVault
+# Stackriot
 
-**DevVault** ist eine native macOS-App (macOS 14+) für Entwickler, die mit mehreren Git-Branches gleichzeitig arbeiten. Sie kombiniert ein Git-Worktree-Management mit IDE-Integration, KI-Agenten, Node.js-Tooling und einem integrierten Run-Terminal – alles in einer übersichtlichen drei-spaltigen Oberfläche.
+**Stackriot** ist eine native macOS-App (macOS 14+) für Entwickler, die mit mehreren Git-Branches gleichzeitig arbeiten. Sie kombiniert ein Git-Worktree-Management mit IDE-Integration, KI-Agenten, Node.js-Tooling und einem integrierten Run-Terminal – alles in einer übersichtlichen drei-spaltigen Oberfläche.
 
 ---
 
@@ -78,7 +78,7 @@
 swift build
 ```
 
-Oder das Xcode-Projekt `DevVault.xcodeproj` öffnen und dort bauen.
+Oder das Xcode-Projekt `Stackriot.xcodeproj` öffnen und dort bauen.
 
 ---
 
