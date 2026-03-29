@@ -26,6 +26,15 @@ actor NodeRuntimeManager {
 
     func prepareExecution(for descriptor: CommandExecutionDescriptor) async throws -> PreparedCommandExecution {
         guard let requirement = descriptor.runtimeRequirement else {
+            if let binPath = cachedStatus.resolvedDefaultBinPath {
+                let environment = runtimeEnvironment(binDirectory: binPath)
+                    .merging(descriptor.environment) { _, new in new }
+                return PreparedCommandExecution(
+                    executable: descriptor.executable,
+                    arguments: descriptor.arguments,
+                    environment: environment
+                )
+            }
             return PreparedCommandExecution(
                 executable: descriptor.executable,
                 arguments: descriptor.arguments,
@@ -146,6 +155,7 @@ actor NodeRuntimeManager {
         cachedStatus.defaultVersionSpec = AppPreferences.nodeDefaultVersionSpec
         if requirement.versionSource == .defaultLTS {
             cachedStatus.resolvedDefaultVersion = resolvedVersion
+            cachedStatus.resolvedDefaultBinPath = binURL.path
         }
         cachedStatus.runtimeRootPath = AppPaths.nodeRuntimeRoot.path
         cachedStatus.npmCachePath = AppPaths.npmCacheDirectory.path
@@ -290,7 +300,7 @@ actor NodeRuntimeManager {
         return environment
     }
 
-    private func persistStatus() {
+private func persistStatus() {
         do {
             try AppPaths.ensureBaseDirectories()
             let data = try JSONEncoder().encode(cachedStatus)
