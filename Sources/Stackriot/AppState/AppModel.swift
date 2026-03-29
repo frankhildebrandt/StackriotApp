@@ -201,6 +201,8 @@ final class AppModel: @unchecked Sendable {
         guard !activeRunIDs.contains(run.id) else { return }
         cancelAutoHide(for: run.id)
         terminalTabs.hide(runID: run.id)
+        terminalSessions[run.id]?.terminate()
+        terminalSessions[run.id] = nil
     }
 
     func reopenTab(_ run: RunRecord) {
