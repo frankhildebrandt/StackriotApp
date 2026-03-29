@@ -7,7 +7,14 @@ import SwiftUI
 final class AppModel: @unchecked Sendable {
     static let defaultNamespaceName = "Default Namespace"
 
-    var selectedNamespaceID: UUID?
+    @ObservationIgnored
+    private let userDefaults: UserDefaults
+
+    var selectedNamespaceID: UUID? {
+        didSet {
+            persistSelectedNamespaceID()
+        }
+    }
     var selectedRepositoryID: UUID?
     var selectedWorktreeIDsByRepository: [UUID: UUID] = [:]
     var cloneDraft = CloneRepositoryDraft()
@@ -57,8 +64,14 @@ final class AppModel: @unchecked Sendable {
     var autoRefreshTask: Task<Void, Never>?
     var nodeRuntimeRefreshTask: Task<Void, Never>?
 
-    init(services: AppServices = .production) {
+    init(
+        services: AppServices = .production,
+        userDefaults: UserDefaults = .standard
+    ) {
         self.services = services
+        self.userDefaults = userDefaults
+        selectedNamespaceID = userDefaults.string(forKey: AppPreferences.selectedNamespaceIDKey)
+            .flatMap(UUID.init(uuidString:))
     }
 
     func configure(modelContext: ModelContext) {
@@ -81,6 +94,14 @@ final class AppModel: @unchecked Sendable {
         let preferred = namespaces.first(where: { $0.id == selectedNamespaceID })
         let fallback = namespaces.first(where: \.isDefault) ?? namespaces.first
         selectedNamespaceID = preferred?.id ?? fallback?.id
+    }
+
+    private func persistSelectedNamespaceID() {
+        if let selectedNamespaceID {
+            userDefaults.set(selectedNamespaceID.uuidString, forKey: AppPreferences.selectedNamespaceIDKey)
+        } else {
+            userDefaults.removeObject(forKey: AppPreferences.selectedNamespaceIDKey)
+        }
     }
 
     func selectInitialRepository(from repositories: [ManagedRepository]) {

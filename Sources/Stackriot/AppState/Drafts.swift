@@ -9,6 +9,7 @@ struct WorktreeDraft {
     var branchName = ""
     var issueContext = ""
     var sourceBranch = ""
+    var destinationRootPath: String?
     var ticketSearchText = ""
     var selectedTicket: GitHubIssueSearchResult?
     var selectedIssueDetails: GitHubIssueDetails?
@@ -18,6 +19,7 @@ struct WorktreeDraft {
     var ticketProviderStatus: TicketProviderStatus?
     var hasConfirmedTicket = false
     var isGeneratingSuggestedName = false
+    var isTicketSectionExpanded = false
 
     init(sourceBranch: String = "") {
         self.sourceBranch = sourceBranch
@@ -25,6 +27,11 @@ struct WorktreeDraft {
 
     var normalizedBranchName: String {
         WorktreeManager.normalizedWorktreeName(from: branchName)
+    }
+
+    var destinationRootURL: URL? {
+        guard let destinationRootPath = destinationRootPath?.nilIfBlank else { return nil }
+        return URL(fileURLWithPath: destinationRootPath, isDirectory: true)
     }
 }
 

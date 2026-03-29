@@ -117,14 +117,14 @@ struct SidebarView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
+/*            HStack {
                 Text("Stackriot")
                     .font(.title3.weight(.semibold))
             }
             .padding(.horizontal)
             .padding(.top, 12)
             .padding(.bottom, 8)
-
+*/
             Button {
                 showNamespacePicker.toggle()
             } label: {

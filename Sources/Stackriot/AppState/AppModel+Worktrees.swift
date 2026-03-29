@@ -116,19 +116,28 @@ extension AppModel {
     func createWorktree(for repository: ManagedRepository, in modelContext: ModelContext) async {
         do {
             let normalizedName = WorktreeManager.normalizedWorktreeName(from: worktreeDraft.branchName)
+            let createFromConfirmedTicket = worktreeDraft.hasConfirmedTicket && worktreeDraft.selectedIssueDetails != nil
             let info = try await services.worktreeManager.createWorktree(
                 bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
                 repositoryName: repository.displayName,
                 branchName: normalizedName,
                 sourceBranch: resolvedSourceBranch(for: repository),
-                directoryName: normalizedName
+                directoryName: normalizedName,
+                destinationRoot: worktreeDraft.destinationRootURL
             )
+
+            let issueContext = createFromConfirmedTicket
+                ? worktreeDraft.selectedIssueDetails.map(compactIssueContext(for:))
+                : worktreeDraft.issueContext.nilIfBlank
+            let initialPlanText = createFromConfirmedTicket
+                ? worktreeDraft.selectedIssueDetails.map(initialPlan(from:))
+                : nil
 
             let worktree = try persistCreatedWorktree(
                 from: info,
                 repository: repository,
-                issueContext: worktreeDraft.issueContext.nilIfBlank,
-                initialPlanText: nil,
+                issueContext: issueContext,
+                initialPlanText: initialPlanText,
                 in: modelContext
             )
             finishCreatedWorktree(worktree, in: repository)
@@ -139,33 +148,7 @@ extension AppModel {
     }
 
     func createWorktreeFromTicket(for repository: ManagedRepository, in modelContext: ModelContext) async {
-        guard let issue = worktreeDraft.selectedIssueDetails, worktreeDraft.hasConfirmedTicket else {
-            pendingErrorMessage = "Select and confirm a GitHub issue before creating the worktree."
-            return
-        }
-
-        do {
-            let normalizedName = WorktreeManager.normalizedWorktreeName(from: worktreeDraft.branchName)
-            let info = try await services.worktreeManager.createWorktree(
-                bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
-                repositoryName: repository.displayName,
-                branchName: normalizedName,
-                sourceBranch: resolvedSourceBranch(for: repository),
-                directoryName: normalizedName
-            )
-
-            let worktree = try persistCreatedWorktree(
-                from: info,
-                repository: repository,
-                issueContext: compactIssueContext(for: issue),
-                initialPlanText: initialPlan(from: issue),
-                in: modelContext
-            )
-            finishCreatedWorktree(worktree, in: repository)
-            await refreshWorktreeStatuses(for: repository)
-        } catch {
-            pendingErrorMessage = error.localizedDescription
-        }
+        await createWorktree(for: repository, in: modelContext)
     }
 
     private func resolvedSourceBranch(for repository: ManagedRepository) -> String {
@@ -225,6 +208,34 @@ extension AppModel {
         selectedWorktreeIDsByRepository[repository.id] = worktree.id
         terminalTabs.selectPlanTab(for: worktree.id)
         isWorktreeSheetPresented = false
+    }
+
+    func moveWorktree(
+        _ worktree: WorktreeRecord,
+        in repository: ManagedRepository,
+        to newParentDirectory: URL,
+        modelContext: ModelContext
+    ) async {
+        do {
+            if worktree.isDefaultBranchWorkspace {
+                throw StackriotError.commandFailed("The default workspace cannot be moved.")
+            }
+
+            let destination = try await services.worktreeManager.moveWorktree(
+                bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
+                worktreePath: URL(fileURLWithPath: worktree.path),
+                newParentDirectory: newParentDirectory,
+                directoryName: worktree.branchName
+            )
+
+            worktree.path = destination.path
+            worktree.lastOpenedAt = .now
+            repository.updatedAt = .now
+            save(modelContext)
+            await refreshWorktreeStatuses(for: repository)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
     }
 
     func removeWorktree(_ worktree: WorktreeRecord, in modelContext: ModelContext) async {

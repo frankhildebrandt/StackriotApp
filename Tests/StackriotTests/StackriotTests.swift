@@ -922,6 +922,45 @@ struct StackriotTests {
 
     @MainActor
     @Test
+    func restoresLastSelectedNamespaceFromUserDefaults() throws {
+        let modelContext = try makeInMemoryModelContext()
+        let defaults = try makeUserDefaultsSuite()
+        let defaultNamespace = RepositoryNamespace(name: AppModel.defaultNamespaceName, isDefault: true, sortOrder: 0)
+        let workspaceNamespace = RepositoryNamespace(name: "Workspace", sortOrder: 1)
+        modelContext.insert(defaultNamespace)
+        modelContext.insert(workspaceNamespace)
+        try modelContext.save()
+
+        defaults.set(workspaceNamespace.id.uuidString, forKey: AppPreferences.selectedNamespaceIDKey)
+
+        let appModel = AppModel(userDefaults: defaults)
+        appModel.selectInitialNamespace(from: appModel.namespaces(in: modelContext))
+
+        #expect(appModel.selectedNamespaceID == workspaceNamespace.id)
+    }
+
+    @MainActor
+    @Test
+    func missingPersistedNamespaceFallsBackToDefaultNamespace() throws {
+        let modelContext = try makeInMemoryModelContext()
+        let defaults = try makeUserDefaultsSuite()
+        let defaultNamespace = RepositoryNamespace(name: AppModel.defaultNamespaceName, isDefault: true, sortOrder: 0)
+        let workspaceNamespace = RepositoryNamespace(name: "Workspace", sortOrder: 1)
+        modelContext.insert(defaultNamespace)
+        modelContext.insert(workspaceNamespace)
+        try modelContext.save()
+
+        defaults.set(UUID().uuidString, forKey: AppPreferences.selectedNamespaceIDKey)
+
+        let appModel = AppModel(userDefaults: defaults)
+        appModel.selectInitialNamespace(from: appModel.namespaces(in: modelContext))
+
+        #expect(appModel.selectedNamespaceID == defaultNamespace.id)
+        #expect(defaults.string(forKey: AppPreferences.selectedNamespaceIDKey) == defaultNamespace.id.uuidString)
+    }
+
+    @MainActor
+    @Test
     func assignRepositoryKeepsNamespaceAndProjectConsistent() throws {
         let modelContext = try makeInMemoryModelContext()
         let appModel = AppModel()
@@ -1257,6 +1296,90 @@ struct StackriotTests {
         #expect(worktreeInfo.path.deletingLastPathComponent().lastPathComponent == "bug")
 
         try? FileManager.default.removeItem(at: worktreeInfo.path)
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
+    @Test
+    func createWorktreeUsesCustomDestinationRootWhenProvided() async throws {
+        let remote = try await createSeededRemote(named: "custom-destination-worktree")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Custom-Destination-\(UUID().uuidString)"
+        )
+        let destinationRoot = try temporaryDirectory(named: "custom-worktree-root")
+
+        let worktreeInfo = try await WorktreeManager().createWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            branchName: "feature/custom-path",
+            sourceBranch: cloneInfo.defaultBranch,
+            directoryName: "feature/custom-path",
+            destinationRoot: destinationRoot
+        )
+
+        #expect(worktreeInfo.path.path.hasPrefix(destinationRoot.path + "/"))
+        #expect(worktreeInfo.path.lastPathComponent == "custom-path")
+        #expect(worktreeInfo.path.deletingLastPathComponent().lastPathComponent == "feature")
+
+        try? FileManager.default.removeItem(at: destinationRoot)
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
+    @Test
+    func createWorktreeAddsUniqueSuffixInsideCustomDestinationRoot() async throws {
+        let remote = try await createSeededRemote(named: "duplicate-destination-worktree")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Duplicate-Destination-\(UUID().uuidString)"
+        )
+        let destinationRoot = try temporaryDirectory(named: "duplicate-worktree-root")
+        let occupied = destinationRoot.appendingPathComponent("feature/custom-path", isDirectory: true)
+        try FileManager.default.createDirectory(at: occupied, withIntermediateDirectories: true)
+
+        let worktreeInfo = try await WorktreeManager().createWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            branchName: "feature/custom-path",
+            sourceBranch: cloneInfo.defaultBranch,
+            directoryName: "feature/custom-path",
+            destinationRoot: destinationRoot
+        )
+
+        #expect(worktreeInfo.path.lastPathComponent == "custom-path-2")
+        #expect(worktreeInfo.path.deletingLastPathComponent().lastPathComponent == "feature")
+
+        try? FileManager.default.removeItem(at: destinationRoot)
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
+    @Test
+    func moveWorktreeMovesFeatureWorkspaceToNewRoot() async throws {
+        let remote = try await createSeededRemote(named: "move-worktree")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Move-Worktree-\(UUID().uuidString)"
+        )
+        let worktreeInfo = try await WorktreeManager().createWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            branchName: "feature/move-me",
+            sourceBranch: cloneInfo.defaultBranch,
+            directoryName: "feature/move-me"
+        )
+        let destinationRoot = try temporaryDirectory(named: "move-worktree-root")
+
+        let movedPath = try await WorktreeManager().moveWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            worktreePath: worktreeInfo.path,
+            newParentDirectory: destinationRoot,
+            directoryName: "feature/move-me"
+        )
+
+        #expect(!FileManager.default.fileExists(atPath: worktreeInfo.path.path))
+        #expect(FileManager.default.fileExists(atPath: movedPath.path))
+        #expect(movedPath.path.hasPrefix(destinationRoot.path + "/"))
+
+        try? FileManager.default.removeItem(at: destinationRoot)
         try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
     }
 
@@ -1656,6 +1779,95 @@ struct StackriotTests {
         try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
     }
 
+    @MainActor
+    @Test
+    func createWorktreeDoesNotRequireConfirmedTicketWhenGitHubIsAvailable() async throws {
+        let remote = try await createSeededRemote(named: "manual-worktree")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Manual-Worktree-\(UUID().uuidString)"
+        )
+        let destinationRoot = try temporaryDirectory(named: "manual-worktree-root")
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: cloneInfo.displayName,
+            remoteURL: remote.remote.absoluteString,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath.path,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+        appModel.worktreeDraft = WorktreeDraft(sourceBranch: cloneInfo.defaultBranch)
+        appModel.worktreeDraft.branchName = "Feature Without Ticket"
+        appModel.worktreeDraft.issueContext = "Manual context"
+        appModel.worktreeDraft.destinationRootPath = destinationRoot.path
+        appModel.worktreeDraft.ticketProvider = .github
+        appModel.worktreeDraft.ticketProviderStatus = TicketProviderStatus(provider: .github, isAvailable: true, message: "ready")
+
+        await appModel.createWorktree(for: repository, in: modelContext)
+
+        #expect(appModel.pendingErrorMessage == nil)
+        #expect(repository.worktrees.count == 1)
+        #expect(repository.worktrees.first?.issueContext == "Manual context")
+        #expect(repository.worktrees.first?.path.hasPrefix(destinationRoot.path + "/") == true)
+
+        if let worktree = repository.worktrees.first {
+            try? FileManager.default.removeItem(at: AppPaths.planFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: worktree.path))
+        }
+        try? FileManager.default.removeItem(at: destinationRoot)
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
+    @MainActor
+    @Test
+    func moveWorktreeUpdatesPersistedPath() async throws {
+        let remote = try await createSeededRemote(named: "appmodel-move-worktree")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "AppModel-Move-\(UUID().uuidString)"
+        )
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: cloneInfo.displayName,
+            remoteURL: remote.remote.absoluteString,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath.path,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        let worktreeInfo = try await WorktreeManager().createWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            branchName: "feature/move-in-appmodel",
+            sourceBranch: cloneInfo.defaultBranch,
+            directoryName: "feature/move-in-appmodel"
+        )
+        let worktree = WorktreeRecord(
+            branchName: worktreeInfo.branchName,
+            path: worktreeInfo.path.path,
+            repository: repository
+        )
+        repository.worktrees = [worktree]
+        modelContext.insert(repository)
+        modelContext.insert(worktree)
+        try modelContext.save()
+
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+        let destinationRoot = try temporaryDirectory(named: "appmodel-move-root")
+
+        await appModel.moveWorktree(worktree, in: repository, to: destinationRoot, modelContext: modelContext)
+
+        #expect(appModel.pendingErrorMessage == nil)
+        #expect(worktree.path.hasPrefix(destinationRoot.path + "/"))
+        #expect(FileManager.default.fileExists(atPath: worktree.path))
+
+        try? FileManager.default.removeItem(at: destinationRoot)
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
     private func createSeededRemote(named name: String) async throws -> (root: URL, remote: URL) {
         let origin = try temporaryDirectory(named: name)
         let remote = origin.appendingPathComponent("\(name).git")
@@ -1726,6 +1938,15 @@ struct StackriotTests {
             configurations: configuration
         )
         return ModelContext(container)
+    }
+
+    private func makeUserDefaultsSuite() throws -> UserDefaults {
+        let suiteName = "StackriotTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            throw NSError(domain: "StackriotTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create UserDefaults suite"])
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
     }
 
     private func makeRepository(

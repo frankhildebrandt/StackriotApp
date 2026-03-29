@@ -7,7 +7,9 @@ struct RepositoryDetailView: View {
 
     let repository: ManagedRepository
     @State private var worktreePendingRemoval: WorktreeRemovalDraft?
+    @State private var worktreePendingMove: WorktreeMoveDraft?
     @State private var removingWorktreeIDs: Set<UUID> = []
+    @State private var movingWorktreeIDs: Set<UUID> = []
     @State private var isRefreshingStatuses = false
     @State private var isPushingDefaultBranch = false
     @State private var hoveredWorktreeID: UUID?
@@ -56,6 +58,22 @@ struct RepositoryDetailView: View {
             Text("""
             This removes the local worktree at \(worktree.path).
             Open tabs and local run history for this worktree will be cleaned up, while the bare repository and remote branch stay untouched.
+            """)
+        }
+        .confirmationDialog("Worktree verschieben?", item: $worktreePendingMove) { draft in
+            Button("Verschieben") {
+                worktreePendingMove = nil
+                if let record = appModel.worktreeRecord(with: draft.id) {
+                    moveWorktree(record, to: draft.destinationRoot)
+                }
+            }
+            Button("Abbrechen", role: .cancel) {
+                worktreePendingMove = nil
+            }
+        } message: { draft in
+            Text("""
+            \(draft.branchName) wird nach \(draft.destinationPath) verschoben.
+            Branch, Run-Historie und Zuordnung bleiben erhalten, nur der lokale Pfad wird aktualisiert.
             """)
         }
         .alert("Rebase fehlgeschlagen", isPresented: Binding(
@@ -218,10 +236,10 @@ struct RepositoryDetailView: View {
 
                                 Spacer()
 
-                                if isRemovingWorktree(worktree) {
+                                if isRemovingWorktree(worktree) || isMovingWorktree(worktree) {
                                     ProgressView()
                                         .controlSize(.small)
-                                        .help("Worktree wird entfernt")
+                                        .help(isRemovingWorktree(worktree) ? "Worktree wird entfernt" : "Worktree wird verschoben")
                                 } else if showsIntegrationButton(for: worktree) {
                                     Button {
                                         appModel.integrationDraft = IntegrationDraft(
@@ -277,6 +295,10 @@ struct RepositoryDetailView: View {
                             }
                             if !worktree.isDefaultBranchWorkspace {
                                 Divider()
+                                Button("Worktree verschieben") {
+                                    presentMoveDialog(for: worktree)
+                                }
+                                .disabled(isMovingWorktree(worktree) || isRemovingWorktree(worktree))
                                 Button("Mit \(repository.defaultBranch) synchronisieren") {
                                     Task {
                                         await appModel.syncWorktreeFromMain(
@@ -358,12 +380,44 @@ struct RepositoryDetailView: View {
         removingWorktreeIDs.contains(worktree.id)
     }
 
+    private func isMovingWorktree(_ worktree: WorktreeRecord) -> Bool {
+        movingWorktreeIDs.contains(worktree.id)
+    }
+
     private func removeWorktree(_ worktree: WorktreeRecord) {
         removingWorktreeIDs.insert(worktree.id)
         Task {
             await appModel.removeWorktree(worktree, in: modelContext)
             removingWorktreeIDs.remove(worktree.id)
         }
+    }
+
+    private func moveWorktree(_ worktree: WorktreeRecord, to destinationRoot: URL) {
+        movingWorktreeIDs.insert(worktree.id)
+        Task {
+            await appModel.moveWorktree(worktree, in: repository, to: destinationRoot, modelContext: modelContext)
+            movingWorktreeIDs.remove(worktree.id)
+        }
+    }
+
+    private func presentMoveDialog(for worktree: WorktreeRecord) {
+        let currentDirectory = URL(fileURLWithPath: worktree.path).deletingLastPathComponent()
+        guard let destinationRoot = IDEManager.chooseDirectory(
+            title: "Worktree verschieben",
+            message: "Stackriot erstellt darunter einen Unterordner fuer den Worktree.",
+            prompt: "Verschieben",
+            initialDirectory: currentDirectory
+        ) else {
+            return
+        }
+
+        let destinationPath = destinationRoot.appendingPathComponent(worktree.branchName, isDirectory: true).path
+        worktreePendingMove = WorktreeMoveDraft(
+            id: worktree.id,
+            branchName: worktree.branchName,
+            destinationRoot: destinationRoot,
+            destinationPath: destinationPath
+        )
     }
 
     private func showsIntegrationButton(for worktree: WorktreeRecord) -> Bool {
@@ -583,4 +637,11 @@ struct RepositoryDetailView: View {
             }
         }
     }
+}
+
+private struct WorktreeMoveDraft: Identifiable {
+    let id: UUID
+    let branchName: String
+    let destinationRoot: URL
+    let destinationPath: String
 }
