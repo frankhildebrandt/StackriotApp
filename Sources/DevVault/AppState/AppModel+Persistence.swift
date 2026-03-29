@@ -25,6 +25,26 @@ extension AppModel {
         )
     }
 
+    func resolvedDefaultRemote(for repository: ManagedRepository) -> RepositoryRemote? {
+        if let configured = repository.defaultRemote {
+            return configured
+        }
+
+        return repository.remotes.sorted {
+            if $0.name == "origin" { return true }
+            if $1.name == "origin" { return false }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }.first
+    }
+
+    func ensureDefaultRemoteSelection(for repository: ManagedRepository) {
+        let nextName = resolvedDefaultRemote(for: repository)?.name
+        if repository.defaultRemoteName != nextName {
+            repository.defaultRemoteName = nextName
+            repository.updatedAt = .now
+        }
+    }
+
     func canonicalRemoteURL(from url: String) throws -> String {
         guard let canonicalURL = RepositoryManager.canonicalRemoteURL(from: url) else {
             throw DevVaultError.invalidRemoteURL

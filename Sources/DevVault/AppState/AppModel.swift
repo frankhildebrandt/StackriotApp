@@ -244,7 +244,11 @@ final class AppModel: @unchecked Sendable {
     }
 
     func presentPublishSheet(for repository: ManagedRepository, worktree: WorktreeRecord) {
-        publishDraft = PublishBranchDraft(repositoryID: repository.id, worktreeID: worktree.id, remoteName: repository.primaryRemote?.name ?? "")
+        publishDraft = PublishBranchDraft(
+            repositoryID: repository.id,
+            worktreeID: worktree.id,
+            remoteName: resolvedDefaultRemote(for: repository)?.name ?? ""
+        )
     }
 
     func dismissPublishSheet() {

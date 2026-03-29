@@ -37,6 +37,14 @@ struct RemoteManagementSheet: View {
                             HStack {
                                 Text(remote.name)
                                     .font(.headline)
+                                if repository.defaultRemoteName == remote.name {
+                                    Text("Default Remote")
+                                        .font(.caption2.weight(.medium))
+                                        .foregroundStyle(.blue)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(.blue.opacity(0.12), in: Capsule())
+                                }
                                 if !remote.fetchEnabled {
                                     Text("Fetch Off")
                                         .font(.caption2.weight(.medium))

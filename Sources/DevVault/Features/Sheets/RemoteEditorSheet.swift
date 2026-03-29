@@ -13,6 +13,7 @@ struct RemoteEditorSheet: View {
     @State private var name = ""
     @State private var url = ""
     @State private var fetchEnabled = true
+    @State private var isDefaultRemote = false
     @State private var selectedSSHKeyID: UUID?
 
     var body: some View {
@@ -25,6 +26,7 @@ struct RemoteEditorSheet: View {
             TextField("URL", text: $url)
                 .textFieldStyle(.roundedBorder)
             Toggle("Use this remote during refresh", isOn: $fetchEnabled)
+            Toggle("Default Remote", isOn: $isDefaultRemote)
 
             Picker("SSH Key", selection: $selectedSSHKeyID) {
                 Text("None").tag(nil as UUID?)
@@ -53,6 +55,7 @@ struct RemoteEditorSheet: View {
                             name: name,
                             url: url,
                             fetchEnabled: fetchEnabled,
+                            isDefaultRemote: isDefaultRemote,
                             sshKey: key,
                             for: repository,
                             editing: remote,
@@ -72,6 +75,7 @@ struct RemoteEditorSheet: View {
             name = remote?.name ?? ""
             url = remote?.url ?? ""
             fetchEnabled = remote?.fetchEnabled ?? true
+            isDefaultRemote = repository.defaultRemoteName == remote?.name || (remote == nil && repository.defaultRemoteName == nil)
             selectedSSHKeyID = remote?.sshKey?.id
         }
     }

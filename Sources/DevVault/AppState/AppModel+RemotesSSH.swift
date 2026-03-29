@@ -6,6 +6,7 @@ extension AppModel {
         name: String,
         url: String,
         fetchEnabled: Bool,
+        isDefaultRemote: Bool,
         sshKey: StoredSSHKey?,
         for repository: ManagedRepository,
         editing remote: RepositoryRemote?,
@@ -16,8 +17,9 @@ extension AppModel {
             try ensureRemoteURLIsUnique(canonicalURL, excluding: remote?.id, modelContext: modelContext)
 
             if let remote {
+                let previousName = remote.name
                 try await services.repositoryManager.updateRemote(
-                    previousName: remote.name,
+                    previousName: previousName,
                     newName: name,
                     url: url,
                     bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath)
@@ -28,6 +30,9 @@ extension AppModel {
                 remote.fetchEnabled = fetchEnabled
                 remote.sshKey = sshKey
                 remote.updatedAt = .now
+                if repository.defaultRemoteName == previousName {
+                    repository.defaultRemoteName = remote.name
+                }
             } else {
                 try await services.repositoryManager.addRemote(
                     name: name,
@@ -46,6 +51,11 @@ extension AppModel {
                 modelContext.insert(newRemote)
             }
 
+            if isDefaultRemote {
+                repository.defaultRemoteName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                ensureDefaultRemoteSelection(for: repository)
+            }
             repository.updatedAt = .now
             try modelContext.save()
         } catch {
@@ -60,6 +70,17 @@ extension AppModel {
                 bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath)
             )
             modelContext.delete(remote)
+            if repository.defaultRemoteName == remote.name {
+                repository.defaultRemoteName = repository.remotes
+                    .filter { $0.id != remote.id }
+                    .sorted {
+                        if $0.name == "origin" { return true }
+                        if $1.name == "origin" { return false }
+                        return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                    }
+                    .first?
+                    .name
+            }
             repository.updatedAt = .now
             try modelContext.save()
         } catch {

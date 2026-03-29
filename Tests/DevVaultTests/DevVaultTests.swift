@@ -291,7 +291,8 @@ struct DevVaultTests {
             remotes: [
                 RemoteExecutionContext(name: "origin", url: remoteOne.remote.path, fetchEnabled: true, privateKeyRef: nil),
                 RemoteExecutionContext(name: "upstream", url: remoteTwo.remote.path, fetchEnabled: true, privateKeyRef: nil),
-            ]
+            ],
+            defaultRemoteName: "origin"
         )
         #expect(refresh.status == .ready)
         #expect(refresh.fetchedAt != nil)
@@ -301,7 +302,8 @@ struct DevVaultTests {
             remotes: [
                 RemoteExecutionContext(name: "origin", url: remoteOne.remote.path, fetchEnabled: true, privateKeyRef: nil),
                 RemoteExecutionContext(name: "broken", url: "/definitely/missing.git", fetchEnabled: false, privateKeyRef: nil),
-            ]
+            ],
+            defaultRemoteName: "origin"
         )
         #expect(disabledRefresh.status == .ready)
 
@@ -511,6 +513,93 @@ struct DevVaultTests {
         let material = try await SSHKeyManager().generateKey(displayName: "Test Key", comment: "tests@example.com")
         #expect(!material.publicKey.isEmpty)
         #expect(!material.privateKeyData.isEmpty)
+    }
+
+    @MainActor
+    @Test
+    func migrationPrefersOriginAsDefaultRemote() throws {
+        let modelContext = try makeInMemoryModelContext()
+        let repository = makeRepository(name: "Legacy")
+        let origin = RepositoryRemote(name: "origin", url: "https://example.com/origin.git", canonicalURL: "https://example.com/origin", repository: repository)
+        let upstream = RepositoryRemote(name: "upstream", url: "https://example.com/upstream.git", canonicalURL: "https://example.com/upstream", repository: repository)
+        repository.remotes = [upstream, origin]
+
+        modelContext.insert(repository)
+        modelContext.insert(origin)
+        modelContext.insert(upstream)
+        try modelContext.save()
+
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+        appModel.migrateLegacyRepositoriesIfNeeded(in: modelContext)
+
+        #expect(repository.defaultRemoteName == "origin")
+        #expect(repository.defaultRemote?.name == "origin")
+    }
+
+    @Test
+    func refreshSyncsDefaultBranchFromConfiguredDefaultRemote() async throws {
+        let origin = try await createSeededRemote(named: "refresh-origin")
+        let upstream = try await createSeededRemote(named: "refresh-upstream")
+
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: origin.remote,
+            preferredName: "Refresh-Sync-\(UUID().uuidString)"
+        )
+        try await RepositoryManager().addRemote(
+            name: "upstream",
+            url: upstream.remote.path,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath
+        )
+
+        let defaultWorkspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        try await configureGitIdentity(in: defaultWorkspace.path)
+
+        try "local only\n".write(
+            to: defaultWorkspace.path.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await runGit(["-C", defaultWorkspace.path.path, "add", "."], currentDirectoryURL: defaultWorkspace.path)
+        try await runGit(["-C", defaultWorkspace.path.path, "commit", "-m", "Local drift"], currentDirectoryURL: defaultWorkspace.path)
+
+        let upstreamCheckout = upstream.root.appendingPathComponent("checkout")
+        try "from upstream\n".write(
+            to: upstreamCheckout.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await runGit(["-C", upstreamCheckout.path, "add", "."], currentDirectoryURL: upstream.root)
+        try await runGit(["-C", upstreamCheckout.path, "commit", "-m", "Upstream update"], currentDirectoryURL: upstream.root)
+        try await runGit(["-C", upstreamCheckout.path, "push", "origin", "HEAD:main"], currentDirectoryURL: upstream.root)
+
+        let refresh = await RepositoryManager().refreshRepository(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            remotes: [
+                RemoteExecutionContext(name: "origin", url: origin.remote.path, fetchEnabled: true, privateKeyRef: nil),
+                RemoteExecutionContext(name: "upstream", url: upstream.remote.path, fetchEnabled: true, privateKeyRef: nil),
+            ],
+            defaultRemoteName: "upstream"
+        )
+
+        #expect(refresh.status == .ready)
+        #expect(refresh.defaultBranchSyncErrorMessage == nil)
+
+        let head = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["-C", defaultWorkspace.path.path, "rev-parse", "HEAD"]
+        )
+        let upstreamHead = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["--git-dir", cloneInfo.bareRepositoryPath.path, "rev-parse", "refs/remotes/upstream/main"]
+        )
+        #expect(head.exitCode == 0)
+        #expect(upstreamHead.exitCode == 0)
+        #expect(head.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == upstreamHead.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     @MainActor

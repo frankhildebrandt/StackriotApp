@@ -28,13 +28,6 @@ struct RunConsoleColumn: View {
                 .padding(.top, 16)
                 .padding(.bottom, worktree.isDefaultBranchWorkspace ? 8 : 10)
 
-                // Origin Sync Bar (nur Main/Default)
-                if worktree.isDefaultBranchWorkspace {
-                    originSyncBar(worktree: worktree)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 10)
-                }
-
                 // Action Toolbar
                 WorktreeActionBar(worktree: worktree, repository: repository)
 
@@ -102,59 +95,6 @@ struct RunConsoleColumn: View {
                 .disabled(worktree == nil)
                 .help("Uncommitted Diff anzeigen")
             }
-        }
-    }
-
-    // MARK: – Origin Sync Bar
-
-    @ViewBuilder
-    @MainActor
-    private func originSyncBar(worktree: WorktreeRecord) -> some View {
-        let status = appModel.worktreeStatuses[worktree.id]
-        let ahead = status?.aheadCount ?? 0
-        let behind = status?.behindCount ?? 0
-
-        HStack(spacing: 8) {
-            if behind == 0 && ahead == 0 {
-                Label("Aktuell", systemImage: "checkmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                if behind > 0 {
-                    Label("\(behind) behind", systemImage: "arrow.down")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.orange)
-                }
-                if ahead > 0 {
-                    Label("\(ahead) ahead", systemImage: "arrow.up")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.blue)
-                }
-            }
-
-            Spacer()
-
-            Button {
-                Task {
-                    await appModel.runGitPull(in: worktree, repository: repository, modelContext: modelContext)
-                }
-            } label: {
-                Label("Pull", systemImage: "arrow.down.to.line")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help("git pull – Änderungen von origin holen")
-
-            Button {
-                Task {
-                    await appModel.runGitPush(in: worktree, repository: repository, modelContext: modelContext)
-                }
-            } label: {
-                Label("Push", systemImage: "arrow.up.to.line")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help("git push – lokale Commits zu origin senden")
         }
     }
 

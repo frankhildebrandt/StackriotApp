@@ -93,14 +93,21 @@ struct RepositoryManager {
 
     func refreshRepository(
         bareRepositoryPath: URL,
-        remotes: [RemoteExecutionContext]
+        remotes: [RemoteExecutionContext],
+        defaultRemoteName: String?
     ) async -> RepositoryRefreshInfo {
         let baseStatus = refreshStatus(for: bareRepositoryPath)
         guard baseStatus == .ready else {
-            return RepositoryRefreshInfo(status: baseStatus, defaultBranch: "main", fetchedAt: nil, errorMessage: "Repository missing or invalid.")
+            return RepositoryRefreshInfo(
+                status: baseStatus,
+                defaultBranch: "main",
+                fetchedAt: nil,
+                fetchErrorMessage: "Repository missing or invalid.",
+                defaultBranchSyncErrorMessage: nil
+            )
         }
 
-        var errors: [String] = []
+        var fetchErrors: [String] = []
         var didFetch = false
 
         for remote in remotes where remote.fetchEnabled {
@@ -117,10 +124,10 @@ struct RepositoryManager {
                 if result.exitCode == 0 {
                     didFetch = true
                 } else {
-                    errors.append(result.stderr.isEmpty ? result.stdout : result.stderr)
+                    fetchErrors.append(result.stderr.isEmpty ? result.stdout : result.stderr)
                 }
             } catch {
-                errors.append(error.localizedDescription)
+                fetchErrors.append(error.localizedDescription)
             }
         }
 
@@ -129,14 +136,20 @@ struct RepositoryManager {
             arguments: ["--git-dir", bareRepositoryPath.path, "symbolic-ref", "--short", "HEAD"]
         )
         let defaultBranch = branchResult?.stdout.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? "main"
-        let errorMessage = errors.isEmpty ? nil : errors.joined(separator: "\n\n")
-        let status: RepositoryHealth = errorMessage == nil ? .ready : .broken
+        let fetchErrorMessage = fetchErrors.isEmpty ? nil : fetchErrors.joined(separator: "\n\n")
+        let defaultBranchSyncErrorMessage = await syncDefaultBranch(
+            bareRepositoryPath: bareRepositoryPath,
+            defaultBranch: defaultBranch,
+            defaultRemoteName: defaultRemoteName
+        )
+        let status: RepositoryHealth = [fetchErrorMessage, defaultBranchSyncErrorMessage].allSatisfy { $0 == nil } ? .ready : .broken
 
         return RepositoryRefreshInfo(
             status: status,
             defaultBranch: defaultBranch,
             fetchedAt: didFetch ? .now : nil,
-            errorMessage: errorMessage
+            fetchErrorMessage: fetchErrorMessage,
+            defaultBranchSyncErrorMessage: defaultBranchSyncErrorMessage
         )
     }
 
@@ -276,6 +289,87 @@ struct RepositoryManager {
         if currentURL != remote.url {
             try await updateRemote(previousName: remote.name, newName: remote.name, url: remote.url, bareRepositoryPath: bareRepositoryPath)
         }
+    }
+
+    private func syncDefaultBranch(
+        bareRepositoryPath: URL,
+        defaultBranch: String,
+        defaultRemoteName: String?
+    ) async -> String? {
+        guard let defaultRemoteName, !defaultRemoteName.isEmpty else {
+            return nil
+        }
+
+        do {
+            let remoteRef = "refs/remotes/\(defaultRemoteName)/\(defaultBranch)"
+            let localBranchRef = "refs/heads/\(defaultBranch)"
+            let remoteRefResult = try await CommandRunner.runCollected(
+                executable: "git",
+                arguments: ["--git-dir", bareRepositoryPath.path, "rev-parse", "--verify", remoteRef]
+            )
+            let targetCommit: String
+            let targetRefForReset: String
+            if remoteRefResult.exitCode == 0 {
+                targetCommit = remoteRefResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+                targetRefForReset = "\(defaultRemoteName)/\(defaultBranch)"
+            } else {
+                let localBranchResult = try await CommandRunner.runCollected(
+                    executable: "git",
+                    arguments: ["--git-dir", bareRepositoryPath.path, "rev-parse", "--verify", localBranchRef]
+                )
+                guard localBranchResult.exitCode == 0 else {
+                    return "Default-branch sync failed: \(remoteRefResult.stderr.isEmpty ? remoteRefResult.stdout : remoteRefResult.stderr)"
+                }
+                targetCommit = localBranchResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+                targetRefForReset = targetCommit
+            }
+
+            let worktreeListResult = try await CommandRunner.runCollected(
+                executable: "git",
+                arguments: ["--git-dir", bareRepositoryPath.path, "worktree", "list", "--porcelain"]
+            )
+            guard worktreeListResult.exitCode == 0 else {
+                return "Default-branch sync failed: \(worktreeListResult.stderr.isEmpty ? worktreeListResult.stdout : worktreeListResult.stderr)"
+            }
+
+            if let worktreePath = parseWorktreePath(for: defaultBranch, from: worktreeListResult.stdout) {
+                let resetResult = try await CommandRunner.runCollected(
+                    executable: "git",
+                    arguments: ["-C", worktreePath, "reset", "--hard", targetRefForReset]
+                )
+                guard resetResult.exitCode == 0 else {
+                    return "Default-branch sync failed: \(resetResult.stderr.isEmpty ? resetResult.stdout : resetResult.stderr)"
+                }
+            } else {
+                let updateResult = try await CommandRunner.runCollected(
+                    executable: "git",
+                    arguments: ["--git-dir", bareRepositoryPath.path, "update-ref", "refs/heads/\(defaultBranch)", targetCommit]
+                )
+                guard updateResult.exitCode == 0 else {
+                    return "Default-branch sync failed: \(updateResult.stderr.isEmpty ? updateResult.stdout : updateResult.stderr)"
+                }
+            }
+
+            return nil
+        } catch {
+            return "Default-branch sync failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func parseWorktreePath(for branchName: String, from output: String) -> String? {
+        var currentWorktreePath: String?
+
+        for line in output.split(whereSeparator: \.isNewline).map(String.init) {
+            if let value = line.stripPrefix("worktree ") {
+                currentWorktreePath = value
+            } else if let value = line.stripPrefix("branch refs/heads/"), value == branchName {
+                return currentWorktreePath
+            } else if line.isEmpty {
+                currentWorktreePath = nil
+            }
+        }
+
+        return nil
     }
 
     private func cleanupTemporaryKeyFile(at url: URL?) {

@@ -44,6 +44,14 @@ extension AppModel {
             didChange = true
         }
 
+        for repository in repositories {
+            let previousDefaultRemoteName = repository.defaultRemoteName
+            ensureDefaultRemoteSelection(for: repository)
+            if repository.defaultRemoteName != previousDefaultRemoteName {
+                didChange = true
+            }
+        }
+
         if didChange {
             save(modelContext)
         }
@@ -78,6 +86,7 @@ extension AppModel {
                 remoteURL: rawRemote,
                 bareRepositoryPath: info.bareRepositoryPath.path,
                 defaultBranch: info.defaultBranch,
+                defaultRemoteName: info.initialRemoteName,
                 namespace: selectedNamespace(in: modelContext) ?? defaultNamespace(in: modelContext)
             )
 
@@ -119,14 +128,18 @@ extension AppModel {
             return
         }
 
+        ensureDefaultRemoteSelection(for: repository)
         let contexts = repository.remotes.map(remoteExecutionContext(for:))
+        let defaultRemoteName = resolvedDefaultRemote(for: repository)?.name
         let result = await services.repositoryManager.refreshRepository(
             bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
-            remotes: contexts
+            remotes: contexts,
+            defaultRemoteName: defaultRemoteName
         )
 
         repository.status = result.status
         repository.defaultBranch = result.defaultBranch
+        repository.defaultRemoteName = defaultRemoteName
         repository.lastFetchedAt = result.fetchedAt ?? repository.lastFetchedAt
         repository.lastErrorMessage = result.errorMessage
         repository.updatedAt = .now

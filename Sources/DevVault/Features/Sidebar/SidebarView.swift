@@ -27,35 +27,13 @@ struct SidebarView: View {
     let onDeleteRepository: (ManagedRepository) -> Void
 
     @State private var expandedProjectIDs: Set<UUID> = []
+    @State private var showNamespacePicker = false
 
     var body: some View {
         List(selection: $selectedRepositoryID) {
             if let currentNamespace {
                 let namespaceProjects = projectsInCurrentNamespace
                 let rootRepositories = ungroupedRepositories
-
-                Section {
-                    ForEach(rootRepositories) { repository in
-                        RepositoryRow(
-                            repository: repository,
-                            isRefreshing: refreshingRepositoryIDs.contains(repository.id),
-                            isAgentRunning: isAgentRunningForRepository(repository)
-                        )
-                        .tag(repository.id)
-                        .draggable(SidebarDragItem(kind: .repository, id: repository.id))
-                        .contextMenu {
-                            repositoryContextMenu(repository)
-                        }
-                    }
-                } header: {
-                    SidebarSectionHeader(
-                        title: currentNamespace.isDefault ? "Repositories" : "Namespace Repositories",
-                        systemImage: "shippingbox"
-                    )
-                    .dropDestination(for: SidebarDragItem.self) { items, _ in
-                        handleNamespaceRootDrop(items, in: currentNamespace)
-                    }
-                }
 
                 if !currentNamespace.isDefault {
                     Section {
@@ -100,6 +78,29 @@ struct SidebarView: View {
                         )
                     }
                 }
+
+                Section {
+                    ForEach(rootRepositories) { repository in
+                        RepositoryRow(
+                            repository: repository,
+                            isRefreshing: refreshingRepositoryIDs.contains(repository.id),
+                            isAgentRunning: isAgentRunningForRepository(repository)
+                        )
+                        .tag(repository.id)
+                        .draggable(SidebarDragItem(kind: .repository, id: repository.id))
+                        .contextMenu {
+                            repositoryContextMenu(repository)
+                        }
+                    }
+                } header: {
+                    SidebarSectionHeader(
+                        title: currentNamespace.isDefault ? "Repositories" : "Namespace Repositories",
+                        systemImage: "shippingbox"
+                    )
+                    .dropDestination(for: SidebarDragItem.self) { items, _ in
+                        handleNamespaceRootDrop(items, in: currentNamespace)
+                    }
+                }
             }
         }
         .safeAreaInset(edge: .top) {
@@ -115,100 +116,63 @@ struct SidebarView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
                 Text("DevVault")
                     .font(.title3.weight(.semibold))
+            }
+            .padding(.horizontal)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
 
-                Spacer()
-
-                Menu(currentNamespace?.name ?? "Namespaces") {
-                    ForEach(namespaces) { namespace in
-                        Button {
-                            onSelectNamespace(namespace)
-                        } label: {
-                            if namespace.id == selectedNamespaceID {
-                                Label(namespace.name, systemImage: "checkmark")
-                            } else {
-                                Text(namespace.name)
-                            }
-                        }
+            Button {
+                showNamespacePicker.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("NAMESPACE")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                        Text(currentNamespace?.name ?? "—")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
                     }
-
-                    Divider()
-
-                    Button("New Namespace") {
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+            .popover(isPresented: $showNamespacePicker, arrowEdge: .bottom) {
+                NamespacePickerPopover(
+                    namespaces: namespaces,
+                    selectedNamespaceID: selectedNamespaceID,
+                    onSelect: { namespace in
+                        onSelectNamespace(namespace)
+                        showNamespacePicker = false
+                    },
+                    onRename: { namespace in
+                        showNamespacePicker = false
+                        onEditNamespace(namespace)
+                    },
+                    onDelete: { namespace in
+                        showNamespacePicker = false
+                        onDeleteNamespace(namespace)
+                    },
+                    onCreateNamespace: {
+                        showNamespacePicker = false
                         onCreateNamespace()
                     }
-
-                    if let currentNamespace, !currentNamespace.isDefault {
-                        Button("Rename Namespace") {
-                            onEditNamespace(currentNamespace)
-                        }
-                        Button("Delete Namespace", role: .destructive) {
-                            onDeleteNamespace(currentNamespace)
-                        }
-                        Divider()
-                        Button("New Project") {
-                            onCreateProject(currentNamespace)
-                        }
-                    }
-                }
-                .menuStyle(.borderlessButton)
-
-                Button {
-                    onCreateNamespace()
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(.bordered)
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(namespaces) { namespace in
-                        NamespaceChip(
-                            namespace: namespace,
-                            isSelected: namespace.id == selectedNamespaceID
-                        )
-                        .onTapGesture {
-                            onSelectNamespace(namespace)
-                        }
-                        .contextMenu {
-                            Button("Select Namespace") {
-                                onSelectNamespace(namespace)
-                            }
-                            if !namespace.isDefault {
-                                Button("Rename Namespace") {
-                                    onEditNamespace(namespace)
-                                }
-                                Button("New Project") {
-                                    onCreateProject(namespace)
-                                }
-                                Button("Delete Namespace", role: .destructive) {
-                                    onDeleteNamespace(namespace)
-                                }
-                            }
-                        }
-                        .dropDestination(for: SidebarDragItem.self) { items, _ in
-                            handleNamespaceDrop(items, onto: namespace)
-                        }
-                    }
-                }
-            }
-
-            if let currentNamespace, !currentNamespace.isDefault {
-                Button {
-                    onCreateProject(currentNamespace)
-                } label: {
-                    Label("Add Project", systemImage: "folder.badge.plus")
-                }
-                .buttonStyle(.bordered)
+                )
             }
         }
-        .padding(.horizontal)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
         .background(.ultraThinMaterial)
     }
 
@@ -220,6 +184,15 @@ struct SidebarView: View {
                 Label("Clone Bare Repo", systemImage: "plus")
             }
             .buttonStyle(.borderedProminent)
+
+            if let currentNamespace, !currentNamespace.isDefault {
+                Button {
+                    onCreateProject(currentNamespace)
+                } label: {
+                    Label("Add Project", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.bordered)
+            }
 
             Spacer()
         }
@@ -320,30 +293,6 @@ struct SidebarView: View {
         }
     }
 
-    private func handleNamespaceDrop(_ items: [SidebarDragItem], onto namespace: RepositoryNamespace) -> Bool {
-        var handled = false
-
-        for item in items {
-            switch item.kind {
-            case .repository:
-                guard let repository = repositories.first(where: { $0.id == item.id }) ?? currentRepository(with: item.id) else {
-                    continue
-                }
-                onAssignRepository(repository, namespace, nil)
-                handled = true
-
-            case .project:
-                guard let project = currentProject(with: item.id) else {
-                    continue
-                }
-                onMoveProject(project, namespace)
-                handled = true
-            }
-        }
-
-        return handled
-    }
-
     private func handleNamespaceRootDrop(_ items: [SidebarDragItem], in namespace: RepositoryNamespace) -> Bool {
         var handled = false
 
@@ -413,7 +362,7 @@ private struct RepositoryRow: View {
                     AgentActivityDot()
                 }
             }
-            Text(repository.primaryRemote?.url ?? repository.remoteURL ?? "No remote configured")
+            Text(repository.defaultRemote?.url ?? repository.remoteURL ?? "No remote configured")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -486,20 +435,106 @@ private struct ProjectHeaderRow: View {
     }
 }
 
-private struct NamespaceChip: View {
-    let namespace: RepositoryNamespace
-    let isSelected: Bool
+private struct NamespacePickerPopover: View {
+    let namespaces: [RepositoryNamespace]
+    let selectedNamespaceID: UUID?
+    let onSelect: (RepositoryNamespace) -> Void
+    let onRename: (RepositoryNamespace) -> Void
+    let onDelete: (RepositoryNamespace) -> Void
+    let onCreateNamespace: () -> Void
 
     var body: some View {
-        Text(namespace.name)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 10)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(namespaces) { namespace in
+                        NamespacePickerRow(
+                            namespace: namespace,
+                            isSelected: namespace.id == selectedNamespaceID,
+                            onSelect: { onSelect(namespace) },
+                            onRename: namespace.isDefault ? nil : { onRename(namespace) },
+                            onDelete: namespace.isDefault ? nil : { onDelete(namespace) }
+                        )
+                    }
+                }
+                .padding(6)
+            }
+            .frame(maxHeight: 320)
+
+            Divider()
+
+            Button(action: onCreateNamespace) {
+                Label("New Namespace…", systemImage: "plus")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
+            .padding(6)
+        }
+        .frame(minWidth: 260)
+    }
+}
+
+private struct NamespacePickerRow: View {
+    let namespace: RepositoryNamespace
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onRename: (() -> Void)?
+    let onDelete: (() -> Void)?
+
+    private var repoCount: Int { namespace.repositories.count }
+    private var projectCount: Int { namespace.projects.count }
+    private var worktreeCount: Int { namespace.repositories.reduce(0) { $0 + $1.worktrees.count } }
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.accentColor)
+                    .opacity(isSelected ? 1 : 0)
+                    .frame(width: 12)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(namespace.name)
+                        .font(.subheadline)
+                        .fontWeight(isSelected ? .semibold : .regular)
+                        .foregroundStyle(.primary)
+
+                    HStack(spacing: 10) {
+                        if projectCount > 0 {
+                            Label("\(projectCount)", systemImage: "folder")
+                        }
+                        Label("\(repoCount)", systemImage: "shippingbox")
+                        if worktreeCount > 0 {
+                            Label("\(worktreeCount)", systemImage: "point.3.connected.trianglepath.dotted")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .background(isSelected ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.12), in: Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
+            .contentShape(Rectangle())
+            .background(
+                isSelected ? Color.accentColor.opacity(0.1) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 6)
             )
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if let onRename {
+                Button("Rename…") { onRename() }
+            }
+            if let onDelete {
+                Divider()
+                Button("Delete", role: .destructive) { onDelete() }
+            }
+        }
     }
 }
 

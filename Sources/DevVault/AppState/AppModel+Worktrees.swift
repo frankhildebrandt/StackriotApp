@@ -131,6 +131,7 @@ extension AppModel {
 
     func refreshWorktreeStatuses(for repository: ManagedRepository) async {
         let defaultBranch = repository.defaultBranch
+        let defaultRemoteName = resolvedDefaultRemote(for: repository)?.name ?? "origin"
         var statuses: [UUID: WorktreeStatus] = [:]
 
         let statusService = services.worktreeStatusService
@@ -139,7 +140,7 @@ extension AppModel {
                 let worktreeID = worktree.id
                 let worktreePath = worktree.path
                 let isDefault = worktree.isDefaultBranchWorkspace
-                let compareBranch = isDefault ? "origin/\(defaultBranch)" : defaultBranch
+                let compareBranch = isDefault ? "\(defaultRemoteName)/\(defaultBranch)" : defaultBranch
                 group.addTask { [statusService] in
                     let status = await statusService.fetchStatus(
                         worktreePath: URL(fileURLWithPath: worktreePath),

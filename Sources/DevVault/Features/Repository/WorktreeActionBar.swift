@@ -29,7 +29,9 @@ struct WorktreeActionBar: View {
                 .frame(height: 18)
                 .padding(.horizontal, 2)
 
-            gitMenuButton
+            if !worktree.isDefaultBranchWorkspace {
+                gitMenuButton
+            }
 
             Spacer()
 
@@ -133,6 +135,7 @@ struct WorktreeActionBar: View {
             Image(systemName: "terminal")
         }
         .buttonStyle(.bordered)
+        .disabled(worktree.isDefaultBranchWorkspace)
         .help("Neues Terminal öffnen")
     }
 
@@ -170,7 +173,7 @@ struct WorktreeActionBar: View {
         }
         .menuStyle(.button)
         .buttonStyle(.bordered)
-        .disabled(!hasConfigs)
+        .disabled(!hasConfigs || worktree.isDefaultBranchWorkspace)
         .help("Run Configuration ausführen")
     }
 

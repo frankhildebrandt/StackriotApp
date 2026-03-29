@@ -8,6 +8,7 @@ final class ManagedRepository {
     var remoteURL: String?
     var bareRepositoryPath: String
     var defaultBranch: String
+    var defaultRemoteName: String?
     var createdAt: Date
     var updatedAt: Date
     var lastFetchedAt: Date?
@@ -30,6 +31,7 @@ final class ManagedRepository {
         remoteURL: String? = nil,
         bareRepositoryPath: String,
         defaultBranch: String,
+        defaultRemoteName: String? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         lastFetchedAt: Date? = nil,
@@ -43,6 +45,7 @@ final class ManagedRepository {
         self.remoteURL = remoteURL
         self.bareRepositoryPath = bareRepositoryPath
         self.defaultBranch = defaultBranch
+        self.defaultRemoteName = defaultRemoteName
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastFetchedAt = lastFetchedAt
@@ -61,11 +64,19 @@ final class ManagedRepository {
         set { statusRawValue = newValue.rawValue }
     }
 
-    var primaryRemote: RepositoryRemote? {
-        remotes.sorted {
+    var defaultRemote: RepositoryRemote? {
+        if let defaultRemoteName {
+            return remotes.first(where: { $0.name == defaultRemoteName })
+        }
+
+        return remotes.sorted {
             if $0.name == "origin" { return true }
             if $1.name == "origin" { return false }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }.first
+    }
+
+    var primaryRemote: RepositoryRemote? {
+        defaultRemote
     }
 }

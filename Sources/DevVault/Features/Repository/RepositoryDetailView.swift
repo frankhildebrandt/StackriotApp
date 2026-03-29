@@ -131,44 +131,57 @@ struct RepositoryDetailView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(worktrees) { worktree in
-                        HStack(alignment: .top, spacing: 12) {
-                            // Left accent strip for selected
-                            Rectangle()
-                                .fill(selectedWorktree?.id == worktree.id ? Color.accentColor : Color.clear)
-                                .frame(width: 2)
-                                .padding(.vertical, 4)
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .top, spacing: 12) {
+                                Rectangle()
+                                    .fill(selectedWorktree?.id == worktree.id ? Color.accentColor : Color.clear)
+                                    .frame(width: 2)
+                                    .padding(.vertical, 4)
 
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack(spacing: 8) {
-                                    Text(worktreeTitle(for: worktree))
-                                        .font(.headline)
-                                    if worktree.isDefaultBranchWorkspace {
-                                        Text(repository.defaultBranch)
-                                            .font(.caption.weight(.medium))
-                                            .foregroundStyle(.secondary)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(.regularMaterial, in: Capsule())
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 8) {
+                                        Text(worktreeTitle(for: worktree))
+                                            .font(.headline)
+                                        if worktree.isDefaultBranchWorkspace {
+                                            Text(repository.defaultBranch)
+                                                .font(.caption.weight(.medium))
+                                                .foregroundStyle(.secondary)
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(.regularMaterial, in: Capsule())
+                                            if let defaultRemote = appModel.resolvedDefaultRemote(for: repository) {
+                                                Text(defaultRemote.name)
+                                                    .font(.caption.weight(.medium))
+                                                    .foregroundStyle(.blue)
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.vertical, 4)
+                                                    .background(.blue.opacity(0.12), in: Capsule())
+                                            }
+                                        }
+                                        if appModel.isAgentRunning(for: worktree) {
+                                            AgentActivityDot()
+                                        }
                                     }
-                                    if appModel.isAgentRunning(for: worktree) {
-                                        AgentActivityDot()
-                                    }
-                                }
-                                Text(worktree.path)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-
-                                worktreeStatusRow(for: worktree)
-
-                                if let issueContext = worktree.issueContext {
-                                    Label(issueContext, systemImage: "number")
+                                    Text(worktree.path)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+
+                                    worktreeStatusRow(for: worktree)
+
+                                    if let issueContext = worktree.issueContext {
+                                        Label(issueContext, systemImage: "number")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
+
+                                Spacer()
                             }
 
-                            Spacer()
+                            if worktree.isDefaultBranchWorkspace {
+                                defaultBranchIndicatorRow(for: worktree)
+                            }
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)
@@ -196,18 +209,18 @@ struct RepositoryDetailView: View {
                                     await appModel.openIDE(.vscode, for: worktree, in: modelContext)
                                 }
                             }
-                            Divider()
-                            Button("Mit \(repository.defaultBranch) synchronisieren") {
-                                Task {
-                                    await appModel.syncWorktreeFromMain(
-                                        worktree,
-                                        repository: repository,
-                                        strategy: .rebase,
-                                        modelContext: modelContext
-                                    )
-                                }
-                            }
                             if !worktree.isDefaultBranchWorkspace {
+                                Divider()
+                                Button("Mit \(repository.defaultBranch) synchronisieren") {
+                                    Task {
+                                        await appModel.syncWorktreeFromMain(
+                                            worktree,
+                                            repository: repository,
+                                            strategy: .rebase,
+                                            modelContext: modelContext
+                                        )
+                                    }
+                                }
                                 Button("In Main/Default integrieren") {
                                     Task {
                                         await appModel.integrateIntoDefaultBranch(
@@ -217,9 +230,9 @@ struct RepositoryDetailView: View {
                                         )
                                     }
                                 }
-                            }
-                            Button("Publish Branch") {
-                                appModel.presentPublishSheet(for: repository, worktree: worktree)
+                                Button("Publish Branch") {
+                                    appModel.presentPublishSheet(for: repository, worktree: worktree)
+                                }
                             }
                             Divider()
                             if !worktree.isDefaultBranchWorkspace {
@@ -265,10 +278,57 @@ struct RepositoryDetailView: View {
     }
 
     @ViewBuilder
-    private func worktreeStatusRow(for worktree: WorktreeRecord) -> some View {
+    private func defaultBranchIndicatorRow(for worktree: WorktreeRecord) -> some View {
         let status = appModel.worktreeStatuses[worktree.id]
         let ahead = status?.aheadCount ?? 0
         let behind = status?.behindCount ?? 0
+
+        HStack(spacing: 10) {
+            if let defaultRemote = appModel.resolvedDefaultRemote(for: repository) {
+                Text("Basis von \(defaultRemote.name)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Keine Default-Remote-Konfiguration")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+            } label: {
+                Label(behind == 0 ? "Pull" : "Pull \(behind)", systemImage: "arrow.down.to.line")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(true)
+            .opacity(behind > 0 ? 1 : 0.6)
+            .help("Nur Anzeige: Der Default-Branch wird beim Refresh vom Default Remote aktualisiert.")
+
+            Button {
+            } label: {
+                Label(ahead == 0 ? "Push" : "Push \(ahead)", systemImage: "arrow.up.to.line")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(true)
+            .opacity(ahead > 0 ? 1 : 0.6)
+            .help("Nur Anzeige: Lokale Commits im Default-Branch müssten publiziert werden.")
+        }
+        .padding(.top, 10)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 1)
+        }
+    }
+
+    @ViewBuilder
+    private func worktreeStatusRow(for worktree: WorktreeRecord) -> some View {
+        let status = appModel.worktreeStatuses[worktree.id]
+        let ahead = worktree.isDefaultBranchWorkspace ? 0 : (status?.aheadCount ?? 0)
+        let behind = worktree.isDefaultBranchWorkspace ? 0 : (status?.behindCount ?? 0)
         let added = status?.addedLines ?? 0
         let deleted = status?.deletedLines ?? 0
         let hasChanges = status?.hasUncommittedChanges ?? false

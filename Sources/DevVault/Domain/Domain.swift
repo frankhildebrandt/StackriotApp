@@ -197,7 +197,15 @@ struct RepositoryRefreshInfo: Sendable {
     let status: RepositoryHealth
     let defaultBranch: String
     let fetchedAt: Date?
-    let errorMessage: String?
+    let fetchErrorMessage: String?
+    let defaultBranchSyncErrorMessage: String?
+
+    var errorMessage: String? {
+        [fetchErrorMessage, defaultBranchSyncErrorMessage]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty }
+            .joined(separator: "\n\n")
+            .nonEmpty
+    }
 }
 
 struct WorktreeStatus: Sendable {
