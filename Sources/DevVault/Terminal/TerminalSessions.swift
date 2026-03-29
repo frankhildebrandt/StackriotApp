@@ -49,6 +49,10 @@ final class AgentTerminalSession: ObservableObject {
         view.terminate()
     }
 
+    func send(text: String) {
+        view.process.send(data: ArraySlice(text.utf8))
+    }
+
     fileprivate func handleData(_ slice: ArraySlice<UInt8>) {
         let text = String(decoding: Array(slice), as: UTF8.self)
         onData(text)

@@ -8,6 +8,8 @@ struct RootView: View {
 
     var body: some View {
         @Bindable var appModel = appModel
+        let selectedRepository = appModel.repository(for: repositories)
+        let selectedWorktree = selectedRepository.flatMap { appModel.selectedWorktree(for: $0) }
 
         NavigationSplitView {
             SidebarView(
@@ -31,13 +33,13 @@ struct RootView: View {
             )
             .navigationSplitViewColumnWidth(min: 280, ideal: 340)
         } content: {
-            if let repository = appModel.repository(for: repositories) {
+            if let repository = selectedRepository {
                 RepositoryDetailView(repository: repository)
             } else {
                 ContentUnavailableView("No Repositories", systemImage: "shippingbox", description: Text("Clone a bare repository to start creating worktrees and actions."))
             }
         } detail: {
-            if let repository = appModel.repository(for: repositories) {
+            if let repository = selectedRepository {
                 RunConsoleColumn(repository: repository)
                     .navigationSplitViewColumnWidth(min: 360, ideal: 420)
             } else {
@@ -49,6 +51,26 @@ struct RootView: View {
             appModel.configure(modelContext: modelContext)
             appModel.selectInitialRepository(from: repositories)
             await appModel.checkAgentAvailability()
+        }
+        .toolbar(content: {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    appModel.isDiffInspectorPresented.toggle()
+                } label: {
+                    Label("Diff", systemImage: "sidebar.right")
+                }
+                .disabled(selectedRepository == nil || selectedWorktree == nil)
+            }
+        })
+        .inspector(isPresented: $appModel.isDiffInspectorPresented) {
+            if let repository = selectedRepository, let worktree = selectedWorktree {
+                DiffInspectorView(repository: repository, worktree: worktree)
+                    .environment(appModel)
+                    .inspectorColumnWidth(min: 320, ideal: 420, max: 720)
+            } else {
+                ContentUnavailableView("No Diff", systemImage: "doc.text.magnifyingglass", description: Text("Select a workspace to inspect uncommitted changes."))
+                    .inspectorColumnWidth(min: 320, ideal: 420, max: 720)
+            }
         }
         .sheet(isPresented: $appModel.isCloneSheetPresented) {
             CloneRepositorySheet()

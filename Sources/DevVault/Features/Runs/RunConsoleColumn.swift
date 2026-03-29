@@ -14,7 +14,7 @@ struct RunConsoleColumn: View {
             if let worktree {
                 // Worktree-Header
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(worktree.branchName)
+                    Text(worktree.isDefaultBranchWorkspace ? "Main/Default" : worktree.branchName)
                         .font(.title3.weight(.semibold))
                     Text(worktree.path)
                         .font(.caption)

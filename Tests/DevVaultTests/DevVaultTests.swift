@@ -147,7 +147,8 @@ struct DevVaultTests {
                 packageManager: .npm,
                 nodeVersionSpec: AppPreferences.nodeDefaultVersionSpec,
                 versionSource: .defaultLTS
-            )
+            ),
+            stdinText: nil
         )
 
         let prepared = try await manager.prepareExecution(for: descriptor)
@@ -185,7 +186,8 @@ struct DevVaultTests {
                 packageManager: .npm,
                 nodeVersionSpec: AppPreferences.nodeDefaultVersionSpec,
                 versionSource: .defaultLTS
-            )
+            ),
+            stdinText: nil
         )
 
         let results = try await withThrowingTaskGroup(of: PreparedCommandExecution.self) { group in
@@ -338,6 +340,160 @@ struct DevVaultTests {
     }
 
     @Test
+    func defaultBranchWorkspaceCanBeEnsuredAndReused() async throws {
+        let remote = try await createSeededRemote(named: "default-workspace")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remote.remote, preferredName: "Sample-Default-Workspace")
+
+        let first = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        let second = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+
+        #expect(first.path == second.path)
+        #expect(FileManager.default.fileExists(atPath: first.path.path))
+
+        let branch = try await RepositoryManager().currentBranch(in: first.path)
+        #expect(branch == cloneInfo.defaultBranch)
+    }
+
+    @Test
+    func integrateIntoDefaultBranchCreatesCommit() async throws {
+        let remote = try await createSeededRemote(named: "integrate")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remote.remote, preferredName: "Sample-Integrate")
+
+        let defaultWorkspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        let featureWorkspace = try await WorktreeManager().createWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            branchName: "feature/integration",
+            sourceBranch: cloneInfo.defaultBranch
+        )
+        try await configureGitIdentity(in: defaultWorkspace.path)
+        try await configureGitIdentity(in: featureWorkspace.path)
+
+        try "hello\nfeature\n".write(
+            to: featureWorkspace.path.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await runGit(["-C", featureWorkspace.path.path, "add", "."], currentDirectoryURL: featureWorkspace.path)
+        try await runGit(["-C", featureWorkspace.path.path, "commit", "-m", "Feature"], currentDirectoryURL: featureWorkspace.path)
+
+        let result = try await WorktreeStatusService().integrate(
+            sourceBranch: "feature/integration",
+            defaultBranch: cloneInfo.defaultBranch,
+            defaultWorktreePath: defaultWorkspace.path
+        )
+
+        guard case .committed = result else {
+            Issue.record("Expected successful integration")
+            return
+        }
+
+        let log = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["-C", defaultWorkspace.path.path, "log", "-1", "--pretty=%s"]
+        )
+        #expect(log.exitCode == 0)
+        #expect(log.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "Integrate feature/integration into main")
+    }
+
+    @Test
+    func integrateIntoDefaultBranchReturnsConflictsWhenMergeFails() async throws {
+        let remote = try await createSeededRemote(named: "conflicts")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remote.remote, preferredName: "Sample-Conflicts")
+
+        let defaultWorkspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        let featureWorkspace = try await WorktreeManager().createWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            branchName: "feature/conflict",
+            sourceBranch: cloneInfo.defaultBranch
+        )
+        try await configureGitIdentity(in: defaultWorkspace.path)
+        try await configureGitIdentity(in: featureWorkspace.path)
+
+        try "main\n".write(
+            to: defaultWorkspace.path.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await runGit(["-C", defaultWorkspace.path.path, "add", "."], currentDirectoryURL: defaultWorkspace.path)
+        try await runGit(["-C", defaultWorkspace.path.path, "commit", "-m", "Main change"], currentDirectoryURL: defaultWorkspace.path)
+
+        try "feature\n".write(
+            to: featureWorkspace.path.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await runGit(["-C", featureWorkspace.path.path, "add", "."], currentDirectoryURL: featureWorkspace.path)
+        try await runGit(["-C", featureWorkspace.path.path, "commit", "-m", "Feature change"], currentDirectoryURL: featureWorkspace.path)
+
+        let result = try await WorktreeStatusService().integrate(
+            sourceBranch: "feature/conflict",
+            defaultBranch: cloneInfo.defaultBranch,
+            defaultWorktreePath: defaultWorkspace.path
+        )
+
+        switch result {
+        case .committed:
+            Issue.record("Expected merge conflicts")
+        case let .conflicts(message):
+            #expect(!message.isEmpty)
+        }
+
+        let conflictFiles = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["-C", defaultWorkspace.path.path, "diff", "--name-only", "--diff-filter=U"]
+        )
+        #expect(conflictFiles.exitCode == 0)
+        #expect(conflictFiles.stdout.contains("README.md"))
+    }
+
+    @Test
+    func loadUncommittedDiffReturnsTrackedAndUntrackedFiles() async throws {
+        let remote = try await createSeededRemote(named: "diff")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remote.remote, preferredName: "Sample-Diff")
+
+        let defaultWorkspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+
+        try "hello\nupdated\n".write(
+            to: defaultWorkspace.path.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "new\nfile\n".write(
+            to: defaultWorkspace.path.appendingPathComponent("NOTES.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let snapshot = try await WorktreeStatusService().loadUncommittedDiff(worktreePath: defaultWorkspace.path)
+
+        #expect(snapshot.files.count == 2)
+        #expect(snapshot.files.contains(where: { $0.path == "README.md" && $0.status == .modified }))
+        #expect(snapshot.files.contains(where: { $0.path == "NOTES.md" && $0.status == .untracked }))
+    }
+
+    @Test
     func sshKeyGenerationProducesReusableMaterial() async throws {
         let material = try await SSHKeyManager().generateKey(displayName: "Test Key", comment: "tests@example.com")
         #expect(!material.publicKey.isEmpty)
@@ -369,6 +525,12 @@ struct DevVaultTests {
             .appendingPathComponent(UUID().uuidString + "-" + name, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+    }
+
+    private func configureGitIdentity(in directory: URL) async throws {
+        try await runGit(["-C", directory.path, "config", "user.email", "tests@example.com"], currentDirectoryURL: directory)
+        try await runGit(["-C", directory.path, "config", "user.name", "DevVault Tests"], currentDirectoryURL: directory)
+        try await runGit(["-C", directory.path, "config", "commit.gpgsign", "false"], currentDirectoryURL: directory)
     }
 
     private func runGit(_ arguments: [String], currentDirectoryURL: URL) async throws {

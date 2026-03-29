@@ -12,10 +12,12 @@ final class AppModel: @unchecked Sendable {
     var pendingErrorMessage: String?
     var worktreeStatuses: [UUID: WorktreeStatus] = [:]
     var worktreePendingMergeOfferID: UUID?
+    var pendingIntegrationConflict: IntegrationConflictDraft?
     var activeRunIDs: Set<UUID> = []
     var refreshingRepositoryIDs: Set<UUID> = []
     var isCloneSheetPresented = false
     var isWorktreeSheetPresented = false
+    var isDiffInspectorPresented = false
     var remoteManagementRepositoryID: UUID?
     var pendingRepositoryDeletionID: UUID?
     var publishDraft = PublishBranchDraft()
@@ -84,16 +86,23 @@ final class AppModel: @unchecked Sendable {
     }
 
     func worktrees(for repository: ManagedRepository) -> [WorktreeRecord] {
-        guard let modelContext = storedModelContext else {
-            return repository.worktrees.sorted(by: { $0.createdAt > $1.createdAt })
+        let worktrees: [WorktreeRecord]
+        if let modelContext = storedModelContext {
+            let repositoryID = repository.id
+            let descriptor = FetchDescriptor<WorktreeRecord>(
+                predicate: #Predicate { $0.repository?.id == repositoryID }
+            )
+            worktrees = (try? modelContext.fetch(descriptor)) ?? []
+        } else {
+            worktrees = repository.worktrees
         }
 
-        let repositoryID = repository.id
-        let descriptor = FetchDescriptor<WorktreeRecord>(
-            predicate: #Predicate { $0.repository?.id == repositoryID },
-            sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
-        )
-        return (try? modelContext.fetch(descriptor)) ?? []
+        return worktrees.sorted { lhs, rhs in
+            if lhs.isDefaultBranchWorkspace != rhs.isDefaultBranchWorkspace {
+                return lhs.isDefaultBranchWorkspace
+            }
+            return lhs.createdAt > rhs.createdAt
+        }
     }
 
     func selectedWorktreeID(for repository: ManagedRepository) -> UUID? {
@@ -216,5 +225,9 @@ final class AppModel: @unchecked Sendable {
         repository.runs
             .filter { $0.worktreeID == worktreeID }
             .sorted(by: { $0.startedAt > $1.startedAt })
+    }
+
+    func defaultBranchWorkspace(for repository: ManagedRepository) -> WorktreeRecord? {
+        worktrees(for: repository).first(where: \.isDefaultBranchWorkspace)
     }
 }

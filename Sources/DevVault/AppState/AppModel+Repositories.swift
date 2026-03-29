@@ -71,6 +71,8 @@ extension AppModel {
             modelContext.insert(remote)
             try modelContext.save()
 
+            _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
+
             selectedRepositoryID = repository.id
             isCloneSheetPresented = false
             await refresh(repository, in: modelContext)
@@ -105,6 +107,7 @@ extension AppModel {
         repository.lastErrorMessage = result.errorMessage
         repository.updatedAt = .now
         save(modelContext)
+        _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
     }
 
     func refreshSelectedRepository() {

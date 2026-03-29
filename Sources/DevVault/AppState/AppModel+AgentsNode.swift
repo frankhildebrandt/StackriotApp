@@ -36,46 +36,69 @@ extension AppModel {
             currentDirectoryURL: URL(fileURLWithPath: worktree.path),
             repositoryID: repository.id,
             worktreeID: worktree.id,
-            runtimeRequirement: nil
+            runtimeRequirement: nil,
+            stdinText: nil
         )
         startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
     }
 
     func runGitCommit(message: String, in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) {
+        let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shellCommand = "git add -A && git commit -m \(trimmedMessage.shellEscaped)"
         let descriptor = CommandExecutionDescriptor(
             title: "git commit",
             actionKind: .gitOperation,
-            executable: "git",
-            arguments: ["commit", "-m", message],
-            displayCommandLine: "git commit -m \"\(message)\"",
+            executable: "/bin/sh",
+            arguments: ["-lc", shellCommand],
+            displayCommandLine: "git add -A && git commit -m \"\(trimmedMessage)\"",
             currentDirectoryURL: URL(fileURLWithPath: worktree.path),
             repositoryID: repository.id,
             worktreeID: worktree.id,
-            runtimeRequirement: nil
+            runtimeRequirement: nil,
+            stdinText: nil
         )
         startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
     }
 
-    func runGitPush(in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) {
-        let descriptor = CommandExecutionDescriptor(
-            title: "git push",
-            actionKind: .gitOperation,
-            executable: "git",
-            arguments: ["push"],
-            displayCommandLine: nil,
-            currentDirectoryURL: URL(fileURLWithPath: worktree.path),
-            repositoryID: repository.id,
-            worktreeID: worktree.id,
-            runtimeRequirement: nil
-        )
-        startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+    func runGitPush(in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) async {
+        do {
+            let hasUpstream = try await services.repositoryManager.hasUpstreamBranch(
+                worktreePath: URL(fileURLWithPath: worktree.path)
+            )
+
+            if !hasUpstream {
+                presentPublishSheet(for: repository, worktree: worktree)
+                return
+            }
+
+            let descriptor = CommandExecutionDescriptor(
+                title: "git push",
+                actionKind: .gitOperation,
+                executable: "git",
+                arguments: ["push"],
+                displayCommandLine: nil,
+                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                repositoryID: repository.id,
+                worktreeID: worktree.id,
+                runtimeRequirement: nil,
+                stdinText: nil
+            )
+            startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
     }
 
     func checkAgentAvailability() async {
         availableAgents = await services.agentManager.checkAvailability()
     }
 
-    func launchAgent(_ tool: AIAgentTool, for worktree: WorktreeRecord, in modelContext: ModelContext) {
+    func launchAgent(
+        _ tool: AIAgentTool,
+        for worktree: WorktreeRecord,
+        in modelContext: ModelContext,
+        initialPrompt: String? = nil
+    ) {
         guard tool != .none else { return }
 
         do {
@@ -98,13 +121,42 @@ extension AppModel {
                 currentDirectoryURL: URL(fileURLWithPath: worktree.path),
                 repositoryID: repository.id,
                 worktreeID: worktree.id,
-                runtimeRequirement: nil
+                runtimeRequirement: nil,
+                stdinText: initialPrompt?.nonEmpty.map { "\($0)\n" }
             )
             startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
             refreshRunningAgentWorktrees()
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
+    }
+
+    func launchConflictResolutionAgent(
+        _ tool: AIAgentTool,
+        for draft: IntegrationConflictDraft,
+        in modelContext: ModelContext
+    ) {
+        guard
+            let repository = repositoryRecord(with: draft.repositoryID),
+            let defaultWorktree = worktreeRecord(with: draft.defaultWorktreeID)
+        else {
+            pendingErrorMessage = DevVaultError.worktreeUnavailable.localizedDescription
+            return
+        }
+
+        let prompt = """
+        Resolve the current merge conflicts in this repository.
+        Source branch: \(draft.sourceBranch)
+        Target branch: \(draft.defaultBranch)
+        Requirements:
+        1. Resolve all merge conflicts in the current working tree.
+        2. Stage the resolved files.
+        3. Create the merge commit with the exact message: \(draft.commitMessage)
+        4. Leave the repository in a clean state if the resolution succeeds.
+        """
+        pendingIntegrationConflict = nil
+        selectedWorktreeIDsByRepository[repository.id] = defaultWorktree.id
+        launchAgent(tool, for: defaultWorktree, in: modelContext, initialPrompt: prompt)
     }
 
     func assignAgent(_ tool: AIAgentTool, to worktree: WorktreeRecord, in modelContext: ModelContext) {
@@ -139,7 +191,8 @@ extension AppModel {
             currentDirectoryURL: URL(fileURLWithPath: worktree.path),
             repositoryID: repository.id,
             worktreeID: worktree.id,
-            runtimeRequirement: nil
+            runtimeRequirement: nil,
+            stdinText: nil
         )
         startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
     }
@@ -159,7 +212,8 @@ extension AppModel {
             currentDirectoryURL: URL(fileURLWithPath: worktree.path),
             repositoryID: repository.id,
             worktreeID: worktree.id,
-            runtimeRequirement: services.nodeTooling.runtimeRequirement(for: URL(fileURLWithPath: worktree.path))
+            runtimeRequirement: services.nodeTooling.runtimeRequirement(for: URL(fileURLWithPath: worktree.path)),
+            stdinText: nil
         )
         startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
     }

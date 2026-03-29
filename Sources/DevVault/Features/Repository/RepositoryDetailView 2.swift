@@ -1,7 +1,7 @@
 import SwiftData
 import SwiftUI
 
-struct RepositoryDetailView: View {
+struct LegacyRepositoryDetailView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
 

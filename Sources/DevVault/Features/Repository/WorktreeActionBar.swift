@@ -73,7 +73,9 @@ struct WorktreeActionBar: View {
         }
         .confirmationDialog("Git Push", isPresented: $pendingGitPush) {
             Button("Push") {
-                appModel.runGitPush(in: worktree, repository: repository, modelContext: modelContext)
+                Task {
+                    await appModel.runGitPush(in: worktree, repository: repository, modelContext: modelContext)
+                }
             }
         } message: {
             Text("Branch \(worktree.branchName) pushen?")
@@ -181,6 +183,17 @@ struct WorktreeActionBar: View {
             }
             Button("Push") {
                 pendingGitPush = true
+            }
+            if !worktree.isDefaultBranchWorkspace {
+                Button("Integrate into Main/Default") {
+                    Task {
+                        await appModel.integrateIntoDefaultBranch(
+                            worktree,
+                            repository: repository,
+                            modelContext: modelContext
+                        )
+                    }
+                }
             }
             Divider()
             Button("Publish Branch…") {

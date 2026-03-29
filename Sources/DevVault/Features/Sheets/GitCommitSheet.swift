@@ -20,6 +20,10 @@ struct GitCommitSheet: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
+            Text("All current changes in this workspace will be staged and committed.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             TextField("Commit-Nachricht", text: $message, axis: .vertical)
                 .lineLimit(3...6)
                 .textFieldStyle(.roundedBorder)

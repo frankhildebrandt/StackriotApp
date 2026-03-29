@@ -2,6 +2,57 @@ import Foundation
 import SwiftData
 
 extension AppModel {
+    func ensureDefaultBranchWorkspace(
+        for repository: ManagedRepository,
+        in modelContext: ModelContext
+    ) async -> WorktreeRecord? {
+        if let existing = repository.worktrees.first(where: \.isDefaultBranchWorkspace) {
+            if existing.branchName != repository.defaultBranch {
+                existing.branchName = repository.defaultBranch
+            }
+            return existing
+        }
+
+        if let existingDefaultBranch = repository.worktrees.first(where: { $0.branchName == repository.defaultBranch }) {
+            existingDefaultBranch.isDefaultBranchWorkspace = true
+            repository.updatedAt = .now
+            save(modelContext)
+            return existingDefaultBranch
+        }
+
+        do {
+            let bareRepositoryPath = URL(fileURLWithPath: repository.bareRepositoryPath)
+            let info = try await services.worktreeManager.ensureDefaultBranchWorkspace(
+                bareRepositoryPath: bareRepositoryPath,
+                repositoryName: repository.displayName,
+                defaultBranch: repository.defaultBranch
+            )
+
+            if let record = repository.worktrees.first(where: { $0.path == info.path.path }) {
+                record.branchName = repository.defaultBranch
+                record.isDefaultBranchWorkspace = true
+                repository.updatedAt = .now
+                save(modelContext)
+                return record
+            }
+
+            let worktree = WorktreeRecord(
+                branchName: repository.defaultBranch,
+                isDefaultBranchWorkspace: true,
+                path: info.path.path,
+                repository: repository
+            )
+            repository.worktrees.append(worktree)
+            repository.updatedAt = .now
+            modelContext.insert(worktree)
+            try modelContext.save()
+            return worktree
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     func createWorktree(for repository: ManagedRepository, in modelContext: ModelContext) async {
         do {
             let info = try await services.worktreeManager.createWorktree(
@@ -33,6 +84,9 @@ extension AppModel {
 
     func removeWorktree(_ worktree: WorktreeRecord, in modelContext: ModelContext) async {
         do {
+            if worktree.isDefaultBranchWorkspace {
+                throw DevVaultError.commandFailed("The default workspace cannot be removed.")
+            }
             guard let repository = worktree.repository else {
                 throw DevVaultError.unsupportedRepositoryPath
             }
@@ -100,6 +154,57 @@ extension AppModel {
 
         for (worktreeID, status) in statuses {
             worktreeStatuses[worktreeID] = status
+        }
+    }
+
+    func integrateIntoDefaultBranch(
+        _ sourceWorktree: WorktreeRecord,
+        repository: ManagedRepository,
+        modelContext: ModelContext
+    ) async {
+        guard !sourceWorktree.isDefaultBranchWorkspace else { return }
+        guard let defaultWorktree = await ensureDefaultBranchWorkspace(for: repository, in: modelContext) else {
+            return
+        }
+
+        do {
+            let result = try await services.worktreeStatusService.integrate(
+                sourceBranch: sourceWorktree.branchName,
+                defaultBranch: repository.defaultBranch,
+                defaultWorktreePath: URL(fileURLWithPath: defaultWorktree.path)
+            )
+
+            switch result {
+            case .committed:
+                pendingIntegrationConflict = nil
+                selectedWorktreeIDsByRepository[repository.id] = defaultWorktree.id
+                pendingErrorMessage = "Integrated \(sourceWorktree.branchName) into \(repository.defaultBranch)."
+            case let .conflicts(message):
+                pendingIntegrationConflict = IntegrationConflictDraft(
+                    repositoryID: repository.id,
+                    sourceWorktreeID: sourceWorktree.id,
+                    defaultWorktreeID: defaultWorktree.id,
+                    sourceBranch: sourceWorktree.branchName,
+                    defaultBranch: repository.defaultBranch,
+                    message: message
+                )
+                selectedWorktreeIDsByRepository[repository.id] = defaultWorktree.id
+            }
+
+            await refreshWorktreeStatuses(for: repository)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func loadDiff(for worktree: WorktreeRecord) async -> WorkspaceDiffSnapshot {
+        do {
+            return try await services.worktreeStatusService.loadUncommittedDiff(
+                worktreePath: URL(fileURLWithPath: worktree.path)
+            )
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+            return WorkspaceDiffSnapshot(files: [])
         }
     }
 

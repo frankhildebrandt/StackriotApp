@@ -26,6 +26,7 @@ struct RepositoryDetailView: View {
         }
         .navigationTitle(repository.displayName)
         .task(id: repository.id) {
+            _ = await appModel.ensureDefaultBranchWorkspace(for: repository, in: modelContext)
             appModel.ensureSelectedWorktree(in: repository)
             await appModel.refreshWorktreeStatuses(for: repository)
         }
@@ -70,6 +71,28 @@ struct RepositoryDetailView: View {
         } message: {
             Text("Der Rebase von \(repository.defaultBranch) konnte nicht abgeschlossen werden. Möchtest du stattdessen einen Merge versuchen?")
         }
+        .confirmationDialog("Merge-Konflikte auflösen", isPresented: Binding(
+            get: { appModel.pendingIntegrationConflict != nil },
+            set: { newValue in
+                if !newValue {
+                    appModel.pendingIntegrationConflict = nil
+                }
+            }
+        ), presenting: appModel.pendingIntegrationConflict) { draft in
+            ForEach(availableAgents) { tool in
+                Button("Mit \(tool.displayName)") {
+                    appModel.launchConflictResolutionAgent(tool, for: draft, in: modelContext)
+                }
+            }
+            Button("Abbrechen", role: .cancel) {
+                appModel.pendingIntegrationConflict = nil
+            }
+        } message: { draft in
+            Text("""
+            Beim Integrieren von \(draft.sourceBranch) in \(draft.defaultBranch) sind Konflikte entstanden.
+            Wähle einen Agenten, der die Konflikte löst und den Commit `\(draft.commitMessage)` erstellt.
+            """)
+        }
     }
 
     private func worktreeSection(worktrees: [WorktreeRecord]) -> some View {
@@ -97,8 +120,16 @@ struct RepositoryDetailView: View {
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack(spacing: 8) {
-                                    Text(worktree.branchName)
+                                    Text(worktreeTitle(for: worktree))
                                         .font(.headline)
+                                    if worktree.isDefaultBranchWorkspace {
+                                        Text(repository.defaultBranch)
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(.regularMaterial, in: Capsule())
+                                    }
                                     if appModel.isAgentRunning(for: worktree) {
                                         AgentActivityDot()
                                     }
@@ -125,7 +156,7 @@ struct RepositoryDetailView: View {
                         .padding(16)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
-                            selectedWorktree?.id == worktree.id ? .regularMaterial : .thinMaterial,
+                            selectedWorktree?.id == worktree.id ? .regularMaterial : (worktree.isDefaultBranchWorkspace ? .ultraThinMaterial : .thinMaterial),
                             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
                         )
                         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -154,12 +185,25 @@ struct RepositoryDetailView: View {
                                     )
                                 }
                             }
+                            if !worktree.isDefaultBranchWorkspace {
+                                Button("In Main/Default integrieren") {
+                                    Task {
+                                        await appModel.integrateIntoDefaultBranch(
+                                            worktree,
+                                            repository: repository,
+                                            modelContext: modelContext
+                                        )
+                                    }
+                                }
+                            }
                             Button("Publish Branch") {
                                 appModel.presentPublishSheet(for: repository, worktree: worktree)
                             }
                             Divider()
-                            Button("Remove Worktree", role: .destructive) {
-                                worktreePendingRemoval = WorktreeRemovalDraft(id: worktree.id, path: worktree.path)
+                            if !worktree.isDefaultBranchWorkspace {
+                                Button("Remove Worktree", role: .destructive) {
+                                    worktreePendingRemoval = WorktreeRemovalDraft(id: worktree.id, path: worktree.path)
+                                }
                             }
                         }
                     }
@@ -318,6 +362,16 @@ struct RepositoryDetailView: View {
 
     private var selectedWorktreeID: UUID? {
         appModel.selectedWorktreeID(for: repository)
+    }
+
+    private var availableAgents: [AIAgentTool] {
+        AIAgentTool.allCases.filter { tool in
+            tool != .none && appModel.availableAgents.contains(tool)
+        }
+    }
+
+    private func worktreeTitle(for worktree: WorktreeRecord) -> String {
+        worktree.isDefaultBranchWorkspace ? "Main/Default" : worktree.branchName
     }
 
     private func statusColor(for status: RunStatusKind) -> Color {

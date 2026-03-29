@@ -84,7 +84,8 @@ struct NodeToolingService {
             currentDirectoryURL: worktreeURL,
             repositoryID: repositoryID,
             worktreeID: worktree.id,
-            runtimeRequirement: runtimeRequirement(for: worktreeURL)
+            runtimeRequirement: runtimeRequirement(for: worktreeURL),
+            stdinText: nil
         )
     }
 

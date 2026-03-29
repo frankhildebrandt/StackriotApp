@@ -183,6 +183,7 @@ struct CommandExecutionDescriptor: Sendable {
     let repositoryID: UUID
     let worktreeID: UUID?
     let runtimeRequirement: NodeRuntimeRequirement?
+    let stdinText: String?
 }
 
 struct RemoteExecutionContext: Sendable {
@@ -205,6 +206,7 @@ struct WorktreeStatus: Sendable {
     var addedLines: Int = 0
     var deletedLines: Int = 0
     var hasUncommittedChanges: Bool = false
+    var hasConflicts: Bool = false
 }
 
 enum SyncStrategy {
@@ -225,6 +227,57 @@ struct TerminalTabState: Sendable {
 struct WorktreeRemovalDraft: Identifiable, Sendable {
     let id: UUID
     let path: String
+}
+
+struct IntegrationConflictDraft: Identifiable, Sendable {
+    let repositoryID: UUID
+    let sourceWorktreeID: UUID
+    let defaultWorktreeID: UUID
+    let sourceBranch: String
+    let defaultBranch: String
+    let message: String
+
+    var id: UUID { sourceWorktreeID }
+
+    var commitMessage: String {
+        "Integrate \(sourceBranch) into \(defaultBranch)"
+    }
+}
+
+struct WorkspaceDiffSnapshot: Sendable {
+    let files: [WorkspaceDiffFile]
+
+    var hasChanges: Bool {
+        !files.isEmpty
+    }
+}
+
+struct WorkspaceDiffFile: Identifiable, Sendable {
+    let path: String
+    let status: WorkspaceDiffFileStatus
+    let patch: String
+
+    var id: String { path }
+}
+
+enum WorkspaceDiffFileStatus: String, Sendable {
+    case added
+    case modified
+    case deleted
+    case renamed
+    case copied
+    case unmerged
+    case untracked
+    case unknown
+
+    var displayName: String {
+        rawValue.capitalized
+    }
+}
+
+enum WorktreeIntegrationResult: Sendable {
+    case committed
+    case conflicts(String)
 }
 
 struct TerminalTabBookkeeping: Sendable {
@@ -432,6 +485,11 @@ enum AgentSessionPhase: Sendable {
 }
 
 extension String {
+    func stripPrefix(_ prefix: String) -> String? {
+        guard hasPrefix(prefix) else { return nil }
+        return String(dropFirst(prefix.count))
+    }
+
     var nonEmpty: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed

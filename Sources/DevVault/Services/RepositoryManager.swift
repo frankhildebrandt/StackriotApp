@@ -254,6 +254,14 @@ struct RepositoryManager {
         return branch
     }
 
+    func hasUpstreamBranch(worktreePath: URL) async throws -> Bool {
+        let result = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["-C", worktreePath.path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
+        )
+        return result.exitCode == 0
+    }
+
     private func configureRemoteIfNeeded(_ remote: RemoteExecutionContext, in bareRepositoryPath: URL) async throws {
         let result = try await CommandRunner.runCollected(
             executable: "git",

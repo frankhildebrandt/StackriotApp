@@ -151,6 +151,12 @@ extension AppModel {
                     environment: environment,
                     currentDirectory: descriptor.currentDirectoryURL?.path
                 )
+                if let stdinText = descriptor.stdinText?.nonEmpty {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(700))
+                        session.send(text: stdinText)
+                    }
+                }
                 return
             }
 
