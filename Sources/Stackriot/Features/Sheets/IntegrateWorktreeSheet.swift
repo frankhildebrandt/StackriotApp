@@ -148,7 +148,7 @@ struct IntegrateWorktreeSheet: View {
         .frame(width: 540)
         .background(.regularMaterial)
         .task {
-            isGHAvailable = await GitHubCLIService.isGHAvailable()
+            isGHAvailable = await appModel.services.gitHubCLIService.isGHAvailable()
             if !isGHAvailable || !hasGitHubRemote {
                 draft.method = .localMerge
             }
