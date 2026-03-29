@@ -77,16 +77,39 @@ final class StackriotTerminalView: LocalProcessTerminalView {
     }
 }
 
+final class TerminalSessionContainerView: NSView {
+    private weak var hostedTerminalView: StackriotTerminalView?
+
+    func host(_ terminalView: StackriotTerminalView) {
+        guard hostedTerminalView !== terminalView else { return }
+
+        hostedTerminalView?.removeFromSuperview()
+        hostedTerminalView = terminalView
+
+        terminalView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(terminalView)
+        NSLayoutConstraint.activate([
+            terminalView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            terminalView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            terminalView.topAnchor.constraint(equalTo: topAnchor),
+            terminalView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+}
+
 struct TerminalSessionView: NSViewRepresentable {
     let session: AgentTerminalSession
 
-    func makeNSView(context: Context) -> StackriotTerminalView {
-        session.view
+    func makeNSView(context: Context) -> TerminalSessionContainerView {
+        let container = TerminalSessionContainerView(frame: .zero)
+        container.host(session.view)
+        return container
     }
 
-    func updateNSView(_ nsView: StackriotTerminalView, context: Context) {
+    func updateNSView(_ nsView: TerminalSessionContainerView, context: Context) {
+        nsView.host(session.view)
         DispatchQueue.main.async {
-            nsView.window?.makeFirstResponder(nsView)
+            session.view.window?.makeFirstResponder(session.view)
         }
     }
 }

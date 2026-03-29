@@ -3,6 +3,7 @@ import SwiftUI
 
 struct TerminalTabStrip: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.modelContext) private var modelContext
 
     let repository: ManagedRepository
     let worktree: WorktreeRecord
@@ -26,6 +27,9 @@ struct TerminalTabStrip: View {
                         },
                         onClose: {
                             appModel.closeTab(run)
+                        },
+                        onCancel: {
+                            appModel.cancelRun(run, in: modelContext)
                         }
                     )
                 }

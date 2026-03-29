@@ -7,9 +7,12 @@ struct TerminalTabChip: View {
     let isRunning: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    let onCancel: () -> Void
+
+    @State private var isHoveringClose = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             if isRunning {
                 ProgressView()
                     .controlSize(.small)
@@ -20,31 +23,38 @@ struct TerminalTabChip: View {
                     .frame(width: 7, height: 7)
             }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(run.title)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                Text(run.startedAt.formatted(date: .omitted, time: .shortened))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            Text(run.title)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            if !isRunning {
-                Button {
-                    onClose()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption2.weight(.bold))
-                        .frame(width: 14, height: 14)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+            Button {
+                if isRunning { onCancel() } else { onClose() }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .frame(width: 14, height: 14)
+                    .background(
+                        Circle()
+                            .fill(isHoveringClose ? Color.primary.opacity(0.15) : Color.clear)
+                    )
+                    .foregroundStyle(isHoveringClose ? Color.primary : Color.secondary.opacity(0.5))
             }
+            .buttonStyle(.plain)
+            .onHover { isHoveringClose = $0 }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .frame(minWidth: 140, alignment: .leading)
-        .background(isSelected ? Color(nsColor: .underPageBackgroundColor) : Color.clear)
+        .frame(width: 160, alignment: .leading)
+        .background(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 5,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 5
+            )
+            .fill(isSelected ? Color(nsColor: .underPageBackgroundColor) : Color.clear)
+        )
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.2))

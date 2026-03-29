@@ -11,7 +11,6 @@ struct RunConsoleColumn: View {
 
     var body: some View {
         let worktree = appModel.selectedWorktree(for: repository)
-        let selectedRunID = worktree.flatMap { appModel.selectedTab(for: $0, in: repository)?.id }
 
         VStack(alignment: .leading, spacing: 0) {
             if let worktree {
@@ -58,7 +57,6 @@ struct RunConsoleColumn: View {
                         run: appModel.selectedTab(for: worktree, in: repository),
                         activeRunIDs: appModel.activeRunIDs
                     )
-                    .id(selectedRunID ?? worktree.id)
                 }
             } else {
                 ContentUnavailableView(
