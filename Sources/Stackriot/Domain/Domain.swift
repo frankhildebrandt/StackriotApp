@@ -30,6 +30,109 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum AIProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    case openAI
+    case anthropic
+    case openRouter
+    case ollama
+    case lmStudio
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .openAI:
+            "OpenAI"
+        case .anthropic:
+            "Anthropic"
+        case .openRouter:
+            "OpenRouter"
+        case .ollama:
+            "Ollama"
+        case .lmStudio:
+            "LM Studio"
+        }
+    }
+
+    var defaultBaseURL: String {
+        switch self {
+        case .openAI:
+            "https://api.openai.com/v1"
+        case .anthropic:
+            "https://api.anthropic.com/v1"
+        case .openRouter:
+            "https://openrouter.ai/api/v1"
+        case .ollama:
+            "http://127.0.0.1:11434"
+        case .lmStudio:
+            "http://127.0.0.1:1234/v1"
+        }
+    }
+
+    var defaultModel: String {
+        switch self {
+        case .openAI:
+            "gpt-5.4-mini"
+        case .anthropic:
+            "claude-sonnet-4-5"
+        case .openRouter:
+            "openai/gpt-5.4-mini"
+        case .ollama:
+            "llama3.2"
+        case .lmStudio:
+            "local-model"
+        }
+    }
+
+    var requiresAPIKey: Bool {
+        switch self {
+        case .openAI, .anthropic, .openRouter:
+            true
+        case .ollama, .lmStudio:
+            false
+        }
+    }
+}
+
+struct AIProviderConfiguration: Sendable, Equatable {
+    let provider: AIProviderKind
+    let apiKey: String?
+    let model: String
+    let baseURL: String
+
+    var isConfigured: Bool {
+        if provider.requiresAPIKey {
+            return apiKey?.nonEmpty != nil
+        }
+        return true
+    }
+}
+
+enum WorktreeIssueKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    case bug
+    case feature
+    case refactor
+    case chore
+
+    var id: String { rawValue }
+
+    var branchPrefix: String { rawValue }
+
+    var displayName: String { rawValue.uppercased() }
+}
+
+struct AIWorktreeNameSuggestion: Sendable, Equatable {
+    let kind: WorktreeIssueKind
+    let ticketNumber: Int?
+    let shortSummary: String
+    let branchName: String
+}
+
+struct AIRunSummary: Sendable, Equatable {
+    let title: String
+    let summary: String
+}
+
 enum RunConfigurationSource: String, Codable, CaseIterable, Identifiable, Sendable {
     case native
     case vscode
@@ -744,10 +847,15 @@ enum AppPreferences {
     static let nodeAutoUpdateEnabledKey = "node.autoUpdateEnabled"
     static let nodeAutoUpdateIntervalKey = "node.autoUpdateIntervalSeconds"
     static let nodeDefaultVersionSpecKey = "node.defaultVersionSpec"
+    static let aiProviderKey = "ai.provider"
+    static let aiAPIKeyKey = "ai.apiKey"
+    static let aiBaseURLKey = "ai.baseURL"
+    static let aiModelKey = "ai.model"
     static let defaultNodeAutoUpdateEnabled = true
     static let defaultNodeAutoUpdateInterval: Double = 21_600
     static let defaultNodeVersionSpec = "lts/*"
     static let defaultTerminalTabRetentionMode = TerminalTabRetentionMode.shortRetain
+    static let defaultAIProvider = AIProviderKind.openAI
 
     static var autoRefreshEnabled: Bool {
         let defaults = UserDefaults.standard
@@ -793,6 +901,43 @@ enum AppPreferences {
         let value = defaults.string(forKey: nodeDefaultVersionSpecKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return value?.isEmpty == false ? value! : defaultNodeVersionSpec
+    }
+
+    static var aiProvider: AIProviderKind {
+        let defaults = UserDefaults.standard
+        guard
+            let value = defaults.string(forKey: aiProviderKey),
+            let provider = AIProviderKind(rawValue: value)
+        else {
+            return defaultAIProvider
+        }
+        return provider
+    }
+
+    static var aiAPIKey: String? {
+        let defaults = UserDefaults.standard
+        return defaults.string(forKey: aiAPIKeyKey)?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+    }
+
+    static var aiBaseURL: String {
+        let defaults = UserDefaults.standard
+        let value = defaults.string(forKey: aiBaseURLKey)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.nonEmpty ?? aiProvider.defaultBaseURL
+    }
+
+    static var aiModel: String {
+        let defaults = UserDefaults.standard
+        let value = defaults.string(forKey: aiModelKey)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.nonEmpty ?? aiProvider.defaultModel
+    }
+
+    static var aiConfiguration: AIProviderConfiguration {
+        AIProviderConfiguration(
+            provider: aiProvider,
+            apiKey: aiAPIKey,
+            model: aiModel,
+            baseURL: aiBaseURL
+        )
     }
 }
 

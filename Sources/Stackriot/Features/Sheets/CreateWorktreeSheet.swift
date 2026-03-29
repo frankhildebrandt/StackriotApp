@@ -201,6 +201,19 @@ struct CreateWorktreeSheet: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
+
+                            if draft.isGeneratingSuggestedName {
+                                ProgressView("Worktree-Name wird vorgeschlagen…")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else if let details = draft.selectedIssueDetails {
+                                Button("Worktree-Namen neu vorschlagen") {
+                                    Task {
+                                        await appModel.populateSuggestedWorktreeName(from: details)
+                                    }
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(isCreating)
+                            }
                         }
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)

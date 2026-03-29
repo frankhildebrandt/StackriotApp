@@ -27,20 +27,36 @@ struct RunConsoleView: View {
                 }
 
                 if let session = appModel.terminalSession(for: run) {
-                    TerminalSessionView(session: session)
-                        .id(session.runID)
-                        .background(.black.opacity(0.92))
-                        .clipShape(Rectangle())
-                        .padding(.bottom, 12)
+                    if appModel.shouldShowAISummary(for: run) {
+                        AgentRunSummaryWindow(
+                            run: run,
+                            isSummarizing: appModel.summarizingRunIDs.contains(run.id),
+                            onClose: { appModel.dismissAISummary(for: run) }
+                        )
+                    } else {
+                        TerminalSessionView(session: session)
+                            .id(session.runID)
+                            .background(.black.opacity(0.92))
+                            .clipShape(Rectangle())
+                            .padding(.bottom, 12)
+                    }
                 } else {
-                    TextEditor(text: .constant(run.outputText))
-                        .font(.system(.body, design: .monospaced))
-                        .scrollContentBackground(.hidden)
-                        .padding(12)
-                        .background(.black.opacity(0.9))
-                        .clipShape(Rectangle())
-                        .foregroundStyle(.white)
-                        .padding(.bottom, 12)
+                    if appModel.shouldShowAISummary(for: run) {
+                        AgentRunSummaryWindow(
+                            run: run,
+                            isSummarizing: appModel.summarizingRunIDs.contains(run.id),
+                            onClose: { appModel.dismissAISummary(for: run) }
+                        )
+                    } else {
+                        TextEditor(text: .constant(run.outputText))
+                            .font(.system(.body, design: .monospaced))
+                            .scrollContentBackground(.hidden)
+                            .padding(12)
+                            .background(.black.opacity(0.9))
+                            .clipShape(Rectangle())
+                            .foregroundStyle(.white)
+                            .padding(.bottom, 12)
+                    }
                 }
             } else {
                 ContentUnavailableView("No Tab Selected", systemImage: "terminal", description: Text("Select a tab to inspect logs and exit state."))
@@ -51,4 +67,3 @@ struct RunConsoleView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
-

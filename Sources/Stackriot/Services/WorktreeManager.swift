@@ -106,7 +106,12 @@ struct WorktreeManager {
     static func normalizedWorktreeName(from value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
-        return trimmed.replacingOccurrences(of: #"\s+"#, with: "-", options: .regularExpression)
+        let normalizedSeparators = trimmed.replacingOccurrences(of: "\\", with: "/")
+        let segments = normalizedSeparators
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map { normalizedWorktreeSegment(from: String($0)) }
+            .filter { !$0.isEmpty }
+        return segments.joined(separator: "/")
     }
 
     func createWorktree(
@@ -130,7 +135,7 @@ struct WorktreeManager {
 
         let destination: URL
         if let directoryName, directoryName.nilIfBlank != nil {
-            destination = uniquePreservingDirectory(in: worktreeRoot, preferredName: directoryName)
+            destination = try uniquePreservingDirectory(in: worktreeRoot, preferredName: directoryName)
         } else {
             destination = AppPaths.uniqueDirectory(in: worktreeRoot, preferredName: trimmedBranch)
         }
@@ -245,26 +250,50 @@ struct WorktreeManager {
         return result.exitCode == 0
     }
 
-    private func uniquePreservingDirectory(in root: URL, preferredName: String) -> URL {
+    private static func normalizedWorktreeSegment(from value: String) -> String {
+        let transliterated = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "ß", with: "ss")
+            .folding(options: [.diacriticInsensitive], locale: .current)
+        let whitespaceCollapsed = transliterated.replacingOccurrences(
+            of: #"\s+"#,
+            with: "-",
+            options: .regularExpression
+        )
+        let cleaned = whitespaceCollapsed.replacingOccurrences(
+            of: #"[^A-Za-z0-9._-]+"#,
+            with: "-",
+            options: .regularExpression
+        )
+        return cleaned
+            .replacingOccurrences(of: #"-{2,}"#, with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-."))
+    }
+
+    private func uniquePreservingDirectory(in root: URL, preferredName: String) throws -> URL {
         let fileManager = FileManager.default
-        let baseName = sanitizedDirectoryName(preferredName)
-        var candidate = root.appendingPathComponent(baseName, isDirectory: true)
+        let components = sanitizedDirectoryComponents(from: preferredName)
+        let parentDirectory = components.dropLast().reduce(root) { partialResult, component in
+            partialResult.appendingPathComponent(component, isDirectory: true)
+        }
+        try fileManager.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
+
+        let baseName = components.last ?? "worktree"
+        var candidate = parentDirectory.appendingPathComponent(baseName, isDirectory: true)
         var index = 2
         while fileManager.fileExists(atPath: candidate.path) {
-            candidate = root.appendingPathComponent("\(baseName)-\(index)", isDirectory: true)
+            candidate = parentDirectory.appendingPathComponent("\(baseName)-\(index)", isDirectory: true)
             index += 1
         }
         return candidate
     }
 
-    private func sanitizedDirectoryName(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "worktree" }
-
-        return trimmed
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-            .replacingOccurrences(of: "\\", with: "-")
-            .nilIfBlank ?? "worktree"
+    private func sanitizedDirectoryComponents(from value: String) -> [String] {
+        let components = value
+            .replacingOccurrences(of: "\\", with: "/")
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map { Self.normalizedWorktreeSegment(from: String($0)) }
+            .filter { !$0.isEmpty }
+        return components.isEmpty ? ["worktree"] : components
     }
 }

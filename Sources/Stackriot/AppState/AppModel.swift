@@ -37,6 +37,8 @@ final class AppModel: @unchecked Sendable {
     var availableAgents: Set<AIAgentTool> = []
     var runningAgentWorktreeIDs: Set<UUID> = []
     var terminalTabs = TerminalTabBookkeeping()
+    var summarizingRunIDs: Set<UUID> = []
+    var dismissedAISummaryRunIDs: Set<UUID> = []
 
     let services: AppServices
     var runningProcesses: [UUID: RunningProcess] = [:]

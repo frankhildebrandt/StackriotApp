@@ -66,6 +66,7 @@ extension AppModel {
         worktreeDraft.selectedTicket = nil
         worktreeDraft.selectedIssueDetails = nil
         worktreeDraft.hasConfirmedTicket = false
+        worktreeDraft.isGeneratingSuggestedName = false
         if worktreeDraft.ticketProviderStatus?.isAvailable == true {
             worktreeDraft.issueContext = ""
         }
@@ -104,6 +105,7 @@ extension AppModel {
             worktreeDraft.selectedIssueDetails = details
             worktreeDraft.hasConfirmedTicket = true
             worktreeDraft.issueContext = compactIssueContext(for: details)
+            await populateSuggestedWorktreeName(from: details)
         } catch {
             clearWorktreeTicketSelection()
             pendingErrorMessage = error.localizedDescription
@@ -177,6 +179,20 @@ extension AppModel {
             return "#\(issue.number)"
         }
         return "#\(issue.number) \(title)"
+    }
+
+    func populateSuggestedWorktreeName(from issue: GitHubIssueDetails) async {
+        worktreeDraft.isGeneratingSuggestedName = true
+        defer { worktreeDraft.isGeneratingSuggestedName = false }
+
+        do {
+            let suggestion = try await services.aiProviderService.suggestWorktreeName(for: issue)
+            worktreeDraft.branchName = suggestion.branchName
+        } catch {
+            let fallback = services.aiProviderService.fallbackWorktreeNameSuggestion(for: issue)
+            worktreeDraft.branchName = fallback.branchName
+            pendingErrorMessage = "AI worktree suggestion failed: \(error.localizedDescription)"
+        }
     }
 
     private func persistCreatedWorktree(

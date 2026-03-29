@@ -88,6 +88,9 @@ extension AppModel {
             }
         }
         save(modelContext)
+        if run.actionKind == .aiAgent {
+            summarizeAgentRun(runID: runID)
+        }
     }
 
     func handleRunFailure(runID: UUID, message: String) {
@@ -101,6 +104,9 @@ extension AppModel {
         scheduleAutoHideIfNeeded(for: runID)
         refreshRunningAgentWorktrees()
         save(modelContext)
+        if run.actionKind == .aiAgent {
+            summarizeAgentRun(runID: runID)
+        }
     }
 
     func scheduleAutoHideIfNeeded(for runID: UUID) {
@@ -209,5 +215,49 @@ extension AppModel {
                 return run.worktree?.id
             }
         )
+    }
+
+    func dismissAISummary(for run: RunRecord) {
+        dismissedAISummaryRunIDs.insert(run.id)
+    }
+
+    func shouldShowAISummary(for run: RunRecord) -> Bool {
+        guard run.actionKind == .aiAgent else { return false }
+        guard !dismissedAISummaryRunIDs.contains(run.id) else { return false }
+        return summarizingRunIDs.contains(run.id) || run.aiSummaryText?.nonEmpty != nil
+    }
+
+    private func summarizeAgentRun(runID: UUID) {
+        guard !summarizingRunIDs.contains(runID) else { return }
+        summarizingRunIDs.insert(runID)
+        dismissedAISummaryRunIDs.remove(runID)
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.summarizingRunIDs.remove(runID) }
+            guard let run = self.runRecord(with: runID), let modelContext = self.storedModelContext else { return }
+
+            do {
+                let summary = try await self.services.aiProviderService.summarizeAgentRun(
+                    title: run.title,
+                    commandLine: run.commandLine,
+                    output: run.outputText,
+                    exitCode: run.exitCode
+                )
+                run.aiSummaryTitle = summary.title
+                run.aiSummaryText = summary.summary
+            } catch {
+                let fallback = self.services.aiProviderService.fallbackRunSummary(
+                    title: run.title,
+                    commandLine: run.commandLine,
+                    output: run.outputText,
+                    exitCode: run.exitCode
+                )
+                run.aiSummaryTitle = fallback.title
+                run.aiSummaryText = fallback.summary
+                self.pendingErrorMessage = "AI run summary failed: \(error.localizedDescription)"
+            }
+            self.save(modelContext)
+        }
     }
 }

@@ -9,6 +9,10 @@ struct SettingsView: View {
     @AppStorage(AppPreferences.autoRefreshIntervalKey) private var autoRefreshInterval = AppPreferences.defaultAutoRefreshInterval
     @AppStorage(AppPreferences.terminalTabRetentionModeKey) private var terminalTabRetentionMode = AppPreferences.defaultTerminalTabRetentionMode.rawValue
     @AppStorage(AppPreferences.nodeAutoUpdateEnabledKey) private var nodeAutoUpdateEnabled = AppPreferences.defaultNodeAutoUpdateEnabled
+    @AppStorage(AppPreferences.aiProviderKey) private var aiProvider = AppPreferences.defaultAIProvider.rawValue
+    @AppStorage(AppPreferences.aiAPIKeyKey) private var aiAPIKey = ""
+    @AppStorage(AppPreferences.aiBaseURLKey) private var aiBaseURL = ""
+    @AppStorage(AppPreferences.aiModelKey) private var aiModel = ""
     @Query(sort: \StoredSSHKey.displayName) private var sshKeys: [StoredSSHKey]
 
     @State private var isImportingKey = false
@@ -60,6 +64,32 @@ struct SettingsView: View {
                 Button("Rebuild Managed Runtime") {
                     appModel.rebuildManagedNodeRuntime()
                 }
+            }
+
+            Section("AI Provider") {
+                Picker("Provider", selection: $aiProvider) {
+                    ForEach(AIProviderKind.allCases) { provider in
+                        Text(provider.displayName).tag(provider.rawValue)
+                    }
+                }
+
+                SecureField("API key", text: $aiAPIKey)
+                    .textFieldStyle(.roundedBorder)
+
+                TextField(selectedAIProvider == .openAI ? "gpt-5.4-mini" : selectedAIProvider.defaultModel, text: $aiModel)
+                    .textFieldStyle(.roundedBorder)
+
+                TextField(selectedAIProvider.defaultBaseURL, text: $aiBaseURL)
+                    .textFieldStyle(.roundedBorder)
+
+                LabeledContent("Effective model", value: AppPreferences.aiModel)
+                LabeledContent("Effective base URL", value: AppPreferences.aiBaseURL)
+
+                Text(selectedAIProvider.requiresAPIKey
+                    ? "API-Key erforderlich. Leer lassen nutzt nur die lokale Fallback-Logik."
+                    : "Lokale Provider koennen ohne API-Key genutzt werden. Ein gesetzter Key wird trotzdem mitgesendet, falls der Endpoint ihn erwartet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("SSH Keys") {
@@ -129,6 +159,10 @@ struct SettingsView: View {
         } message: { key in
             Text("Remove \(key.displayName) from Stackriot and clear assignments from remotes?")
         }
+    }
+
+    private var selectedAIProvider: AIProviderKind {
+        AIProviderKind(rawValue: aiProvider) ?? AppPreferences.defaultAIProvider
     }
 }
 
