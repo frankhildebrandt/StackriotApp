@@ -5,7 +5,7 @@ import SwiftData
 final class WorktreeRecord {
     var id: UUID
     var branchName: String
-    var isDefaultBranchWorkspace: Bool
+    var isDefaultBranchWorkspaceRaw: Bool?
     var issueContext: String?
     var path: String
     @Transient var assignedAgentRawValue: String = AIAgentTool.none.rawValue
@@ -26,7 +26,7 @@ final class WorktreeRecord {
     ) {
         self.id = id
         self.branchName = branchName
-        self.isDefaultBranchWorkspace = isDefaultBranchWorkspace
+        self.isDefaultBranchWorkspaceRaw = isDefaultBranchWorkspace
         self.issueContext = issueContext
         self.path = path
         self.assignedAgentRawValue = assignedAgentRawValue
@@ -38,5 +38,10 @@ final class WorktreeRecord {
     var assignedAgent: AIAgentTool {
         get { AIAgentTool(rawValue: assignedAgentRawValue) ?? .none }
         set { assignedAgentRawValue = newValue.rawValue }
+    }
+
+    var isDefaultBranchWorkspace: Bool {
+        get { isDefaultBranchWorkspaceRaw ?? false }
+        set { isDefaultBranchWorkspaceRaw = newValue }
     }
 }
