@@ -457,6 +457,22 @@ struct StackriotTests {
     }
 
     @Test
+    func worktreeLifecycleAllowsSyncForActiveAndMergedBranches() {
+        let worktree = WorktreeRecord(
+            branchName: "feature/sync-lifecycle",
+            path: "/tmp/worktree-sync-lifecycle"
+        )
+
+        #expect(worktree.allowsSyncFromDefaultBranch)
+
+        worktree.lifecycleState = .merged
+        #expect(worktree.allowsSyncFromDefaultBranch)
+
+        worktree.lifecycleState = .integrating
+        #expect(!worktree.allowsSyncFromDefaultBranch)
+    }
+
+    @Test
     func backgroundNodeRefreshUpdatesStatus() async {
         let manager = NodeRuntimeManager()
         await manager.refreshDefaultRuntimeIfNeeded(force: true)
