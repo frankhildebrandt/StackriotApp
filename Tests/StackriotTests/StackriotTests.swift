@@ -158,6 +158,22 @@ struct StackriotTests {
     }
 
     @Test
+    func shellEnvironmentUsesLoginPathUnlessOverridden() async {
+        let loginPath = await ShellEnvironment.loginShellPath()
+
+        let inherited = await ShellEnvironment.resolvedEnvironment()
+        #expect(inherited["PATH"] == loginPath)
+
+        let overridden = await ShellEnvironment.resolvedEnvironment(
+            additional: ["TERM_PROGRAM": "Stackriot"],
+            overrides: ["PATH": "/custom/bin", "TERM": "xterm-256color"]
+        )
+        #expect(overridden["PATH"] == "/custom/bin")
+        #expect(overridden["TERM_PROGRAM"] == "Stackriot")
+        #expect(overridden["TERM"] == "xterm-256color")
+    }
+
+    @Test
     func generatedCommitMessageUsesFeatureSubjectAndBulletBody() {
         let message = GeneratedCommitMessage(
             summaryTitle: "Add commit action to AI agent summary",

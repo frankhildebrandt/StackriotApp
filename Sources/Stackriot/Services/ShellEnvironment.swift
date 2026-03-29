@@ -23,6 +23,16 @@ enum ShellEnvironment {
         return fallbackPath
     }
 
+    static func resolvedEnvironment(
+        additional: [String: String] = [:],
+        overrides: [String: String] = [:]
+    ) async -> [String: String] {
+        ProcessInfo.processInfo.environment
+            .merging(["PATH": await loginShellPath()]) { _, new in new }
+            .merging(additional) { _, new in new }
+            .merging(overrides) { _, new in new }
+    }
+
     private static func readLoginShellPath() async -> String? {
         let shell = ProcessInfo.processInfo.environment["SHELL"]?.nonEmpty ?? "/bin/zsh"
 
