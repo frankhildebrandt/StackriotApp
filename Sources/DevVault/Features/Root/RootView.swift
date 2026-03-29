@@ -52,16 +52,6 @@ struct RootView: View {
             appModel.selectInitialRepository(from: repositories)
             await appModel.checkAgentAvailability()
         }
-        .toolbar(content: {
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    appModel.isDiffInspectorPresented.toggle()
-                } label: {
-                    Label("Diff", systemImage: "sidebar.right")
-                }
-                .disabled(selectedRepository == nil || selectedWorktree == nil)
-            }
-        })
         .inspector(isPresented: $appModel.isDiffInspectorPresented) {
             if let repository = selectedRepository, let worktree = selectedWorktree {
                 DiffInspectorView(repository: repository, worktree: worktree)

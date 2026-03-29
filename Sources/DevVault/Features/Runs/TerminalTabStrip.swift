@@ -31,6 +31,7 @@ struct TerminalTabStrip: View {
                     .frame(height: 1)
             }
         }
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 

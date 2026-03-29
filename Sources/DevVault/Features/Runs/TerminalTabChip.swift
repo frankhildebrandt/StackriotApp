@@ -10,9 +10,9 @@ struct TerminalTabChip: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Rectangle()
+            Circle()
                 .fill(statusColor)
-                .frame(width: 3, height: 22)
+                .frame(width: 7, height: 7)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(run.title)
@@ -35,10 +35,10 @@ struct TerminalTabChip: View {
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(minWidth: 180, alignment: .leading)
-        .background(isSelected ? Color(nsColor: .windowBackgroundColor) : Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(minWidth: 140, alignment: .leading)
+        .background(isSelected ? Color(nsColor: .underPageBackgroundColor) : Color.clear)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.2))

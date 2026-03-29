@@ -36,7 +36,6 @@ struct DiffInspectorView: View {
                 .background(Color.clear)
             }
         }
-        .searchable(text: $query, placement: .toolbar, prompt: "Filter files")
         .task(id: worktree.id) {
             await reloadDiff()
         }
@@ -44,41 +43,34 @@ struct DiffInspectorView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Uncommitted Diff")
-                        .font(.title3.weight(.semibold))
-                    Text(repository.displayName)
-                        .font(.caption)
+            HStack(spacing: 8) {
+                Text(worktree.isDefaultBranchWorkspace ? "Main/Default" : worktree.branchName)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                if diffSnapshot.hasChanges {
+                    Text("\(diffSnapshot.files.count)")
+                        .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(worktree.isDefaultBranchWorkspace ? "Main/Default" : worktree.branchName)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.thinMaterial, in: Capsule())
                 }
                 Spacer()
                 Button {
-                    Task {
-                        await reloadDiff()
-                    }
+                    Task { await reloadDiff() }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: "arrow.clockwise").font(.caption)
                 }
                 .buttonStyle(.borderless)
                 .help("Refresh diff")
             }
 
-            Text(worktree.path)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-
-            if diffSnapshot.hasChanges {
-                Text("\(filteredFiles.count) of \(diffSnapshot.files.count) files")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            TextField("Filter files…", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
         }
-        .padding(16)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(.thinMaterial)
     }
 
