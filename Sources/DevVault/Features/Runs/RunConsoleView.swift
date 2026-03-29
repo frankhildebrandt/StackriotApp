@@ -13,11 +13,6 @@ struct RunConsoleView: View {
             if let run {
                 HStack {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(run.title)
-                            .font(.title3.weight(.semibold))
-                        Text(run.commandLine)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
                     Spacer()
                     if activeRunIDs.contains(run.id) {
