@@ -15,13 +15,13 @@ struct RunConsoleView: View {
                     VStack(alignment: .leading, spacing: 6) {
                     }
                     Spacer()
-                    if activeRunIDs.contains(run.id) {
+                    if activeRunIDs.contains(run.id), appModel.terminalSession(for: run) == nil {
                         Button("Cancel", role: .destructive) {
                             appModel.cancelRun(run, in: modelContext)
                         }
                     } else {
-                        Button("Close") {
-                            appModel.closeTab(run)
+                        Button("Close", role: activeRunIDs.contains(run.id) ? .destructive : nil) {
+                            appModel.requestCloseTab(run, in: modelContext)
                         }
                     }
                 }

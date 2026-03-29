@@ -2,6 +2,31 @@ import Foundation
 import SwiftData
 
 extension AppModel {
+    func requestCloseTab(_ run: RunRecord, in modelContext: ModelContext) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            if let draft = await self.terminalCloseConfirmation(for: run) {
+                self.pendingTerminalCloseConfirmation = draft
+                return
+            }
+
+            self.forceCloseTab(run, in: modelContext)
+        }
+    }
+
+    func confirmPendingTerminalClose(in modelContext: ModelContext) {
+        guard
+            let runID = pendingTerminalCloseConfirmation?.runID,
+            let run = runRecord(with: runID)
+        else {
+            pendingTerminalCloseConfirmation = nil
+            return
+        }
+
+        forceCloseTab(run, in: modelContext)
+    }
+
     func cancelRun(_ run: RunRecord, in modelContext: ModelContext) {
         if let session = terminalSessions[run.id] {
             session.terminate()
@@ -91,6 +116,9 @@ extension AppModel {
         if run.actionKind == .aiAgent {
             summarizeAgentRun(runID: runID)
         }
+        if forceClosingTerminalRunIDs.remove(runID) != nil {
+            terminalSessions[runID] = nil
+        }
     }
 
     func handleRunFailure(runID: UUID, message: String) {
@@ -106,6 +134,9 @@ extension AppModel {
         save(modelContext)
         if run.actionKind == .aiAgent {
             summarizeAgentRun(runID: runID)
+        }
+        if forceClosingTerminalRunIDs.remove(runID) != nil {
+            terminalSessions[runID] = nil
         }
     }
 
@@ -259,5 +290,53 @@ extension AppModel {
             }
             self.save(modelContext)
         }
+    }
+
+    private func forceCloseTab(_ run: RunRecord, in modelContext: ModelContext) {
+        pendingTerminalCloseConfirmation = nil
+        cancelAutoHide(for: run.id)
+        terminalTabs.hide(runID: run.id)
+
+        if let session = terminalSessions[run.id] {
+            if activeRunIDs.contains(run.id) {
+                forceClosingTerminalRunIDs.insert(run.id)
+                session.forceTerminate()
+            } else {
+                session.forceTerminate()
+                terminalSessions[run.id] = nil
+            }
+            return
+        }
+
+        if activeRunIDs.contains(run.id) {
+            cancelRun(run, in: modelContext)
+            return
+        }
+
+        terminalSessions[run.id] = nil
+    }
+
+    private func terminalCloseConfirmation(for run: RunRecord) async -> TerminalCloseConfirmationDraft? {
+        guard activeRunIDs.contains(run.id) else { return nil }
+
+        if run.actionKind == .aiAgent {
+            return TerminalCloseConfirmationDraft(
+                runID: run.id,
+                title: "Agent schließen?",
+                message: "Der Agent läuft noch. Schließen beendet den Agenten sofort und killt die laufende Session."
+            )
+        }
+
+        guard let session = terminalSessions[run.id] else { return nil }
+        let descendants = await session.runningDescendantProcesses()
+        guard !descendants.isEmpty else { return nil }
+
+        let preview = descendants.prefix(3).joined(separator: ", ")
+        let suffix = descendants.count > 3 ? " und weitere" : ""
+        return TerminalCloseConfirmationDraft(
+            runID: run.id,
+            title: "Terminal mit laufendem Prozess schließen?",
+            message: "Unter dieser Shell laufen noch Prozesse (\(preview)\(suffix)). Schließen beendet die Shell und alle Unterprozesse sofort."
+        )
     }
 }

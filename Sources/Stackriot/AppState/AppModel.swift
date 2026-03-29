@@ -28,6 +28,7 @@ final class AppModel: @unchecked Sendable {
     var pendingRepositoryDeletionID: UUID?
     var pendingNamespaceDeletionID: UUID?
     var pendingProjectDeletionID: UUID?
+    var pendingTerminalCloseConfirmation: TerminalCloseConfirmationDraft?
     var publishDraft = PublishBranchDraft()
     var integrationDraft = IntegrationDraft()
     var nodeRuntimeStatus = NodeRuntimeStatusSnapshot(
@@ -46,6 +47,8 @@ final class AppModel: @unchecked Sendable {
     var terminalSessions: [UUID: AgentTerminalSession] = [:]
     @ObservationIgnored
     var terminalTabAutoHideTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored
+    var forceClosingTerminalRunIDs: Set<UUID> = []
     @ObservationIgnored
     var prMonitoringTasks: [UUID: Task<Void, Never>] = [:]
     var storedModelContext: ModelContext?
@@ -203,6 +206,10 @@ final class AppModel: @unchecked Sendable {
         terminalTabs.hide(runID: run.id)
         terminalSessions[run.id]?.terminate()
         terminalSessions[run.id] = nil
+    }
+
+    func clearPendingTerminalCloseConfirmation() {
+        pendingTerminalCloseConfirmation = nil
     }
 
     func reopenTab(_ run: RunRecord) {
