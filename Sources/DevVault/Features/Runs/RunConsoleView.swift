@@ -34,20 +34,25 @@ struct RunConsoleView: View {
                 if let session = appModel.terminalSession(for: run) {
                     TerminalSessionView(session: session)
                         .id(session.runID)
-                        .background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .background(.black.opacity(0.92))
+                        .clipShape(Rectangle())
+                        .padding(.bottom, 12)
                 } else {
                     TextEditor(text: .constant(run.outputText))
                         .font(.system(.body, design: .monospaced))
                         .scrollContentBackground(.hidden)
                         .padding(12)
-                        .background(.black.opacity(0.9), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .background(.black.opacity(0.9))
+                        .clipShape(Rectangle())
                         .foregroundStyle(.white)
+                        .padding(.bottom, 12)
                 }
             } else {
                 ContentUnavailableView("No Tab Selected", systemImage: "terminal", description: Text("Select a tab to inspect logs and exit state."))
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }

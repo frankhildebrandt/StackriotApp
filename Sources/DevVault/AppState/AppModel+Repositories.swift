@@ -3,11 +3,29 @@ import SwiftData
 
 extension AppModel {
     func migrateLegacyRepositoriesIfNeeded(in modelContext: ModelContext) {
+        let defaultNamespace = defaultNamespace(in: modelContext)
         let descriptor = FetchDescriptor<ManagedRepository>()
         guard let repositories = try? modelContext.fetch(descriptor) else { return }
         var didChange = false
 
-        for repository in repositories where repository.remotes.isEmpty {
+        for repository in repositories {
+            if repository.namespace == nil {
+                repository.namespace = defaultNamespace
+                didChange = true
+            }
+
+            if let project = repository.project {
+                if project.namespace == nil {
+                    project.namespace = repository.namespace
+                    project.updatedAt = .now
+                    didChange = true
+                } else if project.namespace?.id != repository.namespace?.id {
+                    repository.project = nil
+                    didChange = true
+                }
+            }
+
+            guard repository.remotes.isEmpty else { continue }
             guard
                 let remoteURL = repository.remoteURL?.trimmingCharacters(in: .whitespacesAndNewlines),
                 let canonicalURL = RepositoryManager.canonicalRemoteURL(from: remoteURL)
@@ -28,6 +46,10 @@ extension AppModel {
 
         if didChange {
             save(modelContext)
+        }
+
+        if selectedNamespaceID == nil {
+            selectedNamespaceID = defaultNamespace.id
         }
     }
 
@@ -55,7 +77,8 @@ extension AppModel {
                 displayName: info.displayName,
                 remoteURL: rawRemote,
                 bareRepositoryPath: info.bareRepositoryPath.path,
-                defaultBranch: info.defaultBranch
+                defaultBranch: info.defaultBranch,
+                namespace: selectedNamespace(in: modelContext) ?? defaultNamespace(in: modelContext)
             )
 
             let remote = RepositoryRemote(
@@ -73,6 +96,7 @@ extension AppModel {
 
             _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
 
+            selectedNamespaceID = repository.namespace?.id
             selectedRepositoryID = repository.id
             isCloneSheetPresented = false
             await refresh(repository, in: modelContext)
@@ -170,5 +194,12 @@ extension AppModel {
             ActionTemplateRecord(kind: .openIDE, title: "Open in VS Code", payload: SupportedIDE.vscode.rawValue, repository: repository),
             ActionTemplateRecord(kind: .installDependencies, title: "Install dependencies", payload: DependencyInstallMode.install.rawValue, repository: repository),
         ]
+    }
+
+    private func selectedNamespace(in modelContext: ModelContext) -> RepositoryNamespace? {
+        if let selectedNamespaceID, let namespace = namespaceRecord(with: selectedNamespaceID) {
+            return namespace
+        }
+        return fetchDefaultNamespace(in: modelContext)
     }
 }

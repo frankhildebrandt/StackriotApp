@@ -89,6 +89,22 @@ extension AppModel {
         }
     }
 
+    func runGitPull(in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) async {
+        let descriptor = CommandExecutionDescriptor(
+            title: "git pull",
+            actionKind: .gitOperation,
+            executable: "git",
+            arguments: ["pull"],
+            displayCommandLine: nil,
+            currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+            repositoryID: repository.id,
+            worktreeID: worktree.id,
+            runtimeRequirement: nil,
+            stdinText: nil
+        )
+        startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+    }
+
     func checkAgentAvailability() async {
         availableAgents = await services.agentManager.checkAvailability()
     }

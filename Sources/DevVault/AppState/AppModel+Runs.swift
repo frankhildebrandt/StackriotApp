@@ -81,6 +81,11 @@ extension AppModel {
         terminalTabs.markCompleted(runID: runID)
         scheduleAutoHideIfNeeded(for: runID)
         refreshRunningAgentWorktrees()
+        if run.actionKind == .gitOperation, let repository = run.repository {
+            Task { [weak self] in
+                await self?.refreshWorktreeStatuses(for: repository)
+            }
+        }
         save(modelContext)
     }
 

@@ -2,6 +2,8 @@ import SwiftData
 
 enum DevVaultModelContainer {
     static let persistentModelTypes: [any PersistentModel.Type] = [
+        RepositoryNamespace.self,
+        RepositoryProject.self,
         ManagedRepository.self,
         RepositoryRemote.self,
         StoredSSHKey.self,

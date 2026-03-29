@@ -4,19 +4,48 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
+    @Query private var namespaceProjects: [RepositoryProject]
+    @Query private var namespaces: [RepositoryNamespace]
     @Query(sort: \ManagedRepository.displayName) private var repositories: [ManagedRepository]
 
     var body: some View {
         @Bindable var appModel = appModel
-        let selectedRepository = appModel.repository(for: repositories)
+        let selectedNamespace = appModel.namespace(for: namespaces)
+        let visibleRepositories = appModel.visibleRepositories(from: repositories, in: selectedNamespace)
+        let selectedRepository = appModel.repository(for: visibleRepositories)
         let selectedWorktree = selectedRepository.flatMap { appModel.selectedWorktree(for: $0) }
 
         NavigationSplitView {
             SidebarView(
-                repositories: repositories,
+                namespaces: namespaces,
+                projects: namespaceProjects,
+                currentNamespace: selectedNamespace,
+                repositories: visibleRepositories,
+                selectedNamespaceID: $appModel.selectedNamespaceID,
                 selectedRepositoryID: $appModel.selectedRepositoryID,
                 refreshingRepositoryIDs: appModel.refreshingRepositoryIDs,
                 isAgentRunningForRepository: appModel.isAgentRunning(forRepository:),
+                onSelectNamespace: appModel.selectNamespace,
+                onCreateNamespace: {
+                    appModel.presentNamespaceEditor()
+                },
+                onEditNamespace: appModel.presentNamespaceEditor,
+                onDeleteNamespace: appModel.requestNamespaceDeletion,
+                onCreateProject: { namespace in
+                    appModel.presentProjectEditor(in: namespace)
+                },
+                onEditProject: { project in
+                    if let namespace = project.namespace {
+                        appModel.presentProjectEditor(in: namespace, project: project)
+                    }
+                },
+                onMoveProject: { project, namespace in
+                    appModel.moveProject(project, to: namespace, in: modelContext)
+                },
+                onDeleteProject: appModel.requestProjectDeletion,
+                onAssignRepository: { repository, namespace, project in
+                    appModel.assignRepository(repository, to: namespace, project: project, in: modelContext)
+                },
                 onAddRepository: appModel.presentCloneSheet,
                 onRefreshRepository: { repository in
                     Task {
@@ -49,8 +78,13 @@ struct RootView: View {
         }
         .task {
             appModel.configure(modelContext: modelContext)
-            appModel.selectInitialRepository(from: repositories)
             await appModel.checkAgentAvailability()
+        }
+        .task(id: namespaces.map(\.id)) {
+            appModel.selectInitialNamespace(from: namespaces)
+        }
+        .task(id: visibleRepositories.map(\.id)) {
+            appModel.selectInitialRepository(from: visibleRepositories)
         }
         .inspector(isPresented: $appModel.isDiffInspectorPresented) {
             if let repository = selectedRepository, let worktree = selectedWorktree {
@@ -65,8 +99,14 @@ struct RootView: View {
         .sheet(isPresented: $appModel.isCloneSheetPresented) {
             CloneRepositorySheet()
         }
+        .sheet(item: $appModel.namespaceEditorDraft) { draft in
+            NamespaceEditorSheet(draft: draft)
+        }
+        .sheet(item: $appModel.projectEditorDraft) { draft in
+            ProjectEditorSheet(draft: draft)
+        }
         .sheet(isPresented: $appModel.isWorktreeSheetPresented) {
-            if let repository = appModel.repository(for: repositories) {
+            if let repository = appModel.repository(for: visibleRepositories) {
                 CreateWorktreeSheet(repository: repository)
             }
         }
@@ -128,6 +168,54 @@ struct RootView: View {
                 let repository = appModel.repositoryRecord(with: repositoryID)
             {
                 Text("This removes the bare repository and all associated worktrees for \(repository.displayName).")
+            }
+        }
+        .confirmationDialog("Delete namespace?", isPresented: Binding(
+            get: { appModel.pendingNamespaceDeletionID != nil },
+            set: { newValue in
+                if !newValue {
+                    appModel.clearNamespaceDeletionRequest()
+                }
+            }
+        )) {
+            if
+                let namespaceID = appModel.pendingNamespaceDeletionID,
+                let namespace = appModel.namespaceRecord(with: namespaceID)
+            {
+                Button("Delete Namespace", role: .destructive) {
+                    appModel.deleteNamespace(namespace, in: modelContext)
+                }
+            }
+        } message: {
+            if
+                let namespaceID = appModel.pendingNamespaceDeletionID,
+                let namespace = appModel.namespaceRecord(with: namespaceID)
+            {
+                Text("Projects in \(namespace.name) are removed and all contained repositories move to \(AppModel.defaultNamespaceName).")
+            }
+        }
+        .confirmationDialog("Delete project?", isPresented: Binding(
+            get: { appModel.pendingProjectDeletionID != nil },
+            set: { newValue in
+                if !newValue {
+                    appModel.clearProjectDeletionRequest()
+                }
+            }
+        )) {
+            if
+                let projectID = appModel.pendingProjectDeletionID,
+                let project = appModel.projectRecord(with: projectID)
+            {
+                Button("Delete Project", role: .destructive) {
+                    appModel.deleteProject(project, in: modelContext)
+                }
+            }
+        } message: {
+            if
+                let projectID = appModel.pendingProjectDeletionID,
+                let project = appModel.projectRecord(with: projectID)
+            {
+                Text("Repositories in \(project.name) move to \(AppModel.defaultNamespaceName) without a project.")
             }
         }
         .alert("DevVault", isPresented: Binding(

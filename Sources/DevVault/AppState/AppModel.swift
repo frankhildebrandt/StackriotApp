@@ -5,10 +5,15 @@ import SwiftUI
 @MainActor
 @Observable
 final class AppModel: @unchecked Sendable {
+    static let defaultNamespaceName = "Default Namespace"
+
+    var selectedNamespaceID: UUID?
     var selectedRepositoryID: UUID?
     var selectedWorktreeIDsByRepository: [UUID: UUID] = [:]
     var cloneDraft = CloneRepositoryDraft()
     var worktreeDraft = WorktreeDraft()
+    var namespaceEditorDraft: NamespaceEditorDraft?
+    var projectEditorDraft: ProjectEditorDraft?
     var pendingErrorMessage: String?
     var worktreeStatuses: [UUID: WorktreeStatus] = [:]
     var worktreePendingMergeOfferID: UUID?
@@ -20,6 +25,8 @@ final class AppModel: @unchecked Sendable {
     var isDiffInspectorPresented = false
     var remoteManagementRepositoryID: UUID?
     var pendingRepositoryDeletionID: UUID?
+    var pendingNamespaceDeletionID: UUID?
+    var pendingProjectDeletionID: UUID?
     var publishDraft = PublishBranchDraft()
     var nodeRuntimeStatus = NodeRuntimeStatusSnapshot(
         runtimeRootPath: AppPaths.nodeRuntimeRoot.path,
@@ -58,10 +65,21 @@ final class AppModel: @unchecked Sendable {
         }
     }
 
+    func selectInitialNamespace(from namespaces: [RepositoryNamespace]) {
+        let preferred = namespaces.first(where: { $0.id == selectedNamespaceID })
+        let fallback = namespaces.first(where: \.isDefault) ?? namespaces.first
+        selectedNamespaceID = preferred?.id ?? fallback?.id
+    }
+
     func selectInitialRepository(from repositories: [ManagedRepository]) {
-        if selectedRepositoryID == nil {
-            selectedRepositoryID = repositories.first?.id
-        }
+        let currentSelectionVisible = repositories.contains(where: { $0.id == selectedRepositoryID })
+        selectedRepositoryID = currentSelectionVisible ? selectedRepositoryID : repositories.first?.id
+    }
+
+    func namespace(for namespaces: [RepositoryNamespace]) -> RepositoryNamespace? {
+        namespaces.first(where: { $0.id == selectedNamespaceID })
+            ?? namespaces.first(where: \.isDefault)
+            ?? namespaces.first
     }
 
     func repository(for repositories: [ManagedRepository]) -> ManagedRepository? {
@@ -71,6 +89,18 @@ final class AppModel: @unchecked Sendable {
     func selectedRepository() -> ManagedRepository? {
         guard let repositoryID = selectedRepositoryID else { return nil }
         return repositoryRecord(with: repositoryID)
+    }
+
+    func namespaceRecord(with id: UUID) -> RepositoryNamespace? {
+        guard let modelContext = storedModelContext else { return nil }
+        let descriptor = FetchDescriptor<RepositoryNamespace>(predicate: #Predicate { $0.id == id })
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    func projectRecord(with id: UUID) -> RepositoryProject? {
+        guard let modelContext = storedModelContext else { return nil }
+        let descriptor = FetchDescriptor<RepositoryProject>(predicate: #Predicate { $0.id == id })
+        return try? modelContext.fetch(descriptor).first
     }
 
     func repositoryRecord(with id: UUID) -> ManagedRepository? {

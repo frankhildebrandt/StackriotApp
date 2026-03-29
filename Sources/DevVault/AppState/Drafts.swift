@@ -21,6 +21,26 @@ struct PublishBranchDraft {
     var remoteName = ""
 }
 
+enum NameEditorMode {
+    case create
+    case rename
+}
+
+struct NamespaceEditorDraft: Identifiable {
+    var id = UUID()
+    var mode: NameEditorMode = .create
+    var namespaceID: UUID?
+    var name = ""
+}
+
+struct ProjectEditorDraft: Identifiable {
+    var id = UUID()
+    var mode: NameEditorMode = .create
+    var namespaceID: UUID?
+    var projectID: UUID?
+    var name = ""
+}
+
 extension String {
     var nilIfBlank: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)

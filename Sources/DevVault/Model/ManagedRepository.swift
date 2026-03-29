@@ -13,6 +13,8 @@ final class ManagedRepository {
     var lastFetchedAt: Date?
     var statusRawValue: String
     var lastErrorMessage: String?
+    var namespace: RepositoryNamespace?
+    var project: RepositoryProject?
     @Relationship(deleteRule: .cascade, inverse: \RepositoryRemote.repository)
     var remotes: [RepositoryRemote]
     @Relationship(deleteRule: .cascade, inverse: \WorktreeRecord.repository)
@@ -32,7 +34,9 @@ final class ManagedRepository {
         updatedAt: Date = .now,
         lastFetchedAt: Date? = nil,
         status: RepositoryHealth = .ready,
-        lastErrorMessage: String? = nil
+        lastErrorMessage: String? = nil,
+        namespace: RepositoryNamespace? = nil,
+        project: RepositoryProject? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -44,6 +48,8 @@ final class ManagedRepository {
         self.lastFetchedAt = lastFetchedAt
         self.statusRawValue = status.rawValue
         self.lastErrorMessage = lastErrorMessage
+        self.namespace = namespace
+        self.project = project
         self.remotes = []
         self.worktrees = []
         self.actionTemplates = []

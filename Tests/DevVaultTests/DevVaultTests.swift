@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import Testing
 @testable import DevVault
 
@@ -512,6 +513,132 @@ struct DevVaultTests {
         #expect(!material.privateKeyData.isEmpty)
     }
 
+    @MainActor
+    @Test
+    func namespaceMigrationCreatesDefaultNamespaceAndAssignsLegacyRepositories() throws {
+        let modelContext = try makeInMemoryModelContext()
+        let repository = makeRepository(name: "Legacy")
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+
+        appModel.migrateLegacyRepositoriesIfNeeded(in: modelContext)
+
+        let namespaces = appModel.namespaces(in: modelContext)
+        #expect(namespaces.count == 1)
+        #expect(namespaces.first?.isDefault == true)
+        #expect(namespaces.first?.name == AppModel.defaultNamespaceName)
+        #expect(repository.namespace?.id == namespaces.first?.id)
+        #expect(appModel.selectedNamespaceID == namespaces.first?.id)
+    }
+
+    @MainActor
+    @Test
+    func assignRepositoryKeepsNamespaceAndProjectConsistent() throws {
+        let modelContext = try makeInMemoryModelContext()
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+
+        let defaultNamespace = appModel.defaultNamespace(in: modelContext)
+        let workspaceNamespace = RepositoryNamespace(name: "Workspace", sortOrder: 1)
+        let project = RepositoryProject(name: "Inbox", namespace: workspaceNamespace)
+        let repository = makeRepository(name: "Sample", namespace: defaultNamespace)
+
+        modelContext.insert(workspaceNamespace)
+        modelContext.insert(project)
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        appModel.assignRepository(repository, to: workspaceNamespace, project: project, in: modelContext)
+
+        #expect(repository.namespace?.id == workspaceNamespace.id)
+        #expect(repository.project?.id == project.id)
+        #expect(repository.project?.namespace?.id == workspaceNamespace.id)
+    }
+
+    @MainActor
+    @Test
+    func movingProjectUpdatesContainedRepositoriesToTargetNamespace() throws {
+        let modelContext = try makeInMemoryModelContext()
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+
+        let sourceNamespace = RepositoryNamespace(name: "Source", sortOrder: 1)
+        let targetNamespace = RepositoryNamespace(name: "Target", sortOrder: 2)
+        let project = RepositoryProject(name: "Backend", namespace: sourceNamespace)
+        let repository = makeRepository(name: "API", namespace: sourceNamespace, project: project)
+
+        modelContext.insert(sourceNamespace)
+        modelContext.insert(targetNamespace)
+        modelContext.insert(project)
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        appModel.moveProject(project, to: targetNamespace, in: modelContext)
+
+        #expect(project.namespace?.id == targetNamespace.id)
+        #expect(repository.namespace?.id == targetNamespace.id)
+        #expect(repository.project?.id == project.id)
+    }
+
+    @MainActor
+    @Test
+    func deletingProjectMovesRepositoriesIntoDefaultNamespace() throws {
+        let modelContext = try makeInMemoryModelContext()
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+
+        let defaultNamespace = appModel.defaultNamespace(in: modelContext)
+        let workspaceNamespace = RepositoryNamespace(name: "Workspace", sortOrder: 1)
+        let project = RepositoryProject(name: "Client", namespace: workspaceNamespace)
+        let repository = makeRepository(name: "App", namespace: workspaceNamespace, project: project)
+
+        modelContext.insert(workspaceNamespace)
+        modelContext.insert(project)
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        appModel.deleteProject(project, in: modelContext)
+
+        #expect(repository.namespace?.id == defaultNamespace.id)
+        #expect(repository.project == nil)
+        let projects = try modelContext.fetch(FetchDescriptor<RepositoryProject>())
+        #expect(!projects.contains(where: { $0.id == project.id }))
+    }
+
+    @MainActor
+    @Test
+    func deletingNamespaceMovesDirectAndProjectRepositoriesToDefaultNamespace() throws {
+        let modelContext = try makeInMemoryModelContext()
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+
+        let defaultNamespace = appModel.defaultNamespace(in: modelContext)
+        let workspaceNamespace = RepositoryNamespace(name: "Workspace", sortOrder: 1)
+        let project = RepositoryProject(name: "Services", namespace: workspaceNamespace)
+        let directRepository = makeRepository(name: "Direct", namespace: workspaceNamespace)
+        let groupedRepository = makeRepository(name: "Grouped", namespace: workspaceNamespace, project: project)
+
+        modelContext.insert(workspaceNamespace)
+        modelContext.insert(project)
+        modelContext.insert(directRepository)
+        modelContext.insert(groupedRepository)
+        try modelContext.save()
+
+        appModel.deleteNamespace(workspaceNamespace, in: modelContext)
+
+        #expect(directRepository.namespace?.id == defaultNamespace.id)
+        #expect(directRepository.project == nil)
+        #expect(groupedRepository.namespace?.id == defaultNamespace.id)
+        #expect(groupedRepository.project == nil)
+        let namespaces = try modelContext.fetch(FetchDescriptor<RepositoryNamespace>())
+        let projects = try modelContext.fetch(FetchDescriptor<RepositoryProject>())
+        #expect(!namespaces.contains(where: { $0.id == workspaceNamespace.id }))
+        #expect(!projects.contains(where: { $0.id == project.id }))
+    }
+
     private func createSeededRemote(named name: String) async throws -> (root: URL, remote: URL) {
         let origin = try temporaryDirectory(named: name)
         let remote = origin.appendingPathComponent("\(name).git")
@@ -554,4 +681,34 @@ struct DevVaultTests {
         #expect(result.exitCode == 0, "git \(arguments.joined(separator: " ")) failed: \(result.stderr)")
     }
 
+    @MainActor
+    private func makeInMemoryModelContext() throws -> ModelContext {
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: RepositoryNamespace.self,
+            RepositoryProject.self,
+            ManagedRepository.self,
+            RepositoryRemote.self,
+            StoredSSHKey.self,
+            WorktreeRecord.self,
+            ActionTemplateRecord.self,
+            RunRecord.self,
+            configurations: configuration
+        )
+        return ModelContext(container)
+    }
+
+    private func makeRepository(
+        name: String,
+        namespace: RepositoryNamespace? = nil,
+        project: RepositoryProject? = nil
+    ) -> ManagedRepository {
+        ManagedRepository(
+            displayName: name,
+            bareRepositoryPath: "/tmp/\(name)",
+            defaultBranch: "main",
+            namespace: namespace,
+            project: project
+        )
+    }
 }
