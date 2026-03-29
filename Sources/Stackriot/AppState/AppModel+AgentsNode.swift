@@ -160,6 +160,28 @@ extension AppModel {
             // If a prompt is provided, prefer the tool's dedicated non-interactive command when one
             // exists. Only fall back to PTY stdin injection for tools that lack an automation mode.
             let promptText = initialPrompt?.nonEmpty
+            if let promptText, tool == .codex {
+                let descriptor = CommandExecutionDescriptor(
+                    title: tool.displayName,
+                    actionKind: .aiAgent,
+                    showsAgentIndicator: true,
+                    executable: "codex",
+                    arguments: ["exec", "--full-auto", "--json", "--color", "never", promptText],
+                    displayCommandLine: "codex exec --full-auto --json --color never \(promptText.shellEscaped)",
+                    currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                    repositoryID: repository.id,
+                    worktreeID: worktree.id,
+                    runtimeRequirement: nil,
+                    stdinText: nil,
+                    environment: [:],
+                    usesTerminalSession: false,
+                    outputInterpreter: .codexExecJSONL
+                )
+                startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+                refreshRunningAgentWorktrees()
+                return
+            }
+
             let shellCommand: String
             let stdinText: String?
             if let prompt = promptText {

@@ -60,6 +60,8 @@ final class AppModel: @unchecked Sendable {
     var delegatedAgentRunIDs: Set<UUID> = []
     @ObservationIgnored
     var prMonitoringTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored
+    var codexExecOutputParsers: [UUID: CodexExecJSONLParser] = [:]
     var storedModelContext: ModelContext?
     var autoRefreshTask: Task<Void, Never>?
     var nodeRuntimeRefreshTask: Task<Void, Never>?

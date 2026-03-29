@@ -598,6 +598,8 @@ struct CommandExecutionDescriptor: Sendable {
     let runtimeRequirement: NodeRuntimeRequirement?
     let stdinText: String?
     let environment: [String: String]
+    let usesTerminalSession: Bool
+    let outputInterpreter: RunOutputInterpreterKind?
 
     init(
         title: String,
@@ -611,7 +613,9 @@ struct CommandExecutionDescriptor: Sendable {
         worktreeID: UUID? = nil,
         runtimeRequirement: NodeRuntimeRequirement? = nil,
         stdinText: String? = nil,
-        environment: [String: String] = [:]
+        environment: [String: String] = [:],
+        usesTerminalSession: Bool = true,
+        outputInterpreter: RunOutputInterpreterKind? = nil
     ) {
         self.title = title
         self.actionKind = actionKind
@@ -625,7 +629,13 @@ struct CommandExecutionDescriptor: Sendable {
         self.runtimeRequirement = runtimeRequirement
         self.stdinText = stdinText
         self.environment = environment
+        self.usesTerminalSession = usesTerminalSession
+        self.outputInterpreter = outputInterpreter
     }
+}
+
+enum RunOutputInterpreterKind: String, Codable, Sendable {
+    case codexExecJSONL
 }
 
 struct RemoteExecutionContext: Sendable {

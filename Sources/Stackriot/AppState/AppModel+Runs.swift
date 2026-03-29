@@ -64,6 +64,9 @@ extension AppModel {
         run.outputText = "$ \(commandLine)\n"
         repository.runs.append(run)
         modelContext.insert(run)
+        if descriptor.outputInterpreter == .codexExecJSONL {
+            codexExecOutputParsers[run.id] = CodexExecJSONLParser()
+        }
 
         do {
             try modelContext.save()
@@ -93,7 +96,11 @@ extension AppModel {
 
     func handleRunOutput(runID: UUID, chunk: String) {
         guard let run = runRecord(with: runID) else { return }
-        run.outputText += chunk
+        if let parser = codexExecOutputParsers[runID] {
+            run.outputText += parser.consume(chunk).renderedText
+        } else {
+            run.outputText += chunk
+        }
         guard
             run.actionKind == .aiAgent,
             let repositoryID = run.repository?.id,
@@ -109,12 +116,14 @@ extension AppModel {
 
     func handleRunTermination(runID: UUID, exitCode: Int32, wasCancelled: Bool) {
         guard let run = runRecord(with: runID), let modelContext = storedModelContext else { return }
+        flushBufferedRunOutputIfNeeded(runID: runID)
         run.endedAt = .now
         run.exitCode = Int(exitCode)
         run.status = wasCancelled ? .cancelled : (exitCode == 0 ? .succeeded : .failed)
         activeRunIDs.remove(runID)
         delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
+        codexExecOutputParsers.removeValue(forKey: runID)
         terminalTabs.markCompleted(runID: runID)
         scheduleAutoHideIfNeeded(for: runID)
         refreshRunningAgentWorktrees()
@@ -134,12 +143,14 @@ extension AppModel {
 
     func handleRunFailure(runID: UUID, message: String) {
         guard let run = runRecord(with: runID), let modelContext = storedModelContext else { return }
+        flushBufferedRunOutputIfNeeded(runID: runID)
         run.outputText += "\n\(message)\n"
         run.endedAt = .now
         run.status = .failed
         activeRunIDs.remove(runID)
         delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
+        codexExecOutputParsers.removeValue(forKey: runID)
         terminalTabs.markCompleted(runID: runID)
         scheduleAutoHideIfNeeded(for: runID)
         refreshRunningAgentWorktrees()
@@ -183,7 +194,7 @@ extension AppModel {
 
     func launchRun(runID: UUID, descriptor: CommandExecutionDescriptor) async {
         do {
-            if descriptor.actionKind == .aiAgent {
+            if descriptor.actionKind == .aiAgent && descriptor.usesTerminalSession {
                 let environment = ProcessInfo.processInfo.environment.merging(
                     [
                         "PATH": await ShellEnvironment.loginShellPath(),
@@ -307,6 +318,11 @@ extension AppModel {
             }
             self.save(modelContext)
         }
+    }
+
+    private func flushBufferedRunOutputIfNeeded(runID: UUID) {
+        guard let run = runRecord(with: runID), let parser = codexExecOutputParsers[runID] else { return }
+        run.outputText += parser.finish().renderedText
     }
 
     private func forceCloseTab(_ run: RunRecord, in modelContext: ModelContext) {
