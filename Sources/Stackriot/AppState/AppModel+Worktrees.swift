@@ -224,14 +224,24 @@ extension AppModel {
             let worktreePath = worktree.path
             let repositoryID = repository.id
             let bareRepositoryPath = repository.bareRepositoryPath
-            let remainingWorktreeID = repository.worktrees
-                .filter { $0.id != worktreeID }
-                .sorted(by: { $0.createdAt > $1.createdAt })
-                .first?
-                .id
-            let runIDsForWorktree = repository.runs
-                .filter { $0.worktree?.id == worktreeID }
-                .map(\.id)
+            let remainingWorktreeID = try modelContext.fetch(
+                FetchDescriptor<WorktreeRecord>(
+                    predicate: #Predicate {
+                        $0.repository?.id == repositoryID && $0.id != worktreeID
+                    }
+                )
+            )
+            .sorted(by: { $0.createdAt > $1.createdAt })
+            .first?
+            .id
+            let runIDsForWorktree = try modelContext.fetch(
+                FetchDescriptor<RunRecord>(
+                    predicate: #Predicate {
+                        $0.repository?.id == repositoryID && $0.worktree?.id == worktreeID
+                    }
+                )
+            )
+            .map(\.id)
 
             try await services.worktreeManager.removeWorktree(
                 bareRepositoryPath: URL(fileURLWithPath: bareRepositoryPath),
