@@ -7,6 +7,13 @@ private struct RunConfigurationMenuSection: Identifiable {
     let configurations: [RunConfiguration]
 }
 
+private struct DependencyActionDraft: Identifiable {
+    let mode: DependencyInstallMode
+    let commandLine: String
+
+    var id: String { mode.id }
+}
+
 struct WorktreeActionBar: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
@@ -15,6 +22,7 @@ struct WorktreeActionBar: View {
     let repository: ManagedRepository
 
     @State private var pendingRunConfiguration: RunConfiguration?
+    @State private var pendingDependencyAction: DependencyActionDraft?
     @State private var pendingGitPush = false
     @State private var pendingGitCommit = false
 
@@ -34,6 +42,14 @@ struct WorktreeActionBar: View {
                 .frame(height: 18)
                 .padding(.horizontal, 2)
 
+            if hasDependencyActions {
+                dependencyMenuButton
+
+                Divider()
+                    .frame(height: 18)
+                    .padding(.horizontal, 2)
+            }
+
             if !worktree.isDefaultBranchWorkspace {
                 gitMenuButton
             }
@@ -52,7 +68,7 @@ struct WorktreeActionBar: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(.thinMaterial)
-        .confirmationDialog("Run Configuration ausführen?", isPresented: Binding(
+        .confirmationDialog("Task ausfuehren?", isPresented: Binding(
             get: { pendingRunConfiguration != nil },
             set: { if !$0 { pendingRunConfiguration = nil } }
         )) {
@@ -69,7 +85,15 @@ struct WorktreeActionBar: View {
                 }
             }
         } message: {
-            Text(pendingRunConfiguration?.displayCommandLine ?? pendingRunConfiguration?.name ?? "")
+            Text(runConfigurationConfirmationMessage)
+        }
+        .confirmationDialog("Dependencies ausfuehren?", item: $pendingDependencyAction) { action in
+            Button(action.mode.displayName) {
+                executeDependencyAction(action)
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: { action in
+            Text(dependencyConfirmationMessage(for: action))
         }
         .confirmationDialog("Git Push", isPresented: $pendingGitPush) {
             Button("Push") {
@@ -159,6 +183,22 @@ struct WorktreeActionBar: View {
         .help("Run Configuration ausführen")
     }
 
+    private var dependencyMenuButton: some View {
+        Menu {
+            ForEach(DependencyInstallMode.allCases) { mode in
+                Button(mode.displayName) {
+                    pendingDependencyAction = dependencyActionDraft(for: mode)
+                }
+            }
+        } label: {
+            Image(systemName: "shippingbox")
+        }
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .disabled(!hasDependencyActions)
+        .help("Dependencies installieren oder aktualisieren")
+    }
+
     @ViewBuilder
     private func runConfigurationMenuItem(for configuration: RunConfiguration) -> some View {
         let label = Label(runConfigurationTitle(for: configuration), systemImage: iconName(for: configuration))
@@ -242,6 +282,11 @@ struct WorktreeActionBar: View {
         appModel.availableRunConfigurations(for: worktree)
     }
 
+    private var hasDependencyActions: Bool {
+        let worktreeURL = URL(fileURLWithPath: worktree.path)
+        return FileManager.default.fileExists(atPath: worktreeURL.appendingPathComponent("package.json").path)
+    }
+
     private var runConfigurationSections: [RunConfigurationMenuSection] {
         var sections: [RunConfigurationMenuSection] = []
 
@@ -313,6 +358,47 @@ struct WorktreeActionBar: View {
             return "\(configuration.name) · Build"
         default:
             return "\(configuration.name) · \(configuration.runnerType)"
+        }
+    }
+
+    private var runConfigurationConfirmationMessage: String {
+        guard let pendingRunConfiguration else { return "" }
+        let commandLine = pendingRunConfiguration.displayCommandLine ?? pendingRunConfiguration.name
+        return """
+        \(pendingRunConfiguration.name) wird im Worktree \(worktree.branchName) gestartet.
+        Dabei koennen Builds, erzeugte Dateien oder lang laufende Prozesse entstehen.
+
+        Befehl:
+        \(commandLine)
+        """
+    }
+
+    private func dependencyActionDraft(for mode: DependencyInstallMode) -> DependencyActionDraft {
+        let descriptor = appModel.services.nodeTooling.installDescriptor(
+            for: worktree,
+            mode: mode,
+            repositoryID: repository.id
+        )
+        let commandLine = descriptor.displayCommandLine ?? ([descriptor.executable] + descriptor.arguments).joined(separator: " ")
+        return DependencyActionDraft(mode: mode, commandLine: commandLine)
+    }
+
+    private func dependencyConfirmationMessage(for action: DependencyActionDraft) -> String {
+        """
+        \(action.commandLine) wird im Worktree \(worktree.branchName) ausgefuehrt.
+        Dabei koennen heruntergeladene Pakete, Lockfiles und weitere lokale Dependency-Artefakte aktualisiert werden.
+        """
+    }
+
+    private func executeDependencyAction(_ action: DependencyActionDraft) {
+        Task {
+            appModel.installDependencies(
+                mode: action.mode,
+                in: worktree,
+                repository: repository,
+                modelContext: modelContext
+            )
+            pendingDependencyAction = nil
         }
     }
 }

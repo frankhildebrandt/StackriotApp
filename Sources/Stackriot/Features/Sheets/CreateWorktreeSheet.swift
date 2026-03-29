@@ -9,6 +9,7 @@ struct CreateWorktreeSheet: View {
     let repository: ManagedRepository
 
     @State private var isCreating = false
+    @State private var pendingCreationConfirmation = false
     @State private var searchTask: Task<Void, Never>?
 
     private var requiresConfirmedTicket: Bool {
@@ -20,6 +21,26 @@ struct CreateWorktreeSheet: View {
         guard !appModel.worktreeDraft.normalizedBranchName.isEmpty else { return false }
         guard !isCreating else { return false }
         return !requiresConfirmedTicket || appModel.worktreeDraft.hasConfirmedTicket
+    }
+
+    private var sourceBranchName: String {
+        let sourceBranch = appModel.worktreeDraft.sourceBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return sourceBranch.isEmpty ? repository.defaultBranch : sourceBranch
+    }
+
+    private var creationConfirmationMessage: String {
+        var message = """
+        Es wird ein neuer lokaler Worktree mit dem Branch \(appModel.worktreeDraft.normalizedBranchName) aus \(sourceBranchName) angelegt.
+        Dateien und Metadaten in diesem Repository werden lokal erweitert.
+        """
+
+        if requiresConfirmedTicket, let selectedIssue = appModel.worktreeDraft.selectedTicket {
+            message += "\n\nDie bestaetigte Issue #\(selectedIssue.number) wird als Kontext uebernommen und der initiale Plan vorbereitet."
+        } else if let issueContext = appModel.worktreeDraft.issueContext.nilIfBlank {
+            message += "\n\nDer Kontext \"\(issueContext)\" wird dem Worktree zugeordnet."
+        }
+
+        return message
     }
 
     var body: some View {
@@ -42,6 +63,7 @@ struct CreateWorktreeSheet: View {
                             .foregroundStyle(.secondary)
                         TextField("Feature Name", text: $appModel.worktreeDraft.branchName)
                             .textFieldStyle(.roundedBorder)
+                            .disabled(isCreating)
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -63,6 +85,7 @@ struct CreateWorktreeSheet: View {
                             .foregroundStyle(.secondary)
                         TextField("Source Branch", text: $appModel.worktreeDraft.sourceBranch)
                             .textFieldStyle(.roundedBorder)
+                            .disabled(isCreating)
                     }
 
                     if !requiresConfirmedTicket {
@@ -72,6 +95,7 @@ struct CreateWorktreeSheet: View {
                                 .foregroundStyle(.secondary)
                             TextField("Kurzer Kontext", text: $appModel.worktreeDraft.issueContext)
                                 .textFieldStyle(.roundedBorder)
+                                .disabled(isCreating)
                         }
                     }
 
@@ -102,12 +126,12 @@ struct CreateWorktreeSheet: View {
                     HStack(spacing: 8) {
                         TextField("Issue # oder Titel", text: $appModel.worktreeDraft.ticketSearchText)
                             .textFieldStyle(.roundedBorder)
-                            .disabled(status?.isAvailable != true)
+                            .disabled(isCreating || status?.isAvailable != true)
 
                         Button("Suchen") {
                             triggerImmediateSearch()
                         }
-                        .disabled(status?.isAvailable != true || draft.ticketSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(isCreating || status?.isAvailable != true || draft.ticketSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
 
                     if draft.isTicketLoading {
@@ -145,6 +169,7 @@ struct CreateWorktreeSheet: View {
                                             .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                                         }
                                         .buttonStyle(.plain)
+                                        .disabled(isCreating)
                                     }
                                 }
                             }
@@ -185,15 +210,21 @@ struct CreateWorktreeSheet: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
 
+            if isCreating {
+                ProgressView("Worktree wird erstellt…")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             HStack {
                 Spacer()
                 Button("Cancel") {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
+                .disabled(isCreating)
 
                 Button("Create") {
-                    createWorktree()
+                    pendingCreationConfirmation = true
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canCreate)
@@ -210,6 +241,14 @@ struct CreateWorktreeSheet: View {
         }
         .onChange(of: appModel.worktreeDraft.ticketSearchText) { _, newValue in
             scheduleSearch(for: newValue)
+        }
+        .confirmationDialog("Worktree erstellen?", isPresented: $pendingCreationConfirmation) {
+            Button("Erstellen") {
+                createWorktree()
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text(creationConfirmationMessage)
         }
     }
 

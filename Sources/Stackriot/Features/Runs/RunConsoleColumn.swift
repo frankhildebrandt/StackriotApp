@@ -202,10 +202,16 @@ struct RunConsoleColumn: View {
                         }
                     } label: {
                         HStack(spacing: 0) {
-                            Circle()
-                                .fill(statusColor(for: run.status))
-                                .frame(width: 7, height: 7)
-                                .frame(width: 28)
+                            if appModel.activeRunIDs.contains(run.id) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(width: 28)
+                            } else {
+                                Circle()
+                                    .fill(statusColor(for: run.status))
+                                    .frame(width: 7, height: 7)
+                                    .frame(width: 28)
+                            }
 
                             Text(run.title)
                                 .font(.subheadline)
