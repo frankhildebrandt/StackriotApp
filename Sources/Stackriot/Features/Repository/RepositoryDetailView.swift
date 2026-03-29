@@ -197,10 +197,6 @@ struct RepositoryDetailView: View {
                                             AgentActivityDot()
                                         }
                                     }
-                                    Text(worktree.path)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
 
                                     worktreeStatusRow(for: worktree)
                                     worktreeLifecycleIndicator(for: worktree)
