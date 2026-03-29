@@ -11,6 +11,8 @@ final class RunRecord {
     var endedAt: Date?
     var exitCode: Int?
     var outputText: String
+    var aiSummaryTitle: String?
+    var aiSummaryText: String?
     var statusRawValue: String
     var worktreeID: UUID?
     var repository: ManagedRepository?
@@ -25,6 +27,8 @@ final class RunRecord {
         endedAt: Date? = nil,
         exitCode: Int? = nil,
         outputText: String = "",
+        aiSummaryTitle: String? = nil,
+        aiSummaryText: String? = nil,
         status: RunStatusKind = .pending,
         worktreeID: UUID? = nil,
         repository: ManagedRepository? = nil,
@@ -38,6 +42,8 @@ final class RunRecord {
         self.endedAt = endedAt
         self.exitCode = exitCode
         self.outputText = outputText
+        self.aiSummaryTitle = aiSummaryTitle
+        self.aiSummaryText = aiSummaryText
         self.statusRawValue = status.rawValue
         self.worktreeID = worktreeID ?? worktree?.id
         self.repository = repository

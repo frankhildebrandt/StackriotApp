@@ -17,6 +17,7 @@ struct WorktreeDraft {
     var ticketProvider: TicketProviderKind?
     var ticketProviderStatus: TicketProviderStatus?
     var hasConfirmedTicket = false
+    var isGeneratingSuggestedName = false
 
     init(sourceBranch: String = "") {
         self.sourceBranch = sourceBranch

@@ -5,6 +5,7 @@ struct AppServices {
     let repositoryManager: RepositoryManager
     let worktreeManager: WorktreeManager
     let gitHubCLIService: GitHubCLIService
+    let aiProviderService: AIProviderService
     let ideManager: IDEManager
     let sshKeyManager: SSHKeyManager
     let agentManager: AIAgentManager
@@ -19,6 +20,7 @@ struct AppServices {
         repositoryManager: RepositoryManager(),
         worktreeManager: WorktreeManager(),
         gitHubCLIService: GitHubCLIService(),
+        aiProviderService: AIProviderService(),
         ideManager: IDEManager(),
         sshKeyManager: SSHKeyManager(),
         agentManager: AIAgentManager(),

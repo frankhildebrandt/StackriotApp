@@ -1125,7 +1125,178 @@ struct StackriotTests {
     func worktreeNameNormalizationReplacesWhitespaceWithHyphen() {
         #expect(WorktreeManager.normalizedWorktreeName(from: "Feature A") == "Feature-A")
         #expect(WorktreeManager.normalizedWorktreeName(from: "  Feature   A  ") == "Feature-A")
+        #expect(WorktreeManager.normalizedWorktreeName(from: "bug / 3 großes fenster kaputt") == "bug/3-grosses-fenster-kaputt")
         #expect(WorktreeManager.normalizedWorktreeName(from: "   ").isEmpty)
+    }
+
+    @Test
+    func aiWorktreeSuggestionFallsBackToTypedSlashBranchName() async throws {
+        let service = AIProviderService(
+            configurationProvider: {
+                AIProviderConfiguration(
+                    provider: .openAI,
+                    apiKey: nil,
+                    model: "gpt-5.4-mini",
+                    baseURL: "https://api.openai.com/v1"
+                )
+            }
+        )
+        let issue = GitHubIssueDetails(
+            number: 3,
+            title: "BUG: Großes Fenster kaputt",
+            body: "Das Fenster ist defekt und laesst sich nicht korrekt rendern.",
+            url: "https://example.com/issues/3",
+            labels: ["bug"],
+            comments: []
+        )
+
+        let suggestion = try await service.suggestWorktreeName(for: issue)
+        #expect(suggestion.kind == .bug)
+        #expect(suggestion.branchName == "bug/3-grosses-fenster-kaputt")
+    }
+
+    @MainActor
+    @Test
+    func confirmedTicketCanPopulateSuggestedWorktreeNameFromAIService() async throws {
+        let services = AppServices(
+            repositoryManager: RepositoryManager(),
+            worktreeManager: WorktreeManager(),
+            gitHubCLIService: GitHubCLIService(),
+            aiProviderService: AIProviderService(
+                configurationProvider: {
+                    AIProviderConfiguration(
+                        provider: .openAI,
+                        apiKey: "test-key",
+                        model: "gpt-5.4-mini",
+                        baseURL: "https://api.openai.com/v1"
+                    )
+                },
+                worktreeNameGenerator: { issue, _ in
+                    AIWorktreeNameSuggestion(
+                        kind: .bug,
+                        ticketNumber: issue.number,
+                        shortSummary: "grosses fenster kaputt",
+                        branchName: "bug/\(issue.number)-grosses-fenster-kaputt"
+                    )
+                }
+            ),
+            ideManager: IDEManager(),
+            sshKeyManager: SSHKeyManager(),
+            agentManager: AIAgentManager(),
+            nodeTooling: NodeToolingService(),
+            nodeRuntimeManager: NodeRuntimeManager(),
+            makeTooling: MakeToolingService(),
+            worktreeStatusService: WorktreeStatusService(),
+            devToolDiscovery: DevToolDiscoveryService(),
+            runConfigurationDiscovery: RunConfigurationDiscoveryService()
+        )
+        let appModel = AppModel(services: services)
+        let issue = GitHubIssueDetails(
+            number: 3,
+            title: "Großes Fenster kaputt",
+            body: "Bitte reparieren.",
+            url: "https://example.com/issues/3",
+            labels: ["bug"],
+            comments: []
+        )
+
+        await appModel.populateSuggestedWorktreeName(from: issue)
+
+        #expect(appModel.worktreeDraft.branchName == "bug/3-grosses-fenster-kaputt")
+        #expect(!appModel.worktreeDraft.isGeneratingSuggestedName)
+    }
+
+    @Test
+    func createWorktreeSupportsSlashSeparatedDirectoryNames() async throws {
+        let remote = try await createSeededRemote(named: "slash-worktree")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Slash-Worktree-\(UUID().uuidString)"
+        )
+
+        let worktreeInfo = try await WorktreeManager().createWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            branchName: "bug/3-grosses-fenster-kaputt",
+            sourceBranch: cloneInfo.defaultBranch,
+            directoryName: "bug/3-grosses-fenster-kaputt"
+        )
+
+        #expect(FileManager.default.fileExists(atPath: worktreeInfo.path.path))
+        #expect(worktreeInfo.branchName == "bug/3-grosses-fenster-kaputt")
+        #expect(worktreeInfo.path.lastPathComponent == "3-grosses-fenster-kaputt")
+        #expect(worktreeInfo.path.deletingLastPathComponent().lastPathComponent == "bug")
+
+        try? FileManager.default.removeItem(at: worktreeInfo.path)
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
+    @MainActor
+    @Test
+    func agentRunsReceiveAISummaryInsteadOfOnlyRawOutput() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let repository = makeRepository(name: "AgentSummary")
+        let worktree = WorktreeRecord(branchName: "bug/3-window", path: "/tmp/agent-summary", repository: repository)
+        let run = RunRecord(
+            actionKind: .aiAgent,
+            title: "GitHub Copilot",
+            commandLine: "copilot -p",
+            outputText: "$ copilot -p\nUpdated files\n",
+            status: .running,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        repository.worktrees = [worktree]
+        repository.runs = [run]
+        modelContext.insert(repository)
+        modelContext.insert(worktree)
+        modelContext.insert(run)
+        try modelContext.save()
+
+        let services = AppServices(
+            repositoryManager: RepositoryManager(),
+            worktreeManager: WorktreeManager(),
+            gitHubCLIService: GitHubCLIService(),
+            aiProviderService: AIProviderService(
+                configurationProvider: {
+                    AIProviderConfiguration(
+                        provider: .openAI,
+                        apiKey: "test-key",
+                        model: "gpt-5.4-mini",
+                        baseURL: "https://api.openai.com/v1"
+                    )
+                },
+                runSummaryGenerator: { title, _, _, exitCode, _ in
+                    AIRunSummary(
+                        title: "\(title) fertig",
+                        summary: "Der Agentlauf endete mit Exit-Code \(exitCode ?? -1) und hat die wichtigsten Aenderungen zusammengefasst."
+                    )
+                }
+            ),
+            ideManager: IDEManager(),
+            sshKeyManager: SSHKeyManager(),
+            agentManager: AIAgentManager(),
+            nodeTooling: NodeToolingService(),
+            nodeRuntimeManager: NodeRuntimeManager(),
+            makeTooling: MakeToolingService(),
+            worktreeStatusService: WorktreeStatusService(),
+            devToolDiscovery: DevToolDiscoveryService(),
+            runConfigurationDiscovery: RunConfigurationDiscoveryService()
+        )
+        let appModel = AppModel(services: services)
+        appModel.storedModelContext = modelContext
+
+        appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
+        for _ in 0..<20 where run.aiSummaryTitle == nil {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+
+        #expect(run.aiSummaryTitle == "GitHub Copilot fertig")
+        #expect(run.aiSummaryText?.contains("Exit-Code 0") == true)
+        #expect(appModel.shouldShowAISummary(for: run))
+        appModel.dismissAISummary(for: run)
+        #expect(!appModel.shouldShowAISummary(for: run))
     }
 
     @MainActor
