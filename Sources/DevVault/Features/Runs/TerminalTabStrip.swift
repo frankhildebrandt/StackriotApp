@@ -10,6 +10,7 @@ struct TerminalTabStrip: View {
 
     var body: some View {
         let isPlanSelected = appModel.isPlanTabSelected(for: worktree)
+            || (worktree.isDefaultBranchWorkspace && tabs.isEmpty)
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 // Plan chip — always first, never closable
@@ -42,9 +43,9 @@ struct TerminalTabStrip: View {
 
     private func planChip(isPlanSelected: Bool) -> some View {
         HStack(spacing: 5) {
-            Image(systemName: "doc.text")
+            Image(systemName: worktree.isDefaultBranchWorkspace ? "book.closed" : "doc.text")
                 .font(.caption.weight(.semibold))
-            Text("Plan")
+            Text(worktree.isDefaultBranchWorkspace ? "README" : "Plan")
                 .font(.caption.weight(.semibold))
         }
         .padding(.horizontal, 10)
@@ -66,4 +67,3 @@ struct TerminalTabStrip: View {
         }
     }
 }
-
