@@ -553,5 +553,5 @@ private struct SidebarDragItem: Codable, Transferable {
 }
 
 private extension UTType {
-    static let stackriotSidebarItem = UTType(importedAs: "io.hildebrandt.stackriot.sidebar-item")
+    static let stackriotSidebarItem = UTType(exportedAs: "io.hildebrandt.stackriot.sidebar-item")
 }

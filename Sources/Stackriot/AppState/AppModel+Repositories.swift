@@ -147,16 +147,12 @@ extension AppModel {
         save(modelContext)
 
         var logLines: [String] = []
-        let remoteName = defaultRemoteName ?? "origin"
         if let fetchErr = result.fetchErrorMessage {
             logLines.append("⚠ Fetch: \(fetchErr)")
-        } else {
-            // logLines.append("✓ Fetch von \(remoteName) abgeschlossen")
         }
         if let syncErr = result.defaultBranchSyncErrorMessage {
             logLines.append("⚠ Sync: \(syncErr)")
-        } else if let syncSummary = result.defaultBranchSyncSummary {
-            // logLines.append("✓ Sync: \(syncSummary)")
+        } else if result.defaultBranchSyncSummary != nil {
         } else {
             logLines.append("✓ Sync: Kein Default-Worktree für \(result.defaultBranch) gefunden")
         }
