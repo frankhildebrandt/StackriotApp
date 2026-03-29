@@ -9,9 +9,21 @@ struct WorktreeDraft {
     var branchName = ""
     var issueContext = ""
     var sourceBranch = ""
+    var ticketSearchText = ""
+    var selectedTicket: GitHubIssueSearchResult?
+    var selectedIssueDetails: GitHubIssueDetails?
+    var isTicketLoading = false
+    var ticketSearchResults: [GitHubIssueSearchResult] = []
+    var ticketProvider: TicketProviderKind?
+    var ticketProviderStatus: TicketProviderStatus?
+    var hasConfirmedTicket = false
 
     init(sourceBranch: String = "") {
         self.sourceBranch = sourceBranch
+    }
+
+    var normalizedBranchName: String {
+        WorktreeManager.normalizedWorktreeName(from: branchName)
     }
 }
 

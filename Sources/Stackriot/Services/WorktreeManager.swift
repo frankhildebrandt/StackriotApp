@@ -95,11 +95,26 @@ enum GitWorktreeListParser {
 }
 
 struct WorktreeManager {
+    typealias CommandExecutor = @Sendable (_ executable: String, _ arguments: [String], _ currentDirectoryURL: URL?, _ environment: [String: String]) async throws -> CommandResult
+
+    private let runCommand: CommandExecutor
+
+    init(runCommand: @escaping CommandExecutor = WorktreeManager.liveCommand) {
+        self.runCommand = runCommand
+    }
+
+    static func normalizedWorktreeName(from value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return trimmed.replacingOccurrences(of: #"\s+"#, with: "-", options: .regularExpression)
+    }
+
     func createWorktree(
         bareRepositoryPath: URL,
         repositoryName: String,
         branchName: String,
-        sourceBranch: String
+        sourceBranch: String,
+        directoryName: String? = nil
     ) async throws -> CreatedWorktreeInfo {
         let trimmedBranch = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedBranch.isEmpty else {
@@ -113,7 +128,12 @@ struct WorktreeManager {
         )
         try FileManager.default.createDirectory(at: worktreeRoot, withIntermediateDirectories: true)
 
-        let destination = AppPaths.uniqueDirectory(in: worktreeRoot, preferredName: trimmedBranch)
+        let destination: URL
+        if let directoryName, directoryName.nilIfBlank != nil {
+            destination = uniquePreservingDirectory(in: worktreeRoot, preferredName: directoryName)
+        } else {
+            destination = AppPaths.uniqueDirectory(in: worktreeRoot, preferredName: trimmedBranch)
+        }
         let branchExists = try await branchExistsInRepository(trimmedBranch, bareRepositoryPath: bareRepositoryPath)
 
         let arguments: [String]
@@ -123,7 +143,7 @@ struct WorktreeManager {
             arguments = ["--git-dir", bareRepositoryPath.path, "worktree", "add", "-b", trimmedBranch, destination.path, sourceBranch]
         }
 
-        let result = try await CommandRunner.runCollected(executable: "git", arguments: arguments)
+        let result = try await runCommand("git", arguments, nil, [:])
         guard result.exitCode == 0 else {
             throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
@@ -132,9 +152,11 @@ struct WorktreeManager {
     }
 
     func removeWorktree(bareRepositoryPath: URL, worktreePath: URL) async throws {
-        let result = try await CommandRunner.runCollected(
-            executable: "git",
-            arguments: ["--git-dir", bareRepositoryPath.path, "worktree", "remove", "--force", worktreePath.path]
+        let result = try await runCommand(
+            "git",
+            ["--git-dir", bareRepositoryPath.path, "worktree", "remove", "--force", worktreePath.path],
+            nil,
+            [:]
         )
 
         guard result.exitCode == 0 else {
@@ -162,9 +184,11 @@ struct WorktreeManager {
         try FileManager.default.createDirectory(at: worktreeRoot, withIntermediateDirectories: true)
 
         let destination = worktreeRoot.appendingPathComponent("default-branch", isDirectory: true)
-        let result = try await CommandRunner.runCollected(
-            executable: "git",
-            arguments: ["--git-dir", bareRepositoryPath.path, "worktree", "add", destination.path, defaultBranch]
+        let result = try await runCommand(
+            "git",
+            ["--git-dir", bareRepositoryPath.path, "worktree", "add", destination.path, defaultBranch],
+            nil,
+            [:]
         )
         guard result.exitCode == 0 else {
             throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
@@ -177,9 +201,11 @@ struct WorktreeManager {
         bareRepositoryPath: URL,
         branchName: String
     ) async throws -> URL? {
-        let result = try await CommandRunner.runCollected(
-            executable: "git",
-            arguments: ["--git-dir", bareRepositoryPath.path, "worktree", "list", "--porcelain"]
+        let result = try await runCommand(
+            "git",
+            ["--git-dir", bareRepositoryPath.path, "worktree", "list", "--porcelain"],
+            nil,
+            [:]
         )
         guard result.exitCode == 0 else {
             throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
@@ -195,11 +221,50 @@ struct WorktreeManager {
         return nil
     }
 
+    private static func liveCommand(
+        executable: String,
+        arguments: [String],
+        currentDirectoryURL: URL?,
+        environment: [String: String]
+    ) async throws -> CommandResult {
+        try await CommandRunner.runCollected(
+            executable: executable,
+            arguments: arguments,
+            currentDirectoryURL: currentDirectoryURL,
+            environment: environment
+        )
+    }
+
     private func branchExistsInRepository(_ branchName: String, bareRepositoryPath: URL) async throws -> Bool {
-        let result = try await CommandRunner.runCollected(
-            executable: "git",
-            arguments: ["--git-dir", bareRepositoryPath.path, "show-ref", "--verify", "--quiet", "refs/heads/\(branchName)"]
+        let result = try await runCommand(
+            "git",
+            ["--git-dir", bareRepositoryPath.path, "show-ref", "--verify", "--quiet", "refs/heads/\(branchName)"],
+            nil,
+            [:]
         )
         return result.exitCode == 0
+    }
+
+    private func uniquePreservingDirectory(in root: URL, preferredName: String) -> URL {
+        let fileManager = FileManager.default
+        let baseName = sanitizedDirectoryName(preferredName)
+        var candidate = root.appendingPathComponent(baseName, isDirectory: true)
+        var index = 2
+        while fileManager.fileExists(atPath: candidate.path) {
+            candidate = root.appendingPathComponent("\(baseName)-\(index)", isDirectory: true)
+            index += 1
+        }
+        return candidate
+    }
+
+    private func sanitizedDirectoryName(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "worktree" }
+
+        return trimmed
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .replacingOccurrences(of: "\\", with: "-")
+            .nilIfBlank ?? "worktree"
     }
 }

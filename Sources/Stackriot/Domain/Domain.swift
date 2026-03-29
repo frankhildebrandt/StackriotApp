@@ -383,6 +383,45 @@ enum WorktreeLifecycle: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum TicketProviderKind: String, Codable, CaseIterable, Identifiable {
+    case github
+
+    var id: String { rawValue }
+}
+
+struct TicketProviderStatus: Sendable, Equatable {
+    let provider: TicketProviderKind
+    let isAvailable: Bool
+    let message: String
+}
+
+struct GitHubIssueSearchResult: Identifiable, Sendable, Equatable {
+    let number: Int
+    let title: String
+    let url: String
+    let state: String
+
+    var id: Int { number }
+}
+
+struct GitHubIssueComment: Identifiable, Sendable, Equatable {
+    let author: String
+    let body: String
+    let createdAt: Date
+    let url: String?
+
+    var id: String { url ?? "\(author)-\(createdAt.timeIntervalSince1970)" }
+}
+
+struct GitHubIssueDetails: Sendable, Equatable {
+    let number: Int
+    let title: String
+    let body: String
+    let url: String
+    let labels: [String]
+    let comments: [GitHubIssueComment]
+}
+
 enum SSHKeyKind: String, Codable, CaseIterable, Identifiable {
     case imported
     case generated

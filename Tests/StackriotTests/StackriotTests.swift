@@ -1064,6 +1064,208 @@ struct StackriotTests {
         #expect(relevantTools.contains(.intellijIdea))
     }
 
+    @Test
+    func worktreeNameNormalizationReplacesWhitespaceWithHyphen() {
+        #expect(WorktreeManager.normalizedWorktreeName(from: "Feature A") == "Feature-A")
+        #expect(WorktreeManager.normalizedWorktreeName(from: "  Feature   A  ") == "Feature-A")
+        #expect(WorktreeManager.normalizedWorktreeName(from: "   ").isEmpty)
+    }
+
+    @MainActor
+    @Test
+    func gitHubIssueReadinessTracksMissingRemoteCliAndAuth() async {
+        let repository = makeRepository(name: "GitHub")
+        let origin = RepositoryRemote(
+            name: "origin",
+            url: "https://github.com/octo/example.git",
+            canonicalURL: "https://github.com/octo/example",
+            repository: repository
+        )
+        repository.remotes = [origin]
+
+        let missingCLI = GitHubCLIService { executable, arguments, _, _ in
+            if executable == "which", arguments == ["gh"] {
+                return CommandResult(stdout: "", stderr: "", exitCode: 1)
+            }
+            Issue.record("Unexpected command: \(executable) \(arguments.joined(separator: " "))")
+            return CommandResult(stdout: "", stderr: "", exitCode: 1)
+        }
+        let missingCLIStatus = await missingCLI.issueReadiness(for: repository)
+        #expect(!missingCLIStatus.isAvailable)
+        #expect(missingCLIStatus.message.contains("gh"))
+
+        let missingAuth = GitHubCLIService { executable, arguments, _, _ in
+            if executable == "which", arguments == ["gh"] {
+                return CommandResult(stdout: "/usr/local/bin/gh\n", stderr: "", exitCode: 0)
+            }
+            if executable == "gh", arguments == ["auth", "status"] {
+                return CommandResult(stdout: "", stderr: "not logged in", exitCode: 1)
+            }
+            Issue.record("Unexpected command: \(executable) \(arguments.joined(separator: " "))")
+            return CommandResult(stdout: "", stderr: "", exitCode: 1)
+        }
+        let missingAuthStatus = await missingAuth.issueReadiness(for: repository)
+        #expect(!missingAuthStatus.isAvailable)
+        #expect(missingAuthStatus.message.contains("auth"))
+
+        let localRepository = makeRepository(name: "Local")
+        let upstream = RepositoryRemote(
+            name: "upstream",
+            url: "https://gitlab.com/acme/example.git",
+            canonicalURL: "https://gitlab.com/acme/example",
+            repository: localRepository
+        )
+        localRepository.remotes = [upstream]
+
+        let missingRemoteStatus = await missingAuth.issueReadiness(for: localRepository)
+        #expect(!missingRemoteStatus.isAvailable)
+        #expect(missingRemoteStatus.message.contains("GitHub-Remote"))
+    }
+
+    @Test
+    func gitHubIssueSearchResultsDecodeFromCLIJSON() throws {
+        let service = GitHubCLIService()
+        let data = Data(
+            """
+            [
+              {"number": 123, "title": "Feature A", "url": "https://github.com/octo/example/issues/123", "state": "OPEN"}
+            ]
+            """.utf8
+        )
+
+        let results = try service.decodeIssueSearchResults(from: data)
+
+        #expect(results == [
+            GitHubIssueSearchResult(
+                number: 123,
+                title: "Feature A",
+                url: "https://github.com/octo/example/issues/123",
+                state: "OPEN"
+            )
+        ])
+    }
+
+    @Test
+    func gitHubIssueDetailsDecodeFromCLIJSONHandlesLabelsCommentsAndEmptyContent() throws {
+        let service = GitHubCLIService()
+        let populatedData = Data(
+            """
+            {
+              "number": 123,
+              "title": "Ticket backed worktree",
+              "body": "Use the selected issue as plan input.",
+              "url": "https://github.com/octo/example/issues/123",
+              "labels": [
+                {"name": "feature"},
+                {"name": "ios"}
+              ],
+              "comments": [
+                {
+                  "author": {"login": "alice"},
+                  "body": "First comment",
+                  "createdAt": "2026-03-29T12:00:00Z",
+                  "url": "https://github.com/octo/example/issues/123#issuecomment-1"
+                }
+              ]
+            }
+            """.utf8
+        )
+        let populated = try service.decodeIssueDetails(from: populatedData)
+        #expect(populated.labels == ["feature", "ios"])
+        #expect(populated.comments.count == 1)
+        #expect(populated.comments.first?.author == "alice")
+
+        let emptyData = Data(
+            """
+            {
+              "number": 124,
+              "title": "Empty issue",
+              "body": null,
+              "url": "https://github.com/octo/example/issues/124",
+              "labels": [],
+              "comments": []
+            }
+            """.utf8
+        )
+        let empty = try service.decodeIssueDetails(from: emptyData)
+        #expect(empty.body.isEmpty)
+        #expect(empty.labels.isEmpty)
+        #expect(empty.comments.isEmpty)
+    }
+
+    @MainActor
+    @Test
+    func ticketWorktreeCreationNormalizesBranchSetsIssueContextAndWritesPlan() async throws {
+        let remote = try await createSeededRemote(named: "ticket-worktree")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Ticket-Worktree-\(UUID().uuidString)"
+        )
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: cloneInfo.displayName,
+            remoteURL: remote.remote.absoluteString,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath.path,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+        appModel.worktreeDraft = WorktreeDraft(sourceBranch: cloneInfo.defaultBranch)
+        appModel.worktreeDraft.branchName = "  Feature A  "
+        appModel.worktreeDraft.ticketProvider = .github
+        appModel.worktreeDraft.ticketProviderStatus = TicketProviderStatus(provider: .github, isAvailable: true, message: "ready")
+        appModel.worktreeDraft.selectedTicket = GitHubIssueSearchResult(
+            number: 123,
+            title: "Ticket backed worktree",
+            url: "https://github.com/octo/example/issues/123",
+            state: "OPEN"
+        )
+        appModel.worktreeDraft.selectedIssueDetails = GitHubIssueDetails(
+            number: 123,
+            title: "Ticket backed worktree",
+            body: "Use the selected issue as plan input.",
+            url: "https://github.com/octo/example/issues/123",
+            labels: ["feature", "ios"],
+            comments: [
+                GitHubIssueComment(
+                    author: "alice",
+                    body: "Please include comments in the initial plan.",
+                    createdAt: Date(timeIntervalSince1970: 1_743_249_600),
+                    url: "https://github.com/octo/example/issues/123#issuecomment-1"
+                )
+            ]
+        )
+        appModel.worktreeDraft.hasConfirmedTicket = true
+
+        await appModel.createWorktreeFromTicket(for: repository, in: modelContext)
+
+        #expect(appModel.pendingErrorMessage == nil)
+        #expect(repository.worktrees.count == 1)
+
+        guard let worktree = repository.worktrees.first else {
+            Issue.record("Expected created worktree record")
+            return
+        }
+
+        #expect(worktree.branchName == "Feature-A")
+        #expect(worktree.issueContext == "#123 Ticket backed worktree")
+
+        let planURL = AppPaths.planFile(for: worktree.id)
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        #expect(plan.contains("# Ticket backed worktree"))
+        #expect(plan.contains("- Issue: #123"))
+        #expect(plan.contains("## Beschreibung"))
+        #expect(plan.contains("## Kommentare"))
+        #expect(plan.contains("### alice - 2025-03-29T12:00:00Z"))
+
+        try? FileManager.default.removeItem(at: planURL)
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: worktree.path))
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
     private func createSeededRemote(named name: String) async throws -> (root: URL, remote: URL) {
         let origin = try temporaryDirectory(named: name)
         let remote = origin.appendingPathComponent("\(name).git")

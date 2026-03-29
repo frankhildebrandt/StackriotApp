@@ -53,34 +53,162 @@ extension AppModel {
         }
     }
 
+    func refreshTicketProviderStatus(for repository: ManagedRepository) async {
+        worktreeDraft.ticketProvider = .github
+        worktreeDraft.ticketProviderStatus = await services.gitHubCLIService.issueReadiness(for: repository)
+        if worktreeDraft.ticketProviderStatus?.isAvailable != true {
+            clearWorktreeTicketSelection()
+            worktreeDraft.ticketSearchResults = []
+        }
+    }
+
+    func clearWorktreeTicketSelection() {
+        worktreeDraft.selectedTicket = nil
+        worktreeDraft.selectedIssueDetails = nil
+        worktreeDraft.hasConfirmedTicket = false
+        if worktreeDraft.ticketProviderStatus?.isAvailable == true {
+            worktreeDraft.issueContext = ""
+        }
+    }
+
+    func searchWorktreeTickets(for repository: ManagedRepository) async {
+        guard worktreeDraft.ticketProviderStatus?.isAvailable == true else {
+            worktreeDraft.ticketSearchResults = []
+            worktreeDraft.isTicketLoading = false
+            return
+        }
+
+        let query = worktreeDraft.ticketSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            worktreeDraft.ticketSearchResults = []
+            worktreeDraft.isTicketLoading = false
+            return
+        }
+
+        worktreeDraft.isTicketLoading = true
+        clearWorktreeTicketSelection()
+        do {
+            worktreeDraft.ticketSearchResults = try await services.gitHubCLIService.searchIssues(query: query, in: repository)
+        } catch {
+            worktreeDraft.ticketSearchResults = []
+            pendingErrorMessage = error.localizedDescription
+        }
+        worktreeDraft.isTicketLoading = false
+    }
+
+    func confirmWorktreeTicket(_ issue: GitHubIssueSearchResult, for repository: ManagedRepository) async {
+        worktreeDraft.isTicketLoading = true
+        do {
+            let details = try await services.gitHubCLIService.loadIssue(number: issue.number, in: repository)
+            worktreeDraft.selectedTicket = issue
+            worktreeDraft.selectedIssueDetails = details
+            worktreeDraft.hasConfirmedTicket = true
+            worktreeDraft.issueContext = compactIssueContext(for: details)
+        } catch {
+            clearWorktreeTicketSelection()
+            pendingErrorMessage = error.localizedDescription
+        }
+        worktreeDraft.isTicketLoading = false
+    }
+
     func createWorktree(for repository: ManagedRepository, in modelContext: ModelContext) async {
         do {
+            let normalizedName = WorktreeManager.normalizedWorktreeName(from: worktreeDraft.branchName)
             let info = try await services.worktreeManager.createWorktree(
                 bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
                 repositoryName: repository.displayName,
-                branchName: worktreeDraft.branchName,
-                sourceBranch: worktreeDraft.sourceBranch.isEmpty ? repository.defaultBranch : worktreeDraft.sourceBranch
+                branchName: normalizedName,
+                sourceBranch: resolvedSourceBranch(for: repository),
+                directoryName: normalizedName
             )
 
-            let worktree = WorktreeRecord(
-                branchName: info.branchName,
+            let worktree = try persistCreatedWorktree(
+                from: info,
+                repository: repository,
                 issueContext: worktreeDraft.issueContext.nilIfBlank,
-                path: info.path.path,
-                repository: repository
+                initialPlanText: nil,
+                in: modelContext
             )
-
-            repository.worktrees.append(worktree)
-            repository.updatedAt = .now
-            modelContext.insert(worktree)
-            try modelContext.save()
-
-            selectedWorktreeIDsByRepository[repository.id] = worktree.id
-            terminalTabs.selectPlanTab(for: worktree.id)
-            isWorktreeSheetPresented = false
+            finishCreatedWorktree(worktree, in: repository)
             await refreshWorktreeStatuses(for: repository)
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
+    }
+
+    func createWorktreeFromTicket(for repository: ManagedRepository, in modelContext: ModelContext) async {
+        guard let issue = worktreeDraft.selectedIssueDetails, worktreeDraft.hasConfirmedTicket else {
+            pendingErrorMessage = "Select and confirm a GitHub issue before creating the worktree."
+            return
+        }
+
+        do {
+            let normalizedName = WorktreeManager.normalizedWorktreeName(from: worktreeDraft.branchName)
+            let info = try await services.worktreeManager.createWorktree(
+                bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
+                repositoryName: repository.displayName,
+                branchName: normalizedName,
+                sourceBranch: resolvedSourceBranch(for: repository),
+                directoryName: normalizedName
+            )
+
+            let worktree = try persistCreatedWorktree(
+                from: info,
+                repository: repository,
+                issueContext: compactIssueContext(for: issue),
+                initialPlanText: initialPlan(from: issue),
+                in: modelContext
+            )
+            finishCreatedWorktree(worktree, in: repository)
+            await refreshWorktreeStatuses(for: repository)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func resolvedSourceBranch(for repository: ManagedRepository) -> String {
+        let sourceBranch = worktreeDraft.sourceBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return sourceBranch.isEmpty ? repository.defaultBranch : sourceBranch
+    }
+
+    private func compactIssueContext(for issue: GitHubIssueDetails) -> String {
+        let title = issue.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.isEmpty {
+            return "#\(issue.number)"
+        }
+        return "#\(issue.number) \(title)"
+    }
+
+    private func persistCreatedWorktree(
+        from info: CreatedWorktreeInfo,
+        repository: ManagedRepository,
+        issueContext: String?,
+        initialPlanText: String?,
+        in modelContext: ModelContext
+    ) throws -> WorktreeRecord {
+        let worktree = WorktreeRecord(
+            branchName: info.branchName,
+            issueContext: issueContext,
+            path: info.path.path,
+            repository: repository
+        )
+
+        repository.worktrees.append(worktree)
+        repository.updatedAt = .now
+        modelContext.insert(worktree)
+        try modelContext.save()
+
+        if let initialPlanText {
+            try writePlan(initialPlanText, for: worktree.id)
+        }
+
+        return worktree
+    }
+
+    private func finishCreatedWorktree(_ worktree: WorktreeRecord, in repository: ManagedRepository) {
+        selectedWorktreeIDsByRepository[repository.id] = worktree.id
+        terminalTabs.selectPlanTab(for: worktree.id)
+        isWorktreeSheetPresented = false
     }
 
     func removeWorktree(_ worktree: WorktreeRecord, in modelContext: ModelContext) async {
@@ -199,7 +327,7 @@ extension AppModel {
 
         case .githubPR:
             do {
-                let prInfo = try await GitHubCLIService.createPR(
+                let prInfo = try await services.gitHubCLIService.createPR(
                     worktreePath: URL(fileURLWithPath: worktree.path),
                     title: draft.prTitle,
                     body: draft.prBody,
@@ -285,7 +413,7 @@ extension AppModel {
                 else { break }
 
                 do {
-                    let status = try await GitHubCLIService.getPRStatus(
+                    let status = try await services.gitHubCLIService.getPRStatus(
                         worktreePath: URL(fileURLWithPath: record.path),
                         prNumber: prNumber
                     )

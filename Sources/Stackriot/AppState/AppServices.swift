@@ -4,6 +4,7 @@ import Foundation
 struct AppServices {
     let repositoryManager: RepositoryManager
     let worktreeManager: WorktreeManager
+    let gitHubCLIService: GitHubCLIService
     let ideManager: IDEManager
     let sshKeyManager: SSHKeyManager
     let agentManager: AIAgentManager
@@ -17,6 +18,7 @@ struct AppServices {
     static let production = AppServices(
         repositoryManager: RepositoryManager(),
         worktreeManager: WorktreeManager(),
+        gitHubCLIService: GitHubCLIService(),
         ideManager: IDEManager(),
         sshKeyManager: SSHKeyManager(),
         agentManager: AIAgentManager(),
