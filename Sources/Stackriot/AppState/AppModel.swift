@@ -163,11 +163,13 @@ final class AppModel: @unchecked Sendable {
 
         if selectedWorktreeIDsByRepository[repository.id] != selectedID {
             selectedWorktreeIDsByRepository[repository.id] = selectedID
+            terminalTabs.selectPlanTab(for: selectedID)
         }
     }
 
     func selectWorktree(_ worktree: WorktreeRecord, in repository: ManagedRepository) {
         selectedWorktreeIDsByRepository[repository.id] = worktree.id
+        terminalTabs.selectPlanTab(for: worktree.id)
     }
 
     func visibleTabs(for worktree: WorktreeRecord, in repository: ManagedRepository) -> [RunRecord] {
