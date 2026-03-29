@@ -1,4 +1,5 @@
 import Foundation
+
 enum StackriotError: LocalizedError {
     case invalidRemoteURL
     case duplicateRepository(String)
@@ -10,6 +11,8 @@ enum StackriotError: LocalizedError {
     case noBranchToPublish
     case commandFailed(String)
     case keyMaterialInvalid
+    case devToolUnavailable(String)
+    case runConfigurationUnavailable(String)
 
     var errorDescription: String? {
         switch self {
@@ -31,6 +34,10 @@ enum StackriotError: LocalizedError {
             "The selected worktree has no active branch to publish."
         case .keyMaterialInvalid:
             "The SSH key could not be read or generated."
+        case let .devToolUnavailable(name):
+            "\(name) is not installed or is not relevant for this repository."
+        case let .runConfigurationUnavailable(name):
+            "The run configuration \(name) cannot be executed directly here."
         case let .commandFailed(message):
             message
         }

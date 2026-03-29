@@ -1,6 +1,12 @@
 import SwiftData
 import SwiftUI
 
+private struct RunConfigurationMenuSection: Identifiable {
+    let id: String
+    let title: String
+    let configurations: [RunConfiguration]
+}
+
 struct WorktreeActionBar: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
@@ -8,14 +14,13 @@ struct WorktreeActionBar: View {
     let worktree: WorktreeRecord
     let repository: ManagedRepository
 
-    @State private var pendingMakeTarget: String?
-    @State private var pendingScript: String?
+    @State private var pendingRunConfiguration: RunConfiguration?
     @State private var pendingGitPush = false
     @State private var pendingGitCommit = false
 
     var body: some View {
         HStack(spacing: 6) {
-            ideMenuButton
+            devToolMenuButton
             agentMenuButton
             terminalButton
 
@@ -47,31 +52,24 @@ struct WorktreeActionBar: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(.thinMaterial)
-        .confirmationDialog("Make Target ausführen?", isPresented: Binding(
-            get: { pendingMakeTarget != nil },
-            set: { if !$0 { pendingMakeTarget = nil } }
+        .confirmationDialog("Run Configuration ausführen?", isPresented: Binding(
+            get: { pendingRunConfiguration != nil },
+            set: { if !$0 { pendingRunConfiguration = nil } }
         )) {
             Button("Ausführen") {
-                if let target = pendingMakeTarget {
-                    appModel.runMakeTarget(target, in: worktree, repository: repository, modelContext: modelContext)
-                    pendingMakeTarget = nil
+                guard let configuration = pendingRunConfiguration else { return }
+                Task {
+                    await appModel.launchRunConfiguration(
+                        configuration,
+                        in: worktree,
+                        repository: repository,
+                        modelContext: modelContext
+                    )
+                    pendingRunConfiguration = nil
                 }
             }
         } message: {
-            Text(pendingMakeTarget.map { "make \($0) in \(worktree.branchName) ausführen?" } ?? "")
-        }
-        .confirmationDialog("NPM Script ausführen?", isPresented: Binding(
-            get: { pendingScript != nil },
-            set: { if !$0 { pendingScript = nil } }
-        )) {
-            Button("Ausführen") {
-                if let script = pendingScript {
-                    appModel.runNPMScript(script, in: worktree, repository: repository, modelContext: modelContext)
-                    pendingScript = nil
-                }
-            }
-        } message: {
-            Text(pendingScript.map { "npm run \($0) ausführen?" } ?? "")
+            Text(pendingRunConfiguration?.displayCommandLine ?? pendingRunConfiguration?.name ?? "")
         }
         .confirmationDialog("Git Push", isPresented: $pendingGitPush) {
             Button("Push") {
@@ -87,26 +85,28 @@ struct WorktreeActionBar: View {
         }
     }
 
-    // MARK: – IDE Menu
-
-    private var ideMenuButton: some View {
+    private var devToolMenuButton: some View {
         Menu {
-            ForEach(SupportedIDE.allCases) { ide in
-                Button("Open in \(ide.displayName)") {
+            ForEach(availableDevTools) { tool in
+                Button {
                     Task {
-                        await appModel.openIDE(ide, for: worktree, in: modelContext)
+                        await appModel.openDevTool(tool, for: worktree, in: modelContext)
                     }
+                } label: {
+                    Label("Open in \(tool.displayName)", systemImage: tool.systemImageName)
                 }
+            }
+            if availableDevTools.isEmpty {
+                Text("Keine passenden DevTools gefunden")
             }
         } label: {
             Image(systemName: "laptopcomputer")
         }
         .menuStyle(.button)
         .buttonStyle(.bordered)
-        .help("IDE öffnen")
+        .disabled(availableDevTools.isEmpty)
+        .help("DevTool öffnen")
     }
-
-    // MARK: – Agent Menu
 
     private var agentMenuButton: some View {
         Menu {
@@ -126,8 +126,6 @@ struct WorktreeActionBar: View {
         .help("AI Agent starten")
     }
 
-    // MARK: – Terminal Button
-
     private var terminalButton: some View {
         Button {
             appModel.openTerminal(for: worktree, in: modelContext)
@@ -139,45 +137,65 @@ struct WorktreeActionBar: View {
         .help("Neues Terminal öffnen")
     }
 
-    // MARK: – Run Config Menu
-
     private var runConfigButton: some View {
-        let makeTargets = appModel.availableMakeTargets(for: worktree)
-        let npmScripts = appModel.availableNPMScripts(for: worktree)
-        let hasConfigs = !makeTargets.isEmpty || !npmScripts.isEmpty
+        Menu {
+            ForEach(runConfigurationSections) { section in
+                Section(section.title) {
+                    ForEach(section.configurations) { configuration in
+                        runConfigurationMenuItem(for: configuration)
+                    }
+                }
+            }
 
-        return Menu {
-            if !makeTargets.isEmpty {
-                Section("Make Targets") {
-                    ForEach(makeTargets, id: \.self) { target in
-                        Button(target) {
-                            pendingMakeTarget = target
-                        }
-                    }
-                }
-            }
-            if !npmScripts.isEmpty {
-                Section("NPM Scripts") {
-                    ForEach(npmScripts, id: \.self) { script in
-                        Button(script) {
-                            pendingScript = script
-                        }
-                    }
-                }
-            }
-            if !hasConfigs {
-                Text("Kein Makefile / package.json gefunden")
+            if runConfigurationSections.isEmpty {
+                Text("Keine unterstützten Run Configurations gefunden")
             }
         } label: {
             Image(systemName: "play.fill")
         }
         .menuStyle(.button)
         .buttonStyle(.bordered)
-        .disabled(!hasConfigs || worktree.isDefaultBranchWorkspace)
+        .disabled(runConfigurationSections.isEmpty || worktree.isDefaultBranchWorkspace)
         .help("Run Configuration ausführen")
     }
 
-    // MARK: – Git Menu
+    @ViewBuilder
+    private func runConfigurationMenuItem(for configuration: RunConfiguration) -> some View {
+        let label = Label(runConfigurationTitle(for: configuration), systemImage: iconName(for: configuration))
+
+        if configuration.isDirectlyRunnable {
+            Button {
+                pendingRunConfiguration = configuration
+            } label: {
+                label
+            }
+        } else if let preferredDevTool = configuration.preferredDevTool, availableDevTools.contains(preferredDevTool) {
+            Button {
+                Task {
+                    await appModel.launchRunConfiguration(
+                        configuration,
+                        in: worktree,
+                        repository: repository,
+                        modelContext: modelContext
+                    )
+                }
+            } label: {
+                Label(
+                    "\(configuration.name) · Open in \(preferredDevTool.displayName)",
+                    systemImage: preferredDevTool.systemImageName
+                )
+            }
+        } else if let preferredDevTool = configuration.preferredDevTool {
+            Label(
+                "\(configuration.name) · Requires \(preferredDevTool.displayName)",
+                systemImage: "exclamationmark.triangle"
+            )
+            .foregroundStyle(.secondary)
+        } else {
+            Label(configuration.name, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.secondary)
+        }
+    }
 
     private var gitMenuButton: some View {
         Menu {
@@ -210,12 +228,55 @@ struct WorktreeActionBar: View {
         .help("Git Operationen")
     }
 
-    // MARK: – Helpers
-
     private var installedAgents: [AIAgentTool] {
         AIAgentTool.allCases.filter { tool in
             tool != .none && appModel.availableAgents.contains(tool)
         }
+    }
+
+    private var availableDevTools: [SupportedDevTool] {
+        appModel.availableDevTools(for: worktree)
+    }
+
+    private var runConfigurations: [RunConfiguration] {
+        appModel.availableRunConfigurations(for: worktree)
+    }
+
+    private var runConfigurationSections: [RunConfigurationMenuSection] {
+        var sections: [RunConfigurationMenuSection] = []
+
+        let nativeConfigurations = runConfigurations.filter { $0.source == .native }
+        if !nativeConfigurations.isEmpty {
+            sections.append(
+                RunConfigurationMenuSection(
+                    id: "native",
+                    title: "Native Configs",
+                    configurations: nativeConfigurations
+                )
+            )
+        }
+
+        let grouped = Dictionary(grouping: runConfigurations.filter { $0.source != .native }) { $0.displaySourceName }
+        let sortedKeys = grouped.keys.sorted { lhs, rhs in
+            let lhsRank = grouped[lhs]?.first?.preferredDevTool?.sortPriority ?? Int.max
+            let rhsRank = grouped[rhs]?.first?.preferredDevTool?.sortPriority ?? Int.max
+            if lhsRank == rhsRank {
+                return lhs < rhs
+            }
+            return lhsRank < rhsRank
+        }
+
+        sections.append(contentsOf: sortedKeys.map { key in
+            RunConfigurationMenuSection(
+                id: key,
+                title: key,
+                configurations: grouped[key]?.sorted {
+                    $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                } ?? []
+            )
+        })
+
+        return sections
     }
 
     private func agentIcon(for tool: AIAgentTool) -> String {
@@ -230,6 +291,28 @@ struct WorktreeActionBar: View {
             "chevron.left.forwardslash.chevron.right"
         case .cursorCLI:
             "cursorarrow.click.2"
+        }
+    }
+
+    private func iconName(for configuration: RunConfiguration) -> String {
+        switch configuration.executionBehavior {
+        case .direct:
+            return configuration.isDebugCapable ? "play.circle" : "play"
+        case .buildOnly:
+            return "hammer"
+        case .openInDevTool:
+            return configuration.preferredDevTool?.systemImageName ?? "laptopcomputer"
+        }
+    }
+
+    private func runConfigurationTitle(for configuration: RunConfiguration) -> String {
+        switch configuration.source {
+        case .native:
+            return "\(configuration.name) · \(configuration.kind.displayName)"
+        case .xcode:
+            return "\(configuration.name) · Build"
+        default:
+            return "\(configuration.name) · \(configuration.runnerType)"
         }
     }
 }

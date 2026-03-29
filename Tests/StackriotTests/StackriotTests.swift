@@ -939,6 +939,131 @@ struct StackriotTests {
         #expect(!projects.contains(where: { $0.id == project.id }))
     }
 
+
+    @MainActor
+    @Test
+    func vscodeLaunchConfigurationsAreParsedFromJSONC() throws {
+        let root = try temporaryDirectory(named: "vscode-launch")
+        let vscodeDirectory = root.appendingPathComponent(".vscode", isDirectory: true)
+        try FileManager.default.createDirectory(at: vscodeDirectory, withIntermediateDirectories: true)
+        try """
+        {
+          // Stackriot should tolerate JSONC comments and trailing commas
+          "configurations": [
+            {
+              "name": "API",
+              "type": "node",
+              "request": "launch",
+              "program": "${workspaceFolder}/server.js",
+              "cwd": "${workspaceFolder}/packages/api",
+              "args": ["--watch"],
+              "env": { "PORT": "3000", },
+            },
+          ],
+        }
+        """.write(
+            to: vscodeDirectory.appendingPathComponent("launch.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let configurations = RunConfigurationDiscoveryService().discoverRunConfigurations(in: root)
+        let configuration = try #require(configurations.first(where: { $0.source == .vscode && $0.name == "API" }))
+
+        #expect(configuration.command == "node")
+        #expect(configuration.arguments == [root.appendingPathComponent("server.js").path, "--watch"])
+        #expect(configuration.workingDirectory == root.appendingPathComponent("packages/api").path)
+        #expect(configuration.environment["PORT"] == "3000")
+        #expect(configuration.runtimeRequirement != nil)
+    }
+
+    @MainActor
+    @Test
+    func jetbrainsShellConfigurationsAreParsed() throws {
+        let root = try temporaryDirectory(named: "jetbrains-shell")
+        let ideaDirectory = root.appendingPathComponent(".idea/runConfigurations", isDirectory: true)
+        try FileManager.default.createDirectory(at: ideaDirectory, withIntermediateDirectories: true)
+        let scriptURL = root.appendingPathComponent("scripts/test.sh")
+        try FileManager.default.createDirectory(at: scriptURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "#!/bin/sh\necho ok\n".write(to: scriptURL, atomically: true, encoding: .utf8)
+        try "{}".write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+        try """
+        <component name="ProjectRunConfigurationManager">
+          <configuration name="Smoke" type="ShConfigurationType">
+            <option name="SCRIPT_PATH" value="scripts/test.sh" />
+            <option name="SCRIPT_OPTIONS" value="--smoke --ci" />
+            <option name="WORKING_DIRECTORY" value="${PROJECT_DIR}" />
+          </configuration>
+        </component>
+        """.write(
+            to: ideaDirectory.appendingPathComponent("Smoke.xml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let configurations = RunConfigurationDiscoveryService().discoverRunConfigurations(in: root)
+        let configuration = try #require(configurations.first(where: { $0.name == "Smoke" }))
+
+        #expect(configuration.source == .jetbrains)
+        #expect(configuration.command == scriptURL.path)
+        #expect(configuration.arguments == ["--smoke", "--ci"])
+        #expect(configuration.preferredDevTool == .webstorm)
+    }
+
+    @MainActor
+    @Test
+    func xcodeSharedSchemesBecomeBuildableRunConfigurations() throws {
+        let root = try temporaryDirectory(named: "xcode-schemes")
+        let schemeDirectory = root
+            .appendingPathComponent("Sample.xcodeproj", isDirectory: true)
+            .appendingPathComponent("xcshareddata/xcschemes", isDirectory: true)
+        try FileManager.default.createDirectory(at: schemeDirectory, withIntermediateDirectories: true)
+        try """
+        <Scheme LastUpgradeVersion="1600" version="1.7">
+          <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES" />
+          <LaunchAction buildConfiguration="Debug" />
+        </Scheme>
+        """.write(
+            to: schemeDirectory.appendingPathComponent("Sample.xcscheme"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let configurations = RunConfigurationDiscoveryService().discoverRunConfigurations(in: root)
+        let configuration = try #require(configurations.first(where: { $0.source == .xcode && $0.name == "Sample" }))
+
+        #expect(configuration.command == "xcodebuild")
+        #expect(configuration.arguments.contains("-project"))
+        #expect(configuration.arguments.contains("Sample"))
+        #expect(configuration.arguments.last == "build")
+        #expect(configuration.executionBehavior == .buildOnly)
+    }
+
+    @MainActor
+    @Test
+    func devToolContextFilteringMatchesRepositorySignals() throws {
+        let root = try temporaryDirectory(named: "dev-tool-context")
+        try "module demo\n".write(to: root.appendingPathComponent("go.mod"), atomically: true, encoding: .utf8)
+        try "{}".write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+        try "{}".write(to: root.appendingPathComponent("composer.json"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Client.xcodeproj"), withIntermediateDirectories: true)
+
+        let service = DevToolDiscoveryService()
+        let relevantTools = service.relevantTools(
+            from: [.cursor, .vscode, .zed, .xcode, .goland, .phpstorm, .webstorm, .intellijIdea],
+            for: root
+        )
+
+        #expect(relevantTools.contains(.cursor))
+        #expect(relevantTools.contains(.vscode))
+        #expect(relevantTools.contains(.zed))
+        #expect(relevantTools.contains(.xcode))
+        #expect(relevantTools.contains(.goland))
+        #expect(relevantTools.contains(.phpstorm))
+        #expect(relevantTools.contains(.webstorm))
+        #expect(relevantTools.contains(.intellijIdea))
+    }
+
     private func createSeededRemote(named name: String) async throws -> (root: URL, remote: URL) {
         let origin = try temporaryDirectory(named: name)
         let remote = origin.appendingPathComponent("\(name).git")

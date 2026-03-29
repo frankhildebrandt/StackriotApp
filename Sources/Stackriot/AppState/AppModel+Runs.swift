@@ -140,6 +140,7 @@ extension AppModel {
                         "TERM_PROGRAM": "Stackriot",
                     ]
                 ) { _, new in new }
+                .merging(descriptor.environment) { _, new in new }
                 let session = AgentTerminalSession(
                     runID: runID,
                     onData: { [weak self] chunk in
