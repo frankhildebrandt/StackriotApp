@@ -101,6 +101,35 @@ struct RepositoryDetailView: View {
             Wähle einen Agenten, der die Konflikte löst und den Commit `\(draft.commitMessage)` erstellt.
             """)
         }
+        .confirmationDialog(
+            "Lokaler Branch divergiert",
+            isPresented: Binding(
+                get: { appModel.pendingMainDivergence?.repositoryID == repository.id },
+                set: { if !$0 { appModel.pendingMainDivergence = nil } }
+            ),
+            presenting: appModel.pendingMainDivergence.flatMap { $0.repositoryID == repository.id ? $0 : nil }
+        ) { draft in
+            ForEach(SupportedIDE.allCases) { ide in
+                Button("In \(ide.displayName) \u{00f6}ffnen") {
+                    if let worktree = repository.worktrees.first(where: { $0.isDefaultBranchWorkspace }) {
+                        Task { await appModel.openIDE(ide, for: worktree, in: modelContext) }
+                    }
+                }
+            }
+            ForEach(availableAgents) { tool in
+                Button("Mit \(tool.displayName) l\u{00f6}sen") {
+                    appModel.launchMainDivergenceAgent(tool, for: draft, in: modelContext)
+                }
+            }
+            Button("Auf \(draft.defaultRemoteName)/\(draft.defaultBranch) zur\u{00fc}cksetzen", role: .destructive) {
+                Task { await appModel.forceResetMain(for: repository, in: modelContext) }
+            }
+            Button("Ignorieren", role: .cancel) {
+                appModel.pendingMainDivergence = nil
+            }
+        } message: { draft in
+            Text("Der lokale \(draft.defaultBranch)-Branch hat \(draft.aheadCount) Commit(s), die nicht auf \(draft.defaultRemoteName)/\(draft.defaultBranch) vorhanden sind.")
+        }
     }
 
     private func worktreeSection(worktrees: [WorktreeRecord]) -> some View {
@@ -241,6 +270,11 @@ struct RepositoryDetailView: View {
                             Button("Open in VS Code") {
                                 Task {
                                     await appModel.openIDE(.vscode, for: worktree, in: modelContext)
+                                }
+                            }
+                            Button("In Finder zeigen") {
+                                Task {
+                                    await appModel.revealWorktreeInFinder(worktree)
                                 }
                             }
                             if !worktree.isDefaultBranchWorkspace {
@@ -425,14 +459,22 @@ struct RepositoryDetailView: View {
             Spacer()
 
             Button {
+                isRefreshingStatuses = true
+                Task {
+                    await appModel.refresh(repository, in: modelContext)
+                    isRefreshingStatuses = false
+                }
             } label: {
-                Label(behind == 0 ? "Pull" : "Pull \(behind)", systemImage: "arrow.down.to.line")
+                if isRefreshingStatuses {
+                    Label("Sync…", systemImage: "arrow.down.to.line")
+                } else {
+                    Label(behind == 0 ? "Sync" : "Sync (\(behind))", systemImage: "arrow.down.to.line")
+                }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(true)
-            .opacity(behind > 0 ? 1 : 0.6)
-            .help("Nur Anzeige: Der Default-Branch wird beim Refresh vom Default Remote aktualisiert.")
+            .disabled(isRefreshingStatuses)
+            .help("Fetch von Remote und lokales \(repository.defaultBranch) zurücksetzen")
 
             Button {
             } label: {
@@ -443,6 +485,15 @@ struct RepositoryDetailView: View {
             .disabled(true)
             .opacity(ahead > 0 ? 1 : 0.6)
             .help("Nur Anzeige: Lokale Commits im Default-Branch müssten publiziert werden.")
+        }
+        Group {
+            if let log = appModel.syncLogs[repository.id] {
+                Text(log)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(log.contains("⚠") ? .orange : .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+            }
         }
         .padding(.top, 10)
         .overlay(alignment: .top) {

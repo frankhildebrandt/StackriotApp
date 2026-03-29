@@ -103,7 +103,8 @@ struct RepositoryManager {
                 defaultBranch: "main",
                 fetchedAt: nil,
                 fetchErrorMessage: "Repository missing or invalid.",
-                defaultBranchSyncErrorMessage: nil
+                defaultBranchSyncErrorMessage: nil,
+                mainDivergence: nil
             )
         }
 
@@ -137,19 +138,20 @@ struct RepositoryManager {
         )
         let defaultBranch = branchResult?.stdout.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? "main"
         let fetchErrorMessage = fetchErrors.isEmpty ? nil : fetchErrors.joined(separator: "\n\n")
-        let defaultBranchSyncErrorMessage = await syncDefaultBranch(
+        let syncResult = await syncDefaultBranch(
             bareRepositoryPath: bareRepositoryPath,
             defaultBranch: defaultBranch,
             defaultRemoteName: defaultRemoteName
         )
-        let status: RepositoryHealth = [fetchErrorMessage, defaultBranchSyncErrorMessage].allSatisfy { $0 == nil } ? .ready : .broken
+        let status: RepositoryHealth = [fetchErrorMessage, syncResult.errorMessage].allSatisfy { $0 == nil } ? .ready : .broken
 
         return RepositoryRefreshInfo(
             status: status,
             defaultBranch: defaultBranch,
             fetchedAt: didFetch ? .now : nil,
             fetchErrorMessage: fetchErrorMessage,
-            defaultBranchSyncErrorMessage: defaultBranchSyncErrorMessage
+            defaultBranchSyncErrorMessage: syncResult.errorMessage,
+            mainDivergence: syncResult.divergence
         )
     }
 
@@ -295,9 +297,9 @@ struct RepositoryManager {
         bareRepositoryPath: URL,
         defaultBranch: String,
         defaultRemoteName: String?
-    ) async -> String? {
+    ) async -> (errorMessage: String?, divergence: MainDivergenceRef?) {
         guard let defaultRemoteName, !defaultRemoteName.isEmpty else {
-            return nil
+            return (errorMessage: nil, divergence: nil)
         }
 
         do {
@@ -318,7 +320,7 @@ struct RepositoryManager {
                     arguments: ["--git-dir", bareRepositoryPath.path, "rev-parse", "--verify", localBranchRef]
                 )
                 guard localBranchResult.exitCode == 0 else {
-                    return "Default-branch sync failed: \(remoteRefResult.stderr.isEmpty ? remoteRefResult.stdout : remoteRefResult.stderr)"
+                    return (errorMessage: "Default-branch sync failed: \(remoteRefResult.stderr.isEmpty ? remoteRefResult.stdout : remoteRefResult.stderr)", divergence: nil)
                 }
                 targetCommit = localBranchResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
                 targetRefForReset = targetCommit
@@ -329,16 +331,26 @@ struct RepositoryManager {
                 arguments: ["--git-dir", bareRepositoryPath.path, "worktree", "list", "--porcelain"]
             )
             guard worktreeListResult.exitCode == 0 else {
-                return "Default-branch sync failed: \(worktreeListResult.stderr.isEmpty ? worktreeListResult.stdout : worktreeListResult.stderr)"
+                return (errorMessage: "Default-branch sync failed: \(worktreeListResult.stderr.isEmpty ? worktreeListResult.stdout : worktreeListResult.stderr)", divergence: nil)
             }
 
             if let worktreePath = parseWorktreePath(for: defaultBranch, from: worktreeListResult.stdout) {
+                // Check if local branch has commits ahead of the remote target before resetting.
+                let aheadResult = try? await CommandRunner.runCollected(
+                    executable: "git",
+                    arguments: ["--git-dir", bareRepositoryPath.path, "rev-list", "--count", "\(targetCommit)..refs/heads/\(defaultBranch)"]
+                )
+                let aheadCount = aheadResult.flatMap { Int($0.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+                if aheadCount > 0 {
+                    return (errorMessage: nil, divergence: MainDivergenceRef(worktreePath: worktreePath, aheadCount: aheadCount))
+                }
+
                 let resetResult = try await CommandRunner.runCollected(
                     executable: "git",
                     arguments: ["-C", worktreePath, "reset", "--hard", targetRefForReset]
                 )
                 guard resetResult.exitCode == 0 else {
-                    return "Default-branch sync failed: \(resetResult.stderr.isEmpty ? resetResult.stdout : resetResult.stderr)"
+                    return (errorMessage: "Default-branch sync failed: \(resetResult.stderr.isEmpty ? resetResult.stdout : resetResult.stderr)", divergence: nil)
                 }
             } else {
                 let updateResult = try await CommandRunner.runCollected(
@@ -346,34 +358,69 @@ struct RepositoryManager {
                     arguments: ["--git-dir", bareRepositoryPath.path, "update-ref", "refs/heads/\(defaultBranch)", targetCommit]
                 )
                 guard updateResult.exitCode == 0 else {
-                    return "Default-branch sync failed: \(updateResult.stderr.isEmpty ? updateResult.stdout : updateResult.stderr)"
+                    return (errorMessage: "Default-branch sync failed: \(updateResult.stderr.isEmpty ? updateResult.stdout : updateResult.stderr)", divergence: nil)
                 }
             }
 
-            return nil
+            return (errorMessage: nil, divergence: nil)
         } catch {
-            return "Default-branch sync failed: \(error.localizedDescription)"
+            return (errorMessage: "Default-branch sync failed: \(error.localizedDescription)", divergence: nil)
         }
     }
 
     private func parseWorktreePath(for branchName: String, from output: String) -> String? {
-        var currentWorktreePath: String?
+        // We must buffer attributes until the end of each block (empty line) because the
+        // `bare` attribute appears AFTER `branch` in porcelain output. Returning immediately
+        // on seeing `branch refs/heads/<name>` would incorrectly match the bare repo itself.
+        var currentPath: String?
+        var currentBranch: String?
+        var currentIsBare = false
 
         for line in output.split(whereSeparator: \.isNewline).map(String.init) {
             if let value = line.stripPrefix("worktree ") {
-                currentWorktreePath = value
-            } else if let value = line.stripPrefix("branch refs/heads/"), value == branchName {
-                return currentWorktreePath
+                // Start of a new block — evaluate previous block first.
+                if let path = currentPath, currentBranch == branchName, !currentIsBare {
+                    return path
+                }
+                currentPath = value
+                currentBranch = nil
+                currentIsBare = false
+            } else if let value = line.stripPrefix("branch refs/heads/") {
+                currentBranch = value
+            } else if line == "bare" {
+                currentIsBare = true
             } else if line.isEmpty {
-                currentWorktreePath = nil
+                if let path = currentPath, currentBranch == branchName, !currentIsBare {
+                    return path
+                }
+                currentPath = nil
+                currentBranch = nil
+                currentIsBare = false
             }
         }
-
+        // Handle the final block when there is no trailing newline.
+        if let path = currentPath, currentBranch == branchName, !currentIsBare {
+            return path
+        }
         return nil
     }
 
     private func cleanupTemporaryKeyFile(at url: URL?) {
         guard let url else { return }
         try? FileManager.default.removeItem(at: url)
+    }
+
+    func forceResetDefaultBranch(
+        worktreePath: String,
+        remoteName: String,
+        defaultBranch: String
+    ) async throws {
+        let result = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["-C", worktreePath, "reset", "--hard", "\(remoteName)/\(defaultBranch)"]
+        )
+        guard result.exitCode == 0 else {
+            throw DevVaultError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
     }
 }

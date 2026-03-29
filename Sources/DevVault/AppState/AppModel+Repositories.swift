@@ -144,7 +144,39 @@ extension AppModel {
         repository.lastErrorMessage = result.errorMessage
         repository.updatedAt = .now
         save(modelContext)
+
+        var logLines: [String] = []
+        let remoteName = defaultRemoteName ?? "origin"
+        if let fetchErr = result.fetchErrorMessage {
+            logLines.append("⚠ Fetch: \(fetchErr)")
+        } else {
+            logLines.append("✓ Fetch von \(remoteName) abgeschlossen")
+        }
+        if let syncErr = result.defaultBranchSyncErrorMessage {
+            logLines.append("⚠ Sync: \(syncErr)")
+        } else if let div = result.mainDivergence {
+            logLines.append("⚠ Divergenz erkannt: \(div.aheadCount) lokale Commit(s) vor \(remoteName)/\(result.defaultBranch) \u{2014} kein auto-Reset")
+        } else {
+            logLines.append("✓ \(result.defaultBranch) auf \(remoteName)/\(result.defaultBranch) zur\u{00fc}ckgesetzt")
+        }
+        syncLogs[repository.id] = logLines.joined(separator: "\n")
+
+        if let divergence = result.mainDivergence {
+            if pendingMainDivergence?.repositoryID != repository.id {
+                pendingMainDivergence = MainDivergenceDraft(
+                    repositoryID: repository.id,
+                    worktreePath: divergence.worktreePath,
+                    aheadCount: divergence.aheadCount,
+                    defaultBranch: result.defaultBranch,
+                    defaultRemoteName: defaultRemoteName ?? "origin"
+                )
+            }
+        } else if pendingMainDivergence?.repositoryID == repository.id {
+            pendingMainDivergence = nil
+        }
+
         _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
+        await refreshWorktreeStatuses(for: repository)
     }
 
     func refreshSelectedRepository() {
@@ -169,6 +201,29 @@ extension AppModel {
         for repository in repositories {
             await refresh(repository, in: modelContext)
         }
+    }
+
+    func revealWorktreeInFinder(_ worktree: WorktreeRecord) async {
+        do {
+            try await services.ideManager.revealInFinder(path: URL(fileURLWithPath: worktree.path))
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func forceResetMain(for repository: ManagedRepository, in modelContext: ModelContext) async {
+        guard let draft = pendingMainDivergence, draft.repositoryID == repository.id else { return }
+        pendingMainDivergence = nil
+        do {
+            try await services.repositoryManager.forceResetDefaultBranch(
+                worktreePath: draft.worktreePath,
+                remoteName: draft.defaultRemoteName,
+                defaultBranch: draft.defaultBranch
+            )
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+        await refreshWorktreeStatuses(for: repository)
     }
 
     func deleteRepository(_ repository: ManagedRepository, in modelContext: ModelContext) async {

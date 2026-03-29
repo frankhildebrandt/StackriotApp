@@ -18,6 +18,8 @@ final class AppModel: @unchecked Sendable {
     var worktreeStatuses: [UUID: WorktreeStatus] = [:]
     var worktreePendingMergeOfferID: UUID?
     var pendingIntegrationConflict: IntegrationConflictDraft?
+    var pendingMainDivergence: MainDivergenceDraft?
+    var syncLogs: [UUID: String] = [:]
     var activeRunIDs: Set<UUID> = []
     var refreshingRepositoryIDs: Set<UUID> = []
     var isCloneSheetPresented = false

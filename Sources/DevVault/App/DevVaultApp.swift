@@ -9,6 +9,11 @@ struct DevVaultApp: App {
         WindowGroup("DevVault", id: "main") {
             RootView()
                 .environment(appModel)
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    Task {
+                        await appModel.refreshAllRepositories(force: true)
+                    }
+                }
         }
         .defaultSize(width: 1480, height: 920)
         .modelContainer(for: DevVaultModelContainer.persistentModelTypes)

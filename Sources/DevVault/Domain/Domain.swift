@@ -207,6 +207,7 @@ struct RepositoryRefreshInfo: Sendable {
     let fetchedAt: Date?
     let fetchErrorMessage: String?
     let defaultBranchSyncErrorMessage: String?
+    let mainDivergence: MainDivergenceRef?
 
     var errorMessage: String? {
         [fetchErrorMessage, defaultBranchSyncErrorMessage]
@@ -223,6 +224,11 @@ struct WorktreeStatus: Sendable {
     var deletedLines: Int = 0
     var hasUncommittedChanges: Bool = false
     var hasConflicts: Bool = false
+}
+
+struct MainDivergenceRef: Sendable {
+    let worktreePath: String
+    let aheadCount: Int
 }
 
 enum SyncStrategy {
@@ -258,6 +264,16 @@ struct IntegrationConflictDraft: Identifiable, Sendable {
     var commitMessage: String {
         "Integrate \(sourceBranch) into \(defaultBranch)"
     }
+}
+
+struct MainDivergenceDraft: Identifiable, Sendable {
+    let repositoryID: UUID
+    let worktreePath: String
+    let aheadCount: Int
+    let defaultBranch: String
+    let defaultRemoteName: String
+
+    var id: UUID { repositoryID }
 }
 
 struct WorkspaceDiffSnapshot: Sendable {
