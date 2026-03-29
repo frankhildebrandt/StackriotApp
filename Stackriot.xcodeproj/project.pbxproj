@@ -75,9 +75,10 @@
 		E00000000000000000000040 /* PlanEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000040 /* PlanEditorView.swift */; };
 		E00000000000000000000041 /* ReadmeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000041 /* ReadmeView.swift */; };
 		E00000000000000000000042 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000042 /* AIProviderService.swift */; };
-		E00000000000000000000043 /* AgentRunSummaryWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000043 /* AgentRunSummaryWindow.swift */; };
-		E00000000000000000000044 /* DevToolDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000044 /* DevToolDiscoveryService.swift */; };
-		E00000000000000000000045 /* RunConfigurationDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000045 /* RunConfigurationDiscoveryService.swift */; };
+			E00000000000000000000043 /* AgentRunSummaryWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000043 /* AgentRunSummaryWindow.swift */; };
+			E00000000000000000000044 /* DevToolDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000044 /* DevToolDiscoveryService.swift */; };
+			E00000000000000000000045 /* RunConfigurationDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000045 /* RunConfigurationDiscoveryService.swift */; };
+			E00000000000000000000047 /* WorkspaceDiffFileList.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000047 /* WorkspaceDiffFileList.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -149,9 +150,10 @@
 		D00000000000000000000040 /* PlanEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanEditorView.swift; sourceTree = "<group>"; };
 		D00000000000000000000041 /* ReadmeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadmeView.swift; sourceTree = "<group>"; };
 		D00000000000000000000042 /* AIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderService.swift; sourceTree = "<group>"; };
-		D00000000000000000000043 /* AgentRunSummaryWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunSummaryWindow.swift; sourceTree = "<group>"; };
-		D00000000000000000000044 /* DevToolDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevToolDiscoveryService.swift; sourceTree = "<group>"; };
-		D00000000000000000000045 /* RunConfigurationDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConfigurationDiscoveryService.swift; sourceTree = "<group>"; };
+			D00000000000000000000043 /* AgentRunSummaryWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunSummaryWindow.swift; sourceTree = "<group>"; };
+			D00000000000000000000044 /* DevToolDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevToolDiscoveryService.swift; sourceTree = "<group>"; };
+			D00000000000000000000045 /* RunConfigurationDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConfigurationDiscoveryService.swift; sourceTree = "<group>"; };
+			D00000000000000000000047 /* WorkspaceDiffFileList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDiffFileList.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -312,15 +314,16 @@
 			path = Terminal;
 			sourceTree = "<group>";
 		};
-		F0000000000000000000000A /* Repository */ = {
-			isa = PBXGroup;
-			children = (
-				D0000000000000000000000F /* AgentActivityDot.swift */,
-				D00000000000000000000010 /* DiffInspectorView.swift */,
-				D00000000000000000000011 /* RepositoryDetailView.swift */,
-				D00000000000000000000036 /* WorktreeActionBar.swift */,
-			);
-			path = Repository;
+			F0000000000000000000000A /* Repository */ = {
+				isa = PBXGroup;
+				children = (
+					D0000000000000000000000F /* AgentActivityDot.swift */,
+					D00000000000000000000010 /* DiffInspectorView.swift */,
+					D00000000000000000000011 /* RepositoryDetailView.swift */,
+					D00000000000000000000047 /* WorkspaceDiffFileList.swift */,
+					D00000000000000000000036 /* WorktreeActionBar.swift */,
+				);
+				path = Repository;
 			sourceTree = "<group>";
 		};
 		F0000000000000000000000B /* Root */ = {
@@ -473,10 +476,11 @@
 				E0000000000000000000000D /* AppChromeViews.swift in Sources */,
 				E0000000000000000000000E /* Domain.swift in Sources */,
 				E0000000000000000000000F /* AgentActivityDot.swift in Sources */,
-				E00000000000000000000010 /* DiffInspectorView.swift in Sources */,
-				E00000000000000000000011 /* RepositoryDetailView.swift in Sources */,
-				E00000000000000000000036 /* WorktreeActionBar.swift in Sources */,
-				E00000000000000000000012 /* RootView.swift in Sources */,
+					E00000000000000000000010 /* DiffInspectorView.swift in Sources */,
+					E00000000000000000000011 /* RepositoryDetailView.swift in Sources */,
+					E00000000000000000000047 /* WorkspaceDiffFileList.swift in Sources */,
+					E00000000000000000000036 /* WorktreeActionBar.swift in Sources */,
+					E00000000000000000000012 /* RootView.swift in Sources */,
 				E00000000000000000000013 /* RunConsoleColumn.swift in Sources */,
 				E00000000000000000000014 /* RunConsoleView.swift in Sources */,
 				E00000000000000000000040 /* PlanEditorView.swift in Sources */,
@@ -641,13 +645,11 @@
 				CODE_SIGN_ENTITLEMENTS = Stackriot.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Stackriot;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
+					GENERATE_INFOPLIST_FILE = NO;
+					INFOPLIST_FILE = "Stackriot-Info.plist";
+					LD_RUNPATH_SEARCH_PATHS = (
+						"$(inherited)",
+						"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;
@@ -667,13 +669,11 @@
 				CODE_SIGN_ENTITLEMENTS = Stackriot.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Stackriot;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
+					GENERATE_INFOPLIST_FILE = NO;
+					INFOPLIST_FILE = "Stackriot-Info.plist";
+					LD_RUNPATH_SEARCH_PATHS = (
+						"$(inherited)",
+						"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;
