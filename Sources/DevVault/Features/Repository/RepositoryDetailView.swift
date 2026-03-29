@@ -7,8 +7,8 @@ struct RepositoryDetailView: View {
 
     let repository: ManagedRepository
     @State private var worktreePendingRemoval: WorktreeRemovalDraft?
-    @State private var showRunHistory = false
     @State private var isRefreshingStatuses = false
+    @State private var hoveredWorktreeID: UUID?
 
     var body: some View {
         let worktrees = appModel.worktrees(for: repository)
@@ -17,9 +17,7 @@ struct RepositoryDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 worktreeSection(worktrees: worktrees)
 
-                if selectedWorktree != nil {
-                    runHistorySection
-                } else {
+                if selectedWorktree == nil {
                     emptyWorktreeState
                 }
             }
@@ -129,11 +127,17 @@ struct RepositoryDetailView: View {
                     .foregroundStyle(.secondary)
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             } else {
-                VStack(spacing: 10) {
+                VStack(spacing: 0) {
                     ForEach(worktrees) { worktree in
                         HStack(alignment: .top, spacing: 12) {
+                            // Left accent strip for selected
+                            Rectangle()
+                                .fill(selectedWorktree?.id == worktree.id ? Color.accentColor : Color.clear)
+                                .frame(width: 2)
+                                .padding(.vertical, 4)
+
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack(spacing: 8) {
                                     Text(worktreeTitle(for: worktree))
@@ -165,21 +169,21 @@ struct RepositoryDetailView: View {
                             }
 
                             Spacer()
-
-                            if selectedWorktree?.id == worktree.id {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.tint)
-                            }
                         }
-                        .padding(16)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
-                            selectedWorktree?.id == worktree.id ? .regularMaterial : (worktree.isDefaultBranchWorkspace ? .ultraThinMaterial : .thinMaterial),
-                            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            selectedWorktree?.id == worktree.id
+                                ? Color.accentColor.opacity(0.10)
+                                : (hoveredWorktreeID == worktree.id ? Color.primary.opacity(0.04) : Color.clear)
                         )
-                        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .contentShape(Rectangle())
                         .onTapGesture {
                             appModel.selectWorktree(worktree, in: repository)
+                        }
+                        .onHover { isHovering in
+                            hoveredWorktreeID = isHovering ? worktree.id : nil
                         }
                         .contextMenu {
                             Button("Open in Cursor") {
@@ -224,149 +228,21 @@ struct RepositoryDetailView: View {
                                 }
                             }
                         }
+
+                        if worktree.id != worktrees.last?.id {
+                            Divider()
+                                .padding(.leading, 16)
+                        }
                     }
                 }
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+                )
             }
         }
-    }
-
-    private var runHistorySection: some View {
-        let recentRuns = selectedWorktreeID.map { appModel.runs(forWorktreeID: $0, in: repository) } ?? []
-
-        return VStack(alignment: .leading, spacing: 10) {
-            // Collapsible header button
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    showRunHistory.toggle()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: showRunHistory ? "chevron.down" : "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 12)
-                        .animation(.easeInOut(duration: 0.18), value: showRunHistory)
-                    Text("Run History")
-                        .font(.title3.weight(.semibold))
-                    if !recentRuns.isEmpty {
-                        Text("\(recentRuns.count)")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.thinMaterial, in: Capsule())
-                    }
-                    Spacer()
-                }
-            }
-            .buttonStyle(.plain)
-
-            if showRunHistory {
-                if recentRuns.isEmpty {
-                    Text("No runs recorded for this worktree yet.")
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 20)
-                } else {
-                    runHistoryTable(runs: recentRuns)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func runHistoryTable(runs: [RunRecord]) -> some View {
-        let displayRuns = Array(runs.prefix(30))
-
-        VStack(spacing: 0) {
-            // Column headers
-            HStack(spacing: 0) {
-                Color.clear.frame(width: 28)
-                Text("Title")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Command")
-                    .frame(width: 180, alignment: .leading)
-                Text("Gestartet")
-                    .frame(width: 72, alignment: .trailing)
-                Text("Dauer")
-                    .frame(width: 60, alignment: .trailing)
-                Color.clear.frame(width: 10)
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(.thinMaterial)
-
-            Divider()
-
-            ForEach(displayRuns) { run in
-                Button {
-                    appModel.reopenTab(run)
-                } label: {
-                    HStack(spacing: 0) {
-                        // Status dot
-                        Circle()
-                            .fill(statusColor(for: run.status))
-                            .frame(width: 7, height: 7)
-                            .frame(width: 28)
-
-                        // Title
-                        Text(run.title)
-                            .font(.subheadline)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        // Command
-                        Text(run.commandLine)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .frame(width: 180, alignment: .leading)
-
-                        // Started
-                        Text(run.startedAt.formatted(date: .omitted, time: .shortened))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 72, alignment: .trailing)
-
-                        // Duration
-                        Text(runDurationText(for: run))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 60, alignment: .trailing)
-
-                        Color.clear.frame(width: 10)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                    .background(Color.primary.opacity(0.0001))
-                }
-                .buttonStyle(.plain)
-
-                if run.id != displayRuns.last?.id {
-                    Divider().padding(.leading, 28)
-                }
-            }
-        }
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
-        )
-        .transition(.move(edge: .top).combined(with: .opacity))
-    }
-
-    private func runDurationText(for run: RunRecord) -> String {
-        guard let end = run.endedAt else {
-            return run.status == .running ? "…" : "-"
-        }
-        let secs = Int(end.timeIntervalSince(run.startedAt))
-        if secs < 60 { return "\(secs)s" }
-        let m = secs / 60
-        let s = secs % 60
-        return s == 0 ? "\(m)m" : "\(m)m \(s)s"
     }
 
     private var emptyWorktreeState: some View {
@@ -376,10 +252,6 @@ struct RepositoryDetailView: View {
 
     private var selectedWorktree: WorktreeRecord? {
         appModel.selectedWorktree(for: repository)
-    }
-
-    private var selectedWorktreeID: UUID? {
-        appModel.selectedWorktreeID(for: repository)
     }
 
     private var availableAgents: [AIAgentTool] {
@@ -428,23 +300,4 @@ struct RepositoryDetailView: View {
             }
         }
     }
-
-    private func statusColor(for status: RunStatusKind) -> Color {
-        switch status {
-        case .pending, .running:
-            .orange
-        case .succeeded:
-            .green
-        case .failed:
-            .red
-        case .cancelled:
-            .gray
-        }
-    }
-
-    private static let relativeDateFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter
-    }()
 }
