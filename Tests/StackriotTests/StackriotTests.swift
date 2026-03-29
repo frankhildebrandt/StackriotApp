@@ -158,6 +158,38 @@ struct StackriotTests {
     }
 
     @Test
+    func generatedCommitMessageUsesFeatureSubjectAndBulletBody() {
+        let message = GeneratedCommitMessage(
+            summaryTitle: "Add commit action to AI agent summary",
+            summaryText: """
+            Added a commit button directly to the AI summary view.
+            Displayed the current diff alongside the summary for quick review.
+            """
+        )
+
+        #expect(message?.subject == "Feature: Add commit action to AI agent summary")
+        #expect(message?.bodyItems == [
+            "Added a commit button directly to the AI summary view",
+            "Displayed the current diff alongside the summary for quick review"
+        ])
+    }
+
+    @Test
+    func generatedCommitMessageDropsGenericRunMetadataAndDetectsFixes() {
+        let message = GeneratedCommitMessage(
+            summaryTitle: "Agentlauf abgeschlossen",
+            summaryText: """
+            Der Run `Codex` wurde mit Exit-Code 0 beendet.
+            Fixed the summary card so changelog rendering no longer disappears after reload.
+            Relevante Auszuege: Fixed the summary card so changelog rendering no longer disappears after reload.
+            """
+        )
+
+        #expect(message?.subject == "Fix: Fixed the summary card so changelog rendering no longer disappears")
+        #expect(message?.bodyItems == [])
+    }
+
+    @Test
     func nodeVersionResolverSupportsMinimumComparatorRanges() {
         let resolver = NodeVersionSpecResolver()
         let resolved = resolver.resolveInstallableSpec(
