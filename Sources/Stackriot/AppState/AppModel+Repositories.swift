@@ -151,16 +151,18 @@ extension AppModel {
         if let fetchErr = result.fetchErrorMessage {
             logLines.append("⚠ Fetch: \(fetchErr)")
         } else {
-            logLines.append("✓ Fetch von \(remoteName) abgeschlossen")
+            // logLines.append("✓ Fetch von \(remoteName) abgeschlossen")
         }
         if let syncErr = result.defaultBranchSyncErrorMessage {
             logLines.append("⚠ Sync: \(syncErr)")
         } else if let syncSummary = result.defaultBranchSyncSummary {
-            logLines.append("✓ Sync: \(syncSummary)")
+            // logLines.append("✓ Sync: \(syncSummary)")
         } else {
             logLines.append("✓ Sync: Kein Default-Worktree für \(result.defaultBranch) gefunden")
         }
-        syncLogs[repository.id] = logLines.joined(separator: "\n")
+        if logLines != [] {
+            syncLogs[repository.id] = logLines.joined(separator: "\n")
+        }
 
         _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
         await refreshWorktreeStatuses(for: repository)
