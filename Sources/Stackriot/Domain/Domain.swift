@@ -847,6 +847,7 @@ struct NodeRuntimeStatusSnapshot: Codable, Sendable {
     var bootstrapState = "Not initialized"
     var defaultVersionSpec = "lts/*"
     var resolvedDefaultVersion = "Unavailable"
+    var resolvedDefaultBinPath: String?
     var runtimeRootPath = ""
     var npmCachePath = ""
     var lastUpdatedAt: Date?
