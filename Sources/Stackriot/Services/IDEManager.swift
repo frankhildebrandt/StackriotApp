@@ -2,6 +2,25 @@ import AppKit
 import Foundation
 
 struct IDEManager {
+    @MainActor
+    static func chooseDirectory(
+        title: String,
+        message: String,
+        prompt: String,
+        initialDirectory: URL? = nil
+    ) -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = title
+        panel.message = message
+        panel.prompt = prompt
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = initialDirectory
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
     func open(_ tool: SupportedDevTool, worktreeURL: URL) async throws {
         guard installationURL(for: tool) != nil else {
             throw StackriotError.devToolUnavailable(tool.displayName)

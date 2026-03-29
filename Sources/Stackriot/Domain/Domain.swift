@@ -854,6 +854,7 @@ struct NodeRuntimeStatusSnapshot: Codable, Sendable {
 }
 
 enum AppPreferences {
+    static let selectedNamespaceIDKey = "navigation.selectedNamespaceID"
     static let autoRefreshEnabledKey = "repositories.autoRefreshEnabled"
     static let autoRefreshIntervalKey = "repositories.autoRefreshIntervalSeconds"
     static let defaultAutoRefreshEnabled = true

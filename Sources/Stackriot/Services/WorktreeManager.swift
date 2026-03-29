@@ -119,17 +119,17 @@ struct WorktreeManager {
         repositoryName: String,
         branchName: String,
         sourceBranch: String,
-        directoryName: String? = nil
+        directoryName: String? = nil,
+        destinationRoot: URL? = nil
     ) async throws -> CreatedWorktreeInfo {
         let trimmedBranch = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedBranch.isEmpty else {
             throw StackriotError.branchNameRequired
         }
 
-        try AppPaths.ensureBaseDirectories()
-        let worktreeRoot = AppPaths.worktreesRoot.appendingPathComponent(
-            AppPaths.sanitizedPathComponent(repositoryName),
-            isDirectory: true
+        let worktreeRoot = try resolvedWorktreeRoot(
+            repositoryName: repositoryName,
+            destinationRoot: destinationRoot
         )
         try FileManager.default.createDirectory(at: worktreeRoot, withIntermediateDirectories: true)
 
@@ -154,6 +154,33 @@ struct WorktreeManager {
         }
 
         return CreatedWorktreeInfo(branchName: trimmedBranch, path: destination)
+    }
+
+    func moveWorktree(
+        bareRepositoryPath: URL,
+        worktreePath: URL,
+        newParentDirectory: URL,
+        directoryName: String
+    ) async throws -> URL {
+        let trimmedDirectoryName = directoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDirectoryName.isEmpty else {
+            throw StackriotError.branchNameRequired
+        }
+
+        try FileManager.default.createDirectory(at: newParentDirectory, withIntermediateDirectories: true)
+        let destination = try uniquePreservingDirectory(in: newParentDirectory, preferredName: trimmedDirectoryName)
+        let result = try await runCommand(
+            "git",
+            ["--git-dir", bareRepositoryPath.path, "worktree", "move", worktreePath.path, destination.path],
+            nil,
+            [:]
+        )
+
+        guard result.exitCode == 0 else {
+            throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
+
+        return destination
     }
 
     func removeWorktree(bareRepositoryPath: URL, worktreePath: URL) async throws {
@@ -248,6 +275,18 @@ struct WorktreeManager {
             [:]
         )
         return result.exitCode == 0
+    }
+
+    private func resolvedWorktreeRoot(repositoryName: String, destinationRoot: URL?) throws -> URL {
+        if let destinationRoot {
+            return destinationRoot
+        }
+
+        try AppPaths.ensureBaseDirectories()
+        return AppPaths.worktreesRoot.appendingPathComponent(
+            AppPaths.sanitizedPathComponent(repositoryName),
+            isDirectory: true
+        )
     }
 
     private static func normalizedWorktreeSegment(from value: String) -> String {

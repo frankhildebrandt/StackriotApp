@@ -12,15 +12,9 @@ struct CreateWorktreeSheet: View {
     @State private var pendingCreationConfirmation = false
     @State private var searchTask: Task<Void, Never>?
 
-    private var requiresConfirmedTicket: Bool {
-        appModel.worktreeDraft.ticketProviderStatus?.isAvailable == true
-            && appModel.worktreeDraft.ticketProvider == .github
-    }
-
     private var canCreate: Bool {
         guard !appModel.worktreeDraft.normalizedBranchName.isEmpty else { return false }
-        guard !isCreating else { return false }
-        return !requiresConfirmedTicket || appModel.worktreeDraft.hasConfirmedTicket
+        return !isCreating
     }
 
     private var sourceBranchName: String {
@@ -29,18 +23,32 @@ struct CreateWorktreeSheet: View {
     }
 
     private var creationConfirmationMessage: String {
+        let destinationDescription = projectedDestinationPath
+            ?? "Standardpfad unter \(AppPaths.worktreesRoot.path)"
         var message = """
         Es wird ein neuer lokaler Worktree mit dem Branch \(appModel.worktreeDraft.normalizedBranchName) aus \(sourceBranchName) angelegt.
+        Zielpfad: \(destinationDescription)
         Dateien und Metadaten in diesem Repository werden lokal erweitert.
         """
 
-        if requiresConfirmedTicket, let selectedIssue = appModel.worktreeDraft.selectedTicket {
+        if appModel.worktreeDraft.hasConfirmedTicket, let selectedIssue = appModel.worktreeDraft.selectedTicket {
             message += "\n\nDie bestaetigte Issue #\(selectedIssue.number) wird als Kontext uebernommen und der initiale Plan vorbereitet."
         } else if let issueContext = appModel.worktreeDraft.issueContext.nilIfBlank {
             message += "\n\nDer Kontext \"\(issueContext)\" wird dem Worktree zugeordnet."
         }
 
         return message
+    }
+
+    private var destinationRootDescription: String {
+        appModel.worktreeDraft.destinationRootPath?.nilIfBlank ?? "Standardpfad"
+    }
+
+    private var projectedDestinationPath: String? {
+        let normalizedBranchName = appModel.worktreeDraft.normalizedBranchName
+        guard !normalizedBranchName.isEmpty else { return nil }
+        guard let destinationRoot = appModel.worktreeDraft.destinationRootURL else { return nil }
+        return destinationRoot.appendingPathComponent(normalizedBranchName, isDirectory: true).path
     }
 
     var body: some View {
@@ -88,14 +96,45 @@ struct CreateWorktreeSheet: View {
                             .disabled(isCreating)
                     }
 
-                    if !requiresConfirmedTicket {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Kontext (optional)")
-                                .font(.caption.weight(.medium))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Kontext (optional)")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        TextField("Kurzer Kontext", text: $appModel.worktreeDraft.issueContext)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(isCreating || draft.hasConfirmedTicket)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Zielordner")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+
+                        Text(destinationRootDescription)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(draft.destinationRootPath == nil ? .secondary : .primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                        HStack(spacing: 8) {
+                            Button("Open Folder") {
+                                chooseDestinationRoot()
+                            }
+                            .disabled(isCreating)
+
+                            Button("Standardpfad") {
+                                appModel.worktreeDraft.destinationRootPath = nil
+                            }
+                            .disabled(isCreating || draft.destinationRootPath == nil)
+                        }
+
+                        if let projectedDestinationPath {
+                            Text("Effektiver Pfad: \(projectedDestinationPath)")
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
-                            TextField("Kurzer Kontext", text: $appModel.worktreeDraft.issueContext)
-                                .textFieldStyle(.roundedBorder)
-                                .disabled(isCreating)
+                                .lineLimit(2)
                         }
                     }
 
@@ -107,117 +146,141 @@ struct CreateWorktreeSheet: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Ticket-Auswahl")
-                        .font(.headline)
-
-                    if let status {
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                .foregroundStyle(status.isAvailable ? .green : .orange)
-                            Text(status.message)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            appModel.worktreeDraft.isTicketSectionExpanded.toggle()
                         }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background((status.isAvailable ? Color.green : Color.orange).opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
-
-                    HStack(spacing: 8) {
-                        TextField("Issue # oder Titel", text: $appModel.worktreeDraft.ticketSearchText)
-                            .textFieldStyle(.roundedBorder)
-                            .disabled(isCreating || status?.isAvailable != true)
-
-                        Button("Suchen") {
-                            triggerImmediateSearch()
-                        }
-                        .disabled(isCreating || status?.isAvailable != true || draft.ticketSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-
-                    if draft.isTicketLoading {
-                        ProgressView("GitHub-Issues werden geladen...")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else if status?.isAvailable == true {
-                        if draft.ticketSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text("Suche nach einer Issue-Nummer oder einem Titel, um ein Ticket fuer diesen Worktree zu bestaetigen.")
-                                .font(.caption)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: draft.isTicketSectionExpanded ? "chevron.down" : "chevron.right")
+                                .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
-                        } else if draft.ticketSearchResults.isEmpty {
-                            Text("Keine Issues gefunden.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ScrollView {
-                                LazyVStack(alignment: .leading, spacing: 8) {
-                                    ForEach(draft.ticketSearchResults) { issue in
-                                        Button {
-                                            Task {
-                                                await appModel.confirmWorktreeTicket(issue, for: repository)
-                                            }
-                                        } label: {
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text("#\(issue.number) \(issue.title)")
-                                                    .font(.subheadline.weight(.medium))
-                                                    .foregroundStyle(.primary)
-                                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                                Text(issue.state.capitalized)
-                                                    .font(.caption)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            .padding(10)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                        }
-                                        .buttonStyle(.plain)
-                                        .disabled(isCreating)
-                                    }
-                                }
-                            }
-                            .frame(maxHeight: 220)
-                        }
-                    }
-
-                    if let selectedIssue = draft.selectedTicket {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 8) {
-                                Image(systemName: draft.hasConfirmedTicket ? "checkmark.seal.fill" : "number")
-                                    .foregroundStyle(draft.hasConfirmedTicket ? .green : .secondary)
-                                Text(draft.hasConfirmedTicket ? "Issue bestaetigt" : "Issue ausgewaehlt")
+                                .frame(width: 12)
+                            Text("GitHub-Issue (optional)")
+                                .font(.headline)
+                            Spacer()
+                            if draft.hasConfirmedTicket, let selectedIssue = draft.selectedTicket {
+                                Text("#\(selectedIssue.number)")
                                     .font(.caption.weight(.medium))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.green)
                             }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
 
-                            Text("#\(selectedIssue.number) \(selectedIssue.title)")
-                                .font(.subheadline.weight(.medium))
-
-                            if let details = draft.selectedIssueDetails {
-                                Text(details.url)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                if !details.labels.isEmpty {
-                                    Text(details.labels.joined(separator: ", "))
+                    if draft.isTicketSectionExpanded {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if let status {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                        .foregroundStyle(status.isAvailable ? .green : .orange)
+                                    Text(status.message)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background((status.isAvailable ? Color.green : Color.orange).opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
 
-                            if draft.isGeneratingSuggestedName {
-                                ProgressView("Worktree-Name wird vorgeschlagen…")
+                            HStack(spacing: 8) {
+                                TextField("Issue # oder Titel", text: $appModel.worktreeDraft.ticketSearchText)
+                                    .textFieldStyle(.roundedBorder)
+                                    .disabled(isCreating || status?.isAvailable != true)
+
+                                Button("Suchen") {
+                                    triggerImmediateSearch()
+                                }
+                                .disabled(isCreating || status?.isAvailable != true || draft.ticketSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            }
+
+                            if draft.isTicketLoading {
+                                ProgressView("GitHub-Issues werden geladen...")
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                            } else if let details = draft.selectedIssueDetails {
-                                Button("Worktree-Namen neu vorschlagen") {
-                                    Task {
-                                        await appModel.populateSuggestedWorktreeName(from: details)
+                            } else if status?.isAvailable == true {
+                                if draft.ticketSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Text("Suche nach einer Issue-Nummer oder einem Titel, um optional Kontext fuer diesen Worktree zu uebernehmen.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else if draft.ticketSearchResults.isEmpty {
+                                    Text("Keine Issues gefunden.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    ScrollView {
+                                        LazyVStack(alignment: .leading, spacing: 8) {
+                                            ForEach(draft.ticketSearchResults) { issue in
+                                                Button {
+                                                    Task {
+                                                        await appModel.confirmWorktreeTicket(issue, for: repository)
+                                                    }
+                                                } label: {
+                                                    VStack(alignment: .leading, spacing: 4) {
+                                                        Text("#\(issue.number) \(issue.title)")
+                                                            .font(.subheadline.weight(.medium))
+                                                            .foregroundStyle(.primary)
+                                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                                        Text(issue.state.capitalized)
+                                                            .font(.caption)
+                                                            .foregroundStyle(.secondary)
+                                                    }
+                                                    .padding(10)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                                }
+                                                .buttonStyle(.plain)
+                                                .disabled(isCreating)
+                                            }
+                                        }
+                                    }
+                                    .frame(maxHeight: 220)
+                                }
+                            }
+
+                            if let selectedIssue = draft.selectedTicket {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: draft.hasConfirmedTicket ? "checkmark.seal.fill" : "number")
+                                            .foregroundStyle(draft.hasConfirmedTicket ? .green : .secondary)
+                                        Text(draft.hasConfirmedTicket ? "Issue bestaetigt" : "Issue ausgewaehlt")
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Text("#\(selectedIssue.number) \(selectedIssue.title)")
+                                        .font(.subheadline.weight(.medium))
+
+                                    if let details = draft.selectedIssueDetails {
+                                        Text(details.url)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                        if !details.labels.isEmpty {
+                                            Text(details.labels.joined(separator: ", "))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+
+                                    if draft.isGeneratingSuggestedName {
+                                        ProgressView("Worktree-Name wird vorgeschlagen…")
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    } else if let details = draft.selectedIssueDetails {
+                                        Button("Worktree-Namen neu vorschlagen") {
+                                            Task {
+                                                await appModel.populateSuggestedWorktreeName(from: details)
+                                            }
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .disabled(isCreating)
                                     }
                                 }
-                                .buttonStyle(.borderless)
-                                .disabled(isCreating)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
                         }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -271,7 +334,8 @@ struct CreateWorktreeSheet: View {
             appModel.clearWorktreeTicketSelection()
         }
 
-        guard requiresConfirmedTicket else { return }
+        guard appModel.worktreeDraft.ticketProviderStatus?.isAvailable == true else { return }
+        guard appModel.worktreeDraft.isTicketSectionExpanded else { return }
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             Task { @MainActor in
                 appModel.worktreeDraft.ticketSearchResults = []
@@ -296,15 +360,25 @@ struct CreateWorktreeSheet: View {
     private func createWorktree() {
         isCreating = true
         Task {
-            if requiresConfirmedTicket {
-                await appModel.createWorktreeFromTicket(for: repository, in: modelContext)
-            } else {
-                await appModel.createWorktree(for: repository, in: modelContext)
-            }
+            await appModel.createWorktree(for: repository, in: modelContext)
             isCreating = false
             if appModel.pendingErrorMessage == nil {
                 dismiss()
             }
         }
+    }
+
+    private func chooseDestinationRoot() {
+        let initialDirectory = appModel.worktreeDraft.destinationRootURL
+            ?? AppPaths.worktreesRoot.appendingPathComponent(AppPaths.sanitizedPathComponent(repository.displayName), isDirectory: true)
+        guard let selectedDirectory = IDEManager.chooseDirectory(
+            title: "Zielordner waehlen",
+            message: "Stackriot erstellt darunter einen Unterordner fuer den neuen Worktree.",
+            prompt: "Auswaehlen",
+            initialDirectory: initialDirectory
+        ) else {
+            return
+        }
+        appModel.worktreeDraft.destinationRootPath = selectedDirectory.path
     }
 }
