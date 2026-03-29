@@ -48,6 +48,9 @@ struct DiffInspectorView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Uncommitted Diff")
                         .font(.title3.weight(.semibold))
+                    Text(repository.displayName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Text(worktree.isDefaultBranchWorkspace ? "Main/Default" : worktree.branchName)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)

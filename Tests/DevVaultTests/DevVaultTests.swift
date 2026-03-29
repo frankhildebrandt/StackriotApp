@@ -342,7 +342,10 @@ struct DevVaultTests {
     @Test
     func defaultBranchWorkspaceCanBeEnsuredAndReused() async throws {
         let remote = try await createSeededRemote(named: "default-workspace")
-        let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remote.remote, preferredName: "Sample-Default-Workspace")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Sample-Default-Workspace-\(UUID().uuidString)"
+        )
 
         let first = try await WorktreeManager().ensureDefaultBranchWorkspace(
             bareRepositoryPath: cloneInfo.bareRepositoryPath,
@@ -365,7 +368,10 @@ struct DevVaultTests {
     @Test
     func integrateIntoDefaultBranchCreatesCommit() async throws {
         let remote = try await createSeededRemote(named: "integrate")
-        let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remote.remote, preferredName: "Sample-Integrate")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Sample-Integrate-\(UUID().uuidString)"
+        )
 
         let defaultWorkspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
             bareRepositoryPath: cloneInfo.bareRepositoryPath,
@@ -411,7 +417,10 @@ struct DevVaultTests {
     @Test
     func integrateIntoDefaultBranchReturnsConflictsWhenMergeFails() async throws {
         let remote = try await createSeededRemote(named: "conflicts")
-        let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remote.remote, preferredName: "Sample-Conflicts")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Sample-Conflicts-\(UUID().uuidString)"
+        )
 
         let defaultWorkspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
             bareRepositoryPath: cloneInfo.bareRepositoryPath,
@@ -467,7 +476,10 @@ struct DevVaultTests {
     @Test
     func loadUncommittedDiffReturnsTrackedAndUntrackedFiles() async throws {
         let remote = try await createSeededRemote(named: "diff")
-        let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remote.remote, preferredName: "Sample-Diff")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Sample-Diff-\(UUID().uuidString)"
+        )
 
         let defaultWorkspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
             bareRepositoryPath: cloneInfo.bareRepositoryPath,
