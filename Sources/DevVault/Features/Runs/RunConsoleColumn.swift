@@ -10,8 +10,9 @@ struct RunConsoleColumn: View {
         let worktree = appModel.selectedWorktree(for: repository)
         let selectedRunID = worktree.flatMap { appModel.selectedTab(for: $0, in: repository)?.id }
 
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 0) {
             if let worktree {
+                // Worktree-Header
                 VStack(alignment: .leading, spacing: 4) {
                     Text(worktree.branchName)
                         .font(.title3.weight(.semibold))
@@ -20,7 +21,16 @@ struct RunConsoleColumn: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                .padding(.horizontal, 24)
+                .padding(.top, 16)
+                .padding(.bottom, 10)
 
+                // Action Toolbar
+                WorktreeActionBar(worktree: worktree, repository: repository)
+
+                Divider()
+
+                // Terminal Tabs + Console
                 let tabs = appModel.visibleTabs(for: worktree, in: repository)
                 if tabs.isEmpty {
                     ContentUnavailableView(
@@ -46,7 +56,6 @@ struct RunConsoleColumn: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(24)
         .id(worktree?.id ?? repository.id)
         .navigationTitle("Run Console")
         .background(
@@ -58,4 +67,3 @@ struct RunConsoleColumn: View {
         )
     }
 }
-

@@ -20,6 +20,57 @@ extension AppModel {
         }
     }
 
+    func openTerminal(for worktree: WorktreeRecord, in modelContext: ModelContext) {
+        guard let repository = worktree.repository else { return }
+
+        let shell = ProcessInfo.processInfo.environment["SHELL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let loginShell = (shell?.isEmpty == false ? shell! : "/bin/zsh")
+
+        let descriptor = CommandExecutionDescriptor(
+            title: "Terminal",
+            actionKind: .aiAgent,
+            executable: loginShell,
+            arguments: ["-il"],
+            displayCommandLine: loginShell,
+            currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+            repositoryID: repository.id,
+            worktreeID: worktree.id,
+            runtimeRequirement: nil
+        )
+        startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+    }
+
+    func runGitCommit(message: String, in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) {
+        let descriptor = CommandExecutionDescriptor(
+            title: "git commit",
+            actionKind: .gitOperation,
+            executable: "git",
+            arguments: ["commit", "-m", message],
+            displayCommandLine: "git commit -m \"\(message)\"",
+            currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+            repositoryID: repository.id,
+            worktreeID: worktree.id,
+            runtimeRequirement: nil
+        )
+        startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+    }
+
+    func runGitPush(in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) {
+        let descriptor = CommandExecutionDescriptor(
+            title: "git push",
+            actionKind: .gitOperation,
+            executable: "git",
+            arguments: ["push"],
+            displayCommandLine: nil,
+            currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+            repositoryID: repository.id,
+            worktreeID: worktree.id,
+            runtimeRequirement: nil
+        )
+        startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+    }
+
     func checkAgentAvailability() async {
         availableAgents = await services.agentManager.checkAvailability()
     }

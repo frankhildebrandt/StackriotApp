@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A00000000000000000000022 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000023 /* SwiftTerm */; };
 		E00000000000000000000001 /* AppCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000001 /* AppCommands.swift */; };
 		E00000000000000000000002 /* DevVaultApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000002 /* DevVaultApp.swift */; };
 		E00000000000000000000003 /* ModelContainer+DevVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000003 /* ModelContainer+DevVault.swift */; };
@@ -22,7 +23,6 @@
 		E0000000000000000000000D /* AppChromeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000D /* AppChromeViews.swift */; };
 		E0000000000000000000000E /* Domain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000E /* Domain.swift */; };
 		E0000000000000000000000F /* AgentActivityDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000F /* AgentActivityDot.swift */; };
-		E00000000000000000000010 /* AgentAssignmentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000010 /* AgentAssignmentRow.swift */; };
 		E00000000000000000000011 /* RepositoryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000011 /* RepositoryDetailView.swift */; };
 		E00000000000000000000012 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000012 /* RootView.swift */; };
 		E00000000000000000000013 /* RunConsoleColumn.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000013 /* RunConsoleColumn.swift */; };
@@ -60,7 +60,8 @@
 		E00000000000000000000033 /* WorktreeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000033 /* WorktreeManager.swift */; };
 		E00000000000000000000034 /* WorktreeStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000034 /* WorktreeStatusService.swift */; };
 		E00000000000000000000035 /* TerminalSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000035 /* TerminalSessions.swift */; };
-		A00000000000000000000022 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000023 /* SwiftTerm */; };
+		E00000000000000000000036 /* WorktreeActionBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000036 /* WorktreeActionBar.swift */; };
+		E00000000000000000000037 /* GitCommitSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000037 /* GitCommitSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -80,7 +81,6 @@
 		D0000000000000000000000D /* AppChromeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppChromeViews.swift; sourceTree = "<group>"; };
 		D0000000000000000000000E /* Domain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain.swift; sourceTree = "<group>"; };
 		D0000000000000000000000F /* AgentActivityDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivityDot.swift; sourceTree = "<group>"; };
-		D00000000000000000000010 /* AgentAssignmentRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAssignmentRow.swift; sourceTree = "<group>"; };
 		D00000000000000000000011 /* RepositoryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryDetailView.swift; sourceTree = "<group>"; };
 		D00000000000000000000012 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		D00000000000000000000013 /* RunConsoleColumn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConsoleColumn.swift; sourceTree = "<group>"; };
@@ -118,6 +118,8 @@
 		D00000000000000000000033 /* WorktreeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeManager.swift; sourceTree = "<group>"; };
 		D00000000000000000000034 /* WorktreeStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeStatusService.swift; sourceTree = "<group>"; };
 		D00000000000000000000035 /* TerminalSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessions.swift; sourceTree = "<group>"; };
+		D00000000000000000000036 /* WorktreeActionBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeActionBar.swift; sourceTree = "<group>"; };
+		D00000000000000000000037 /* GitCommitSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitCommitSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -135,15 +137,13 @@
 		A00000000000000000000030 = {
 			isa = PBXGroup;
 			children = (
-				A00000000000000000000031 /* Sources */,
+				A00000000000000000000031 /* Sources/DevVault */,
 				A00000000000000000000032 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		A00000000000000000000031 /* Sources */ = {
+		A00000000000000000000031 /* Sources/DevVault */ = {
 			isa = PBXGroup;
-			path = Sources/DevVault;
-			sourceTree = SOURCE_ROOT;
 			children = (
 				F00000000000000000000001 /* App */,
 				F00000000000000000000002 /* AppState */,
@@ -155,21 +155,29 @@
 				F00000000000000000000008 /* Services */,
 				F00000000000000000000009 /* Terminal */,
 			);
+			path = Sources/DevVault;
+			sourceTree = SOURCE_ROOT;
+		};
+		A00000000000000000000032 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000000F /* DevVault.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
 		};
 		F00000000000000000000001 /* App */ = {
 			isa = PBXGroup;
-			path = App;
-			sourceTree = "<group>";
 			children = (
 				D00000000000000000000001 /* AppCommands.swift */,
 				D00000000000000000000002 /* DevVaultApp.swift */,
 				D00000000000000000000003 /* ModelContainer+DevVault.swift */,
 			);
+			path = App;
+			sourceTree = "<group>";
 		};
 		F00000000000000000000002 /* AppState */ = {
 			isa = PBXGroup;
-			path = AppState;
-			sourceTree = "<group>";
 			children = (
 				D00000000000000000000004 /* AppModel+AgentsNode.swift */,
 				D00000000000000000000005 /* AppModel+Persistence.swift */,
@@ -181,27 +189,27 @@
 				D0000000000000000000000B /* AppServices.swift */,
 				D0000000000000000000000C /* Drafts.swift */,
 			);
+			path = AppState;
+			sourceTree = "<group>";
 		};
 		F00000000000000000000003 /* Chrome */ = {
 			isa = PBXGroup;
-			path = Chrome;
-			sourceTree = "<group>";
 			children = (
 				D0000000000000000000000D /* AppChromeViews.swift */,
 			);
+			path = Chrome;
+			sourceTree = "<group>";
 		};
 		F00000000000000000000004 /* Domain */ = {
 			isa = PBXGroup;
-			path = Domain;
-			sourceTree = "<group>";
 			children = (
 				D0000000000000000000000E /* Domain.swift */,
 			);
+			path = Domain;
+			sourceTree = "<group>";
 		};
 		F00000000000000000000005 /* Features */ = {
 			isa = PBXGroup;
-			path = Features;
-			sourceTree = "<group>";
 			children = (
 				F0000000000000000000000A /* Repository */,
 				F0000000000000000000000B /* Root */,
@@ -210,70 +218,11 @@
 				F0000000000000000000000E /* Sheets */,
 				F0000000000000000000000F /* Sidebar */,
 			);
-		};
-		F0000000000000000000000A /* Repository */ = {
-			isa = PBXGroup;
-			path = Repository;
+			path = Features;
 			sourceTree = "<group>";
-			children = (
-				D0000000000000000000000F /* AgentActivityDot.swift */,
-				D00000000000000000000010 /* AgentAssignmentRow.swift */,
-				D00000000000000000000011 /* RepositoryDetailView.swift */,
-			);
-		};
-		F0000000000000000000000B /* Root */ = {
-			isa = PBXGroup;
-			path = Root;
-			sourceTree = "<group>";
-			children = (
-				D00000000000000000000012 /* RootView.swift */,
-			);
-		};
-		F0000000000000000000000C /* Runs */ = {
-			isa = PBXGroup;
-			path = Runs;
-			sourceTree = "<group>";
-			children = (
-				D00000000000000000000013 /* RunConsoleColumn.swift */,
-				D00000000000000000000014 /* RunConsoleView.swift */,
-				D00000000000000000000015 /* TerminalTabChip.swift */,
-				D00000000000000000000016 /* TerminalTabStrip.swift */,
-			);
-		};
-		F0000000000000000000000D /* Shared */ = {
-			isa = PBXGroup;
-			path = Shared;
-			sourceTree = "<group>";
-			children = (
-				D00000000000000000000017 /* ActionPillGroup.swift */,
-				D00000000000000000000018 /* FlowLayout.swift */,
-				D00000000000000000000019 /* StatChip.swift */,
-			);
-		};
-		F0000000000000000000000E /* Sheets */ = {
-			isa = PBXGroup;
-			path = Sheets;
-			sourceTree = "<group>";
-			children = (
-				D0000000000000000000001A /* CloneRepositorySheet.swift */,
-				D0000000000000000000001B /* CreateWorktreeSheet.swift */,
-				D0000000000000000000001C /* PublishBranchSheet.swift */,
-				D0000000000000000000001D /* RemoteEditorSheet.swift */,
-				D0000000000000000000001E /* RemoteManagementSheet.swift */,
-			);
-		};
-		F0000000000000000000000F /* Sidebar */ = {
-			isa = PBXGroup;
-			path = Sidebar;
-			sourceTree = "<group>";
-			children = (
-				D0000000000000000000001F /* SidebarView.swift */,
-			);
 		};
 		F00000000000000000000006 /* Model */ = {
 			isa = PBXGroup;
-			path = Model;
-			sourceTree = "<group>";
 			children = (
 				D00000000000000000000020 /* ActionTemplateRecord.swift */,
 				D00000000000000000000021 /* ManagedRepository.swift */,
@@ -282,19 +231,19 @@
 				D00000000000000000000024 /* StoredSSHKey.swift */,
 				D00000000000000000000025 /* WorktreeRecord.swift */,
 			);
+			path = Model;
+			sourceTree = "<group>";
 		};
 		F00000000000000000000007 /* Node */ = {
 			isa = PBXGroup;
-			path = Node;
-			sourceTree = "<group>";
 			children = (
 				D00000000000000000000026 /* NodeRuntimeManager.swift */,
 			);
+			path = Node;
+			sourceTree = "<group>";
 		};
 		F00000000000000000000008 /* Services */ = {
 			isa = PBXGroup;
-			path = Services;
-			sourceTree = "<group>";
 			children = (
 				D00000000000000000000027 /* AIAgentManager.swift */,
 				D00000000000000000000028 /* AppPaths.swift */,
@@ -311,21 +260,75 @@
 				D00000000000000000000033 /* WorktreeManager.swift */,
 				D00000000000000000000034 /* WorktreeStatusService.swift */,
 			);
+			path = Services;
+			sourceTree = "<group>";
 		};
 		F00000000000000000000009 /* Terminal */ = {
 			isa = PBXGroup;
-			path = Terminal;
-			sourceTree = "<group>";
 			children = (
 				D00000000000000000000035 /* TerminalSessions.swift */,
 			);
+			path = Terminal;
+			sourceTree = "<group>";
 		};
-		A00000000000000000000032 /* Products */ = {
+		F0000000000000000000000A /* Repository */ = {
 			isa = PBXGroup;
 			children = (
-				A0000000000000000000000F /* DevVault.app */,
+				D0000000000000000000000F /* AgentActivityDot.swift */,
+				D00000000000000000000011 /* RepositoryDetailView.swift */,
+				D00000000000000000000036 /* WorktreeActionBar.swift */,
 			);
-			name = Products;
+			path = Repository;
+			sourceTree = "<group>";
+		};
+		F0000000000000000000000B /* Root */ = {
+			isa = PBXGroup;
+			children = (
+				D00000000000000000000012 /* RootView.swift */,
+			);
+			path = Root;
+			sourceTree = "<group>";
+		};
+		F0000000000000000000000C /* Runs */ = {
+			isa = PBXGroup;
+			children = (
+				D00000000000000000000013 /* RunConsoleColumn.swift */,
+				D00000000000000000000014 /* RunConsoleView.swift */,
+				D00000000000000000000015 /* TerminalTabChip.swift */,
+				D00000000000000000000016 /* TerminalTabStrip.swift */,
+			);
+			path = Runs;
+			sourceTree = "<group>";
+		};
+		F0000000000000000000000D /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				D00000000000000000000017 /* ActionPillGroup.swift */,
+				D00000000000000000000018 /* FlowLayout.swift */,
+				D00000000000000000000019 /* StatChip.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		F0000000000000000000000E /* Sheets */ = {
+			isa = PBXGroup;
+			children = (
+				D0000000000000000000001A /* CloneRepositorySheet.swift */,
+				D0000000000000000000001B /* CreateWorktreeSheet.swift */,
+				D00000000000000000000037 /* GitCommitSheet.swift */,
+				D0000000000000000000001C /* PublishBranchSheet.swift */,
+				D0000000000000000000001D /* RemoteEditorSheet.swift */,
+				D0000000000000000000001E /* RemoteManagementSheet.swift */,
+			);
+			path = Sheets;
+			sourceTree = "<group>";
+		};
+		F0000000000000000000000F /* Sidebar */ = {
+			isa = PBXGroup;
+			children = (
+				D0000000000000000000001F /* SidebarView.swift */,
+			);
+			path = Sidebar;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -408,8 +411,8 @@
 				E0000000000000000000000D /* AppChromeViews.swift in Sources */,
 				E0000000000000000000000E /* Domain.swift in Sources */,
 				E0000000000000000000000F /* AgentActivityDot.swift in Sources */,
-				E00000000000000000000010 /* AgentAssignmentRow.swift in Sources */,
 				E00000000000000000000011 /* RepositoryDetailView.swift in Sources */,
+				E00000000000000000000036 /* WorktreeActionBar.swift in Sources */,
 				E00000000000000000000012 /* RootView.swift in Sources */,
 				E00000000000000000000013 /* RunConsoleColumn.swift in Sources */,
 				E00000000000000000000014 /* RunConsoleView.swift in Sources */,
@@ -420,6 +423,7 @@
 				E00000000000000000000019 /* StatChip.swift in Sources */,
 				E0000000000000000000001A /* CloneRepositorySheet.swift in Sources */,
 				E0000000000000000000001B /* CreateWorktreeSheet.swift in Sources */,
+				E00000000000000000000037 /* GitCommitSheet.swift in Sources */,
 				E0000000000000000000001C /* PublishBranchSheet.swift in Sources */,
 				E0000000000000000000001D /* RemoteEditorSheet.swift in Sources */,
 				E0000000000000000000001E /* RemoteManagementSheet.swift in Sources */,
@@ -457,21 +461,6 @@
 			productRef = A00000000000000000000023 /* SwiftTerm */;
 		};
 /* End PBXTargetDependency section */
-
-/* Begin XCLocalSwiftPackageReference section */
-		A00000000000000000000034 /* XCLocalSwiftPackageReference "Vendor/SwiftTerm" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Vendor/SwiftTerm;
-		};
-/* End XCLocalSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		A00000000000000000000023 /* SwiftTerm */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A00000000000000000000034 /* XCLocalSwiftPackageReference "Vendor/SwiftTerm" */;
-			productName = SwiftTerm;
-		};
-/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A00000000000000000000070 /* Debug */ = {
@@ -581,6 +570,21 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A00000000000000000000034 /* XCLocalSwiftPackageReference "Vendor/SwiftTerm" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/SwiftTerm;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A00000000000000000000023 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A00000000000000000000034 /* XCLocalSwiftPackageReference "Vendor/SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A00000000000000000000050 /* Project object */;
 }

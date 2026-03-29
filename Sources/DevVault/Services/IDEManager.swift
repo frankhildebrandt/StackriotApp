@@ -11,6 +11,17 @@ struct IDEManager {
         }
     }
 
+    func openTerminal(path: URL) async throws {
+        let result = try await CommandRunner.runCollected(
+            executable: "open",
+            arguments: ["-a", "Terminal", path.path]
+        )
+
+        guard result.exitCode == 0 else {
+            throw DevVaultError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
+    }
+
     func revealInFinder(path: URL) async throws {
         let result = try await CommandRunner.runCollected(
             executable: "open",

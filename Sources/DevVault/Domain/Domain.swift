@@ -24,6 +24,7 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     case npmScript
     case installDependencies
     case aiAgent
+    case gitOperation
 
     var id: String { rawValue }
 }
