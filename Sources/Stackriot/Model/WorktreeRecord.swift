@@ -6,6 +6,8 @@ final class WorktreeRecord {
     var id: UUID
     var branchName: String
     var isDefaultBranchWorkspaceRaw: Bool?
+    var isPinnedRaw: Bool?
+    var cardColorRaw: String?
     var issueContext: String?
     var path: String
     @Transient var assignedAgentRawValue: String = AIAgentTool.none.rawValue
@@ -23,6 +25,8 @@ final class WorktreeRecord {
         id: UUID = UUID(),
         branchName: String,
         isDefaultBranchWorkspace: Bool = false,
+        isPinned: Bool = false,
+        cardColor: WorktreeCardColor = .none,
         issueContext: String? = nil,
         path: String,
         assignedAgentRawValue: String = AIAgentTool.none.rawValue,
@@ -36,7 +40,9 @@ final class WorktreeRecord {
     ) {
         self.id = id
         self.branchName = branchName
-        self.isDefaultBranchWorkspaceRaw = isDefaultBranchWorkspace
+        self.isDefaultBranchWorkspaceRaw = isDefaultBranchWorkspace ? true : nil
+        self.isPinnedRaw = isPinned ? true : nil
+        self.cardColorRaw = cardColor == .none ? nil : cardColor.rawValue
         self.issueContext = issueContext
         self.path = path
         self.assignedAgentRawValue = assignedAgentRawValue
@@ -57,6 +63,16 @@ final class WorktreeRecord {
     var isDefaultBranchWorkspace: Bool {
         get { isDefaultBranchWorkspaceRaw ?? false }
         set { isDefaultBranchWorkspaceRaw = newValue }
+    }
+
+    var isPinned: Bool {
+        get { isPinnedRaw ?? false }
+        set { isPinnedRaw = newValue }
+    }
+
+    var cardColor: WorktreeCardColor {
+        get { WorktreeCardColor(rawValue: cardColorRaw ?? WorktreeCardColor.none.rawValue) ?? .none }
+        set { cardColorRaw = newValue == .none ? nil : newValue.rawValue }
     }
 
     var lifecycleState: WorktreeLifecycle {

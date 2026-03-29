@@ -130,7 +130,12 @@ struct RepositoryDetailView: View {
     }
 
     private func worktreeSection(worktrees: [WorktreeRecord]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let defaultWorktree = worktrees.first(where: \.isDefaultBranchWorkspace)
+        let pinnedWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace && $0.isPinned }
+        let regularWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace && !$0.isPinned }
+        let featureWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace }
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Worktrees")
                     .font(.title3.weight(.semibold))
@@ -169,182 +174,29 @@ struct RepositoryDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             } else {
-                VStack(spacing: 0) {
-                    ForEach(worktrees) { worktree in
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .top, spacing: 12) {
-                                if autoSyncAvailable(for: worktree) {
-                                    Button {
-                                        Task {
-                                            await appModel.syncWorktreeFromMain(
-                                                worktree,
-                                                repository: repository,
-                                                strategy: .rebase,
-                                                modelContext: modelContext
-                                            )
-                                        }
-                                    } label: {
-                                        Image(systemName: "arrow.clockwise")
-                                            .foregroundStyle(.orange)
-                                            .imageScale(.medium)
-                                            .frame(width: 18, height: 18)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(isRemovingWorktree(worktree))
-                                    .help("\(worktree.branchName) jetzt mit \(repository.defaultBranch) synchronisieren")
-                                }
-
-                                Rectangle()
-                                    .fill(selectedWorktree?.id == worktree.id ? Color.accentColor : Color.clear)
-                                    .frame(width: 2)
-                                    .padding(.vertical, 4)
-
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 8) {
-                                        Text(worktreeTitle(for: worktree))
-                                            .font(.headline)
-                                        if worktree.isDefaultBranchWorkspace {
-                                            Text(repository.defaultBranch)
-                                                .font(.caption.weight(.medium))
-                                                .foregroundStyle(.secondary)
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 4)
-                                                .background(.regularMaterial, in: Capsule())
-                                            if let defaultRemote = appModel.resolvedDefaultRemote(for: repository) {
-                                                Text(defaultRemote.name)
-                                                    .font(.caption.weight(.medium))
-                                                    .foregroundStyle(.blue)
-                                                    .padding(.horizontal, 8)
-                                                    .padding(.vertical, 4)
-                                                    .background(.blue.opacity(0.12), in: Capsule())
-                                            }
-                                        }
-                                        if appModel.isAgentRunning(for: worktree) {
-                                            AgentActivityDot()
-                                        }
-                                    }
-
-                                    worktreeStatusRow(for: worktree)
-                                    worktreeLifecycleIndicator(for: worktree)
-
-                                    if let issueContext = worktree.issueContext {
-                                        Label(issueContext, systemImage: "number")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-
-                                Spacer()
-
-                                if isRemovingWorktree(worktree) || isMovingWorktree(worktree) {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                        .help(isRemovingWorktree(worktree) ? "Worktree wird entfernt" : "Worktree wird verschoben")
-                                } else if showsIntegrationButton(for: worktree) {
-                                    Button {
-                                        appModel.integrationDraft = IntegrationDraft(
-                                            prTitle: worktree.branchName
-                                        )
-                                        integrationTargetWorktreeID = worktree.id
-                                        integrationTargetBranchName = worktree.branchName
-                                        isIntegrationSheetPresented = true
-                                    } label: {
-                                        Image(systemName: worktree.lifecycleState == .integrating
-                                            ? "arrow.up.circle"
-                                            : "arrow.up.circle.fill")
-                                            .foregroundStyle(worktree.lifecycleState == .integrating ? .orange : .secondary)
-                                            .imageScale(.large)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(worktree.lifecycleState == .integrating)
-                                    .help("In \(repository.defaultBranch) integrieren")
-                                }
-                            }
-
-                            if worktree.isDefaultBranchWorkspace {
-                                defaultBranchIndicatorRow(for: worktree)
-                            }
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            selectedWorktree?.id == worktree.id
-                                ? Color.accentColor.opacity(0.10)
-                                : (hoveredWorktreeID == worktree.id ? Color.primary.opacity(0.04) : Color.clear)
+                VStack(alignment: .leading, spacing: 16) {
+                    if let defaultWorktree {
+                        worktreeGroup(
+                            title: "Main / Default",
+                            subtitle: "Die geschützte Haupt-Workspace für \(repository.defaultBranch).",
+                            worktrees: [defaultWorktree]
                         )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            appModel.selectWorktree(worktree, in: repository)
-                        }
-                        .onHover { isHovering in
-                            hoveredWorktreeID = isHovering ? worktree.id : nil
-                        }
-                        .contextMenu {
-                            ForEach(appModel.availableDevTools(for: worktree)) { tool in
-                                Button("Open in \(tool.displayName)") {
-                                    Task {
-                                        await appModel.openDevTool(tool, for: worktree, in: modelContext)
-                                    }
-                                }
-                            }
-                            Button("In Finder zeigen") {
-                                Task {
-                                    await appModel.revealWorktreeInFinder(worktree)
-                                }
-                            }
-                            if !worktree.isDefaultBranchWorkspace {
-                                Divider()
-                                Button("Worktree verschieben") {
-                                    presentMoveDialog(for: worktree)
-                                }
-                                .disabled(isMovingWorktree(worktree) || isRemovingWorktree(worktree))
-                                Button("Mit \(repository.defaultBranch) synchronisieren") {
-                                    Task {
-                                        await appModel.syncWorktreeFromMain(
-                                            worktree,
-                                            repository: repository,
-                                            strategy: .rebase,
-                                            modelContext: modelContext
-                                        )
-                                    }
-                                }
-                                Button("In Main/Default integrieren") {
-                                    appModel.integrationDraft = IntegrationDraft(
-                                        prTitle: worktree.branchName
-                                    )
-                                    integrationTargetWorktreeID = worktree.id
-                                    integrationTargetBranchName = worktree.branchName
-                                    isIntegrationSheetPresented = true
-                                }
-                                Button("Publish Branch") {
-                                    appModel.presentPublishSheet(for: repository, worktree: worktree)
-                                }
-                            }
-                            Divider()
-                            if !worktree.isDefaultBranchWorkspace {
-                                Button("Remove Worktree", role: .destructive) {
-                                    worktreePendingRemoval = WorktreeRemovalDraft(id: worktree.id, path: worktree.path)
-                                }
-                                .disabled(isRemovingWorktree(worktree))
-                            }
-                        }
-
-                        if worktree.id != worktrees.last?.id {
-                            Divider()
-                                .padding(.leading, 16)
-                        }
                     }
-                }
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
-                )
 
-                // Motivations-Hinweis: nur wenn kein Feature-Worktree vorhanden
-                let featureWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace }
+                    if !pinnedWorktrees.isEmpty {
+                        worktreeGroup(
+                            title: "Angepinnt",
+                            subtitle: "Bleiben bei der Integration erhalten und liegen über den normalen Worktrees.",
+                            worktrees: pinnedWorktrees
+                        )
+                    }
+
+                    worktreeGroup(
+                        title: (defaultWorktree != nil || !pinnedWorktrees.isEmpty) ? "Weitere Worktrees" : nil,
+                        worktrees: regularWorktrees
+                    )
+                }
+
                 if featureWorktrees.isEmpty {
                     featureWorktreeMotivationCard
                 }
@@ -382,6 +234,256 @@ struct RepositoryDetailView: View {
 
     private func isMovingWorktree(_ worktree: WorktreeRecord) -> Bool {
         movingWorktreeIDs.contains(worktree.id)
+    }
+
+    @ViewBuilder
+    private func worktreeGroup(
+        title: String?,
+        subtitle: String? = nil,
+        worktrees: [WorktreeRecord]
+    ) -> some View {
+        if !worktrees.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                if let title {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.subheadline.weight(.semibold))
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                VStack(spacing: 10) {
+                    ForEach(worktrees) { worktree in
+                        worktreeCard(worktree)
+                    }
+                }
+            }
+        }
+    }
+
+    private func worktreeCard(_ worktree: WorktreeRecord) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                if autoSyncAvailable(for: worktree) {
+                    Button {
+                        Task {
+                            await appModel.syncWorktreeFromMain(
+                                worktree,
+                                repository: repository,
+                                strategy: .rebase,
+                                modelContext: modelContext
+                            )
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundStyle(.orange)
+                            .imageScale(.medium)
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isRemovingWorktree(worktree))
+                    .help("\(worktree.branchName) jetzt mit \(repository.defaultBranch) synchronisieren")
+                }
+
+                Rectangle()
+                    .fill(selectedWorktree?.id == worktree.id ? worktreeAccentColor(for: worktree) : Color.clear)
+                    .frame(width: 2)
+                    .padding(.vertical, 4)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text(worktreeTitle(for: worktree))
+                            .font(.headline)
+                        if worktree.isPinned {
+                            Image(systemName: "pin.fill")
+                                .imageScale(.small)
+                                .foregroundStyle(worktreeAccentColor(for: worktree))
+                                .help("Angepinnt")
+                        }
+                        if worktree.cardColor != .none {
+                            Circle()
+                                .fill(worktreeAccentColor(for: worktree))
+                                .frame(width: 10, height: 10)
+                                .help("Kartenfarbe: \(worktree.cardColor.displayName)")
+                        }
+                        if worktree.isDefaultBranchWorkspace {
+                            Text(repository.defaultBranch)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.regularMaterial, in: Capsule())
+                            if let defaultRemote = appModel.resolvedDefaultRemote(for: repository) {
+                                Text(defaultRemote.name)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.blue)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(.blue.opacity(0.12), in: Capsule())
+                            }
+                        }
+                        if appModel.isAgentRunning(for: worktree) {
+                            AgentActivityDot()
+                        }
+                    }
+
+                    worktreeStatusRow(for: worktree)
+                    worktreeLifecycleIndicator(for: worktree)
+
+                    if let issueContext = worktree.issueContext {
+                        Label(issueContext, systemImage: "number")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                if isRemovingWorktree(worktree) || isMovingWorktree(worktree) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .help(isRemovingWorktree(worktree) ? "Worktree wird entfernt" : "Worktree wird verschoben")
+                } else {
+                    HStack(spacing: 10) {
+                        if !worktree.isDefaultBranchWorkspace {
+                            Button {
+                                togglePinned(worktree)
+                            } label: {
+                                Image(systemName: worktree.isPinned ? "pin.fill" : "pin")
+                                    .foregroundStyle(worktree.isPinned ? worktreeAccentColor(for: worktree) : .secondary)
+                                    .imageScale(.large)
+                            }
+                            .buttonStyle(.plain)
+                            .help(worktree.isPinned ? "Worktree entpinnen" : "Worktree anpinnen")
+                        }
+
+                        if showsIntegrationButton(for: worktree) {
+                            Button {
+                                appModel.integrationDraft = IntegrationDraft(
+                                    prTitle: worktree.branchName
+                                )
+                                integrationTargetWorktreeID = worktree.id
+                                integrationTargetBranchName = worktree.branchName
+                                isIntegrationSheetPresented = true
+                            } label: {
+                                Image(systemName: worktree.lifecycleState == .integrating
+                                    ? "arrow.up.circle"
+                                    : "arrow.up.circle.fill")
+                                    .foregroundStyle(worktree.lifecycleState == .integrating ? .orange : .secondary)
+                                    .imageScale(.large)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(worktree.lifecycleState == .integrating)
+                            .help("In \(repository.defaultBranch) integrieren")
+                        }
+                    }
+                }
+            }
+
+            if worktree.isDefaultBranchWorkspace {
+                defaultBranchIndicatorRow(for: worktree)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.thinMaterial)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(worktreeCardTint(for: worktree))
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(
+                    worktreeCardBorder(for: worktree),
+                    lineWidth: selectedWorktree?.id == worktree.id ? 1.5 : 1
+                )
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onTapGesture {
+            appModel.selectWorktree(worktree, in: repository)
+        }
+        .onHover { isHovering in
+            hoveredWorktreeID = isHovering ? worktree.id : nil
+        }
+        .contextMenu {
+            ForEach(appModel.availableDevTools(for: worktree)) { tool in
+                Button("Open in \(tool.displayName)") {
+                    Task {
+                        await appModel.openDevTool(tool, for: worktree, in: modelContext)
+                    }
+                }
+            }
+            Button("In Finder zeigen") {
+                Task {
+                    await appModel.revealWorktreeInFinder(worktree)
+                }
+            }
+            Menu("Kartenfarbe") {
+                ForEach(WorktreeCardColor.allCases) { color in
+                    Button {
+                        appModel.setCardColor(color, for: worktree, in: repository, modelContext: modelContext)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(worktreeAccentColor(for: color))
+                                .frame(width: 10, height: 10)
+                            Text(color.displayName)
+                            if worktree.cardColor == color {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+            if !worktree.isDefaultBranchWorkspace {
+                Divider()
+                Button(worktree.isPinned ? "Worktree entpinnen" : "Worktree anpinnen") {
+                    togglePinned(worktree)
+                }
+                Button("Worktree verschieben") {
+                    presentMoveDialog(for: worktree)
+                }
+                .disabled(isMovingWorktree(worktree) || isRemovingWorktree(worktree))
+                Button("Mit \(repository.defaultBranch) synchronisieren") {
+                    Task {
+                        await appModel.syncWorktreeFromMain(
+                            worktree,
+                            repository: repository,
+                            strategy: .rebase,
+                            modelContext: modelContext
+                        )
+                    }
+                }
+                Button("In Main/Default integrieren") {
+                    appModel.integrationDraft = IntegrationDraft(
+                        prTitle: worktree.branchName
+                    )
+                    integrationTargetWorktreeID = worktree.id
+                    integrationTargetBranchName = worktree.branchName
+                    isIntegrationSheetPresented = true
+                }
+                Button("Publish Branch") {
+                    appModel.presentPublishSheet(for: repository, worktree: worktree)
+                }
+                Divider()
+                Button("Remove Worktree", role: .destructive) {
+                    worktreePendingRemoval = WorktreeRemovalDraft(id: worktree.id, path: worktree.path)
+                }
+                .disabled(isRemovingWorktree(worktree))
+            }
+        }
+    }
+
+    private func togglePinned(_ worktree: WorktreeRecord) {
+        appModel.setPinned(!worktree.isPinned, for: worktree, in: repository, modelContext: modelContext)
     }
 
     private func removeWorktree(_ worktree: WorktreeRecord) {
@@ -431,6 +533,63 @@ struct RepositoryDetailView: View {
 
     private func worktreeTitle(for worktree: WorktreeRecord) -> String {
         worktree.isDefaultBranchWorkspace ? "Main/Default" : worktree.branchName
+    }
+
+    private func worktreeAccentColor(for worktree: WorktreeRecord) -> Color {
+        worktreeAccentColor(for: worktree.cardColor)
+    }
+
+    private func worktreeAccentColor(for color: WorktreeCardColor) -> Color {
+        switch color {
+        case .none:
+            .accentColor
+        case .blue:
+            .blue
+        case .green:
+            .green
+        case .orange:
+            .orange
+        case .purple:
+            .purple
+        case .pink:
+            .pink
+        case .slate:
+            .gray
+        }
+    }
+
+    private func worktreeCardTint(for worktree: WorktreeRecord) -> Color {
+        let isSelected = selectedWorktree?.id == worktree.id
+        let isHovered = hoveredWorktreeID == worktree.id
+
+        if worktree.cardColor == .none {
+            if isSelected {
+                return Color.accentColor.opacity(0.10)
+            }
+            if isHovered {
+                return Color.primary.opacity(0.04)
+            }
+            return .clear
+        }
+
+        let accent = worktreeAccentColor(for: worktree)
+        if isSelected {
+            return accent.opacity(0.22)
+        }
+        if isHovered {
+            return accent.opacity(0.18)
+        }
+        return accent.opacity(0.12)
+    }
+
+    private func worktreeCardBorder(for worktree: WorktreeRecord) -> Color {
+        if worktree.cardColor == .none {
+            return selectedWorktree?.id == worktree.id
+                ? Color.accentColor.opacity(0.30)
+                : Color.primary.opacity(0.07)
+        }
+
+        return worktreeAccentColor(for: worktree).opacity(selectedWorktree?.id == worktree.id ? 0.42 : 0.24)
     }
 
     // MARK: - Lifecycle Indicator

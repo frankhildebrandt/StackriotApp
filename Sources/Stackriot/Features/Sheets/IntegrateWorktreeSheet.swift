@@ -22,12 +22,23 @@ struct IntegrateWorktreeSheet: View {
         worktree?.branchName ?? initialBranchName
     }
 
+    private var isPinnedWorktree: Bool {
+        worktree?.isPinned ?? false
+    }
+
     private var hasGitHubRemote: Bool {
         repository.remotes.contains { GitHubCLIService.isGitHubRemote(url: $0.url) }
     }
 
     private var canUseGitHubPR: Bool {
         isGHAvailable && hasGitHubRemote
+    }
+
+    private var deleteAfterIntegrationBinding: Binding<Bool> {
+        Binding(
+            get: { isPinnedWorktree ? false : draft.deleteAfterIntegration },
+            set: { draft.deleteAfterIntegration = isPinnedWorktree ? false : $0 }
+        )
     }
 
     init(worktreeID: UUID, repository: ManagedRepository, initialBranchName: String) {
@@ -119,7 +130,14 @@ struct IntegrateWorktreeSheet: View {
 
             Divider()
 
-            Toggle("Worktree nach Integration löschen", isOn: $draft.deleteAfterIntegration)
+            Toggle("Worktree nach Integration löschen", isOn: deleteAfterIntegrationBinding)
+                .disabled(isPinnedWorktree)
+
+            if isPinnedWorktree {
+                Text("Angepinnte Worktrees bleiben auch nach der Integration lokal erhalten.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Divider()
 
@@ -163,6 +181,9 @@ struct IntegrateWorktreeSheet: View {
             isGHAvailable = await appModel.services.gitHubCLIService.isGHAvailable()
             if !isGHAvailable || !hasGitHubRemote {
                 draft.method = .localMerge
+            }
+            if isPinnedWorktree {
+                draft.deleteAfterIntegration = false
             }
         }
     }
