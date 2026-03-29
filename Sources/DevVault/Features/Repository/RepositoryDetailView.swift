@@ -9,6 +9,9 @@ struct RepositoryDetailView: View {
     @State private var worktreePendingRemoval: WorktreeRemovalDraft?
     @State private var isRefreshingStatuses = false
     @State private var hoveredWorktreeID: UUID?
+    @State private var isIntegrationSheetPresented = false
+    @State private var integrationTargetWorktree: WorktreeRecord?
+    @AppStorage("hasSeenWorktreeOnboarding") private var hasSeenWorktreeOnboarding = false
 
     var body: some View {
         let worktrees = appModel.worktrees(for: repository)
@@ -28,6 +31,12 @@ struct RepositoryDetailView: View {
             _ = await appModel.ensureDefaultBranchWorkspace(for: repository, in: modelContext)
             appModel.ensureSelectedWorktree(in: repository)
             await appModel.refreshWorktreeStatuses(for: repository)
+            appModel.restoreAllPRMonitoring(in: modelContext)
+        }
+        .sheet(isPresented: $isIntegrationSheetPresented) {
+            if let worktree = integrationTargetWorktree {
+                IntegrateWorktreeSheet(worktree: worktree, repository: repository)
+            }
         }
         .confirmationDialog("Remove worktree?", item: $worktreePendingRemoval) { worktree in
             Button("Remove", role: .destructive) {
@@ -122,6 +131,11 @@ struct RepositoryDetailView: View {
                 }
             }
 
+            // Einmaliger Onboarding-Hinweis
+            if !hasSeenWorktreeOnboarding {
+                onboardingBanner
+            }
+
             if worktrees.isEmpty {
                 Text("No worktrees yet. Create one from the bare repository to start development.")
                     .foregroundStyle(.secondary)
@@ -168,6 +182,7 @@ struct RepositoryDetailView: View {
                                         .lineLimit(1)
 
                                     worktreeStatusRow(for: worktree)
+                                    worktreeLifecycleIndicator(for: worktree)
 
                                     if let issueContext = worktree.issueContext {
                                         Label(issueContext, systemImage: "number")
@@ -177,6 +192,25 @@ struct RepositoryDetailView: View {
                                 }
 
                                 Spacer()
+
+                                if !worktree.isDefaultBranchWorkspace {
+                                    Button {
+                                        appModel.integrationDraft = IntegrationDraft(
+                                            prTitle: worktree.branchName
+                                        )
+                                        integrationTargetWorktree = worktree
+                                        isIntegrationSheetPresented = true
+                                    } label: {
+                                        Image(systemName: worktree.lifecycleState == .integrating
+                                            ? "arrow.up.circle"
+                                            : "arrow.up.circle.fill")
+                                            .foregroundStyle(worktree.lifecycleState == .integrating ? .orange : .secondary)
+                                            .imageScale(.large)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(worktree.lifecycleState == .integrating)
+                                    .help("In \(repository.defaultBranch) integrieren")
+                                }
                             }
 
                             if worktree.isDefaultBranchWorkspace {
@@ -222,13 +256,11 @@ struct RepositoryDetailView: View {
                                     }
                                 }
                                 Button("In Main/Default integrieren") {
-                                    Task {
-                                        await appModel.integrateIntoDefaultBranch(
-                                            worktree,
-                                            repository: repository,
-                                            modelContext: modelContext
-                                        )
-                                    }
+                                    appModel.integrationDraft = IntegrationDraft(
+                                        prTitle: worktree.branchName
+                                    )
+                                    integrationTargetWorktree = worktree
+                                    isIntegrationSheetPresented = true
                                 }
                                 Button("Publish Branch") {
                                     appModel.presentPublishSheet(for: repository, worktree: worktree)
@@ -254,6 +286,12 @@ struct RepositoryDetailView: View {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
                 )
+
+                // Motivations-Hinweis: nur wenn kein Feature-Worktree vorhanden
+                let featureWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace }
+                if featureWorktrees.isEmpty {
+                    featureWorktreeMotivationCard
+                }
             }
         }
     }
@@ -275,6 +313,96 @@ struct RepositoryDetailView: View {
 
     private func worktreeTitle(for worktree: WorktreeRecord) -> String {
         worktree.isDefaultBranchWorkspace ? "Main/Default" : worktree.branchName
+    }
+
+    // MARK: - Lifecycle Indicator
+
+    @ViewBuilder
+    private func worktreeLifecycleIndicator(for worktree: WorktreeRecord) -> some View {
+        switch worktree.lifecycleState {
+        case .active:
+            EmptyView()
+        case .integrating:
+            HStack(spacing: 6) {
+                Label("PR offen", systemImage: "arrow.triangle.merge")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+                if let urlString = worktree.prURL, let url = URL(string: urlString) {
+                    Link(destination: url) {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+                }
+            }
+        case .merged:
+            Label("Merged", systemImage: "checkmark.seal.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+        }
+    }
+
+    // MARK: - Motivational UX
+
+    private var featureWorktreeMotivationCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Einen Worktree pro Feature")
+                    .font(.subheadline.weight(.medium))
+                Text("Paralleles Arbeiten, saubere Isolation. Starte einen neuen Worktree für den nächsten Task.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                appModel.presentWorktreeSheet(for: repository)
+            } label: {
+                Label("Neuer Worktree", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(14)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    private var onboardingBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "lightbulb.fill")
+                .foregroundStyle(.yellow)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Feature-Workflow mit Worktrees")
+                    .font(.caption.weight(.semibold))
+                Text("Erstelle für jedes Feature einen eigenen Worktree. Der ↑-Button auf jeder Karte startet den Integrations-Workflow — lokal oder als GitHub PR.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button("Verstanden") {
+                hasSeenWorktreeOnboarding = true
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(12)
+        .background(.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(.yellow.opacity(0.3), lineWidth: 1)
+        )
     }
 
     @ViewBuilder

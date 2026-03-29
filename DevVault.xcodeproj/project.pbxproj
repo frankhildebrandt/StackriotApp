@@ -68,6 +68,8 @@
 		E0000000000000000000003A /* ProjectEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000003A /* ProjectEditorSheet.swift */; };
 		E0000000000000000000003B /* RepositoryNamespace.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000003B /* RepositoryNamespace.swift */; };
 		E0000000000000000000003C /* RepositoryProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000003C /* RepositoryProject.swift */; };
+		E0000000000000000000003D /* GitHubCLIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000003D /* GitHubCLIService.swift */; };
+		E0000000000000000000003E /* IntegrateWorktreeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000003E /* IntegrateWorktreeSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -132,6 +134,8 @@
 		D0000000000000000000003A /* ProjectEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectEditorSheet.swift; sourceTree = "<group>"; };
 		D0000000000000000000003B /* RepositoryNamespace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryNamespace.swift; sourceTree = "<group>"; };
 		D0000000000000000000003C /* RepositoryProject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryProject.swift; sourceTree = "<group>"; };
+		D0000000000000000000003D /* GitHubCLIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubCLIService.swift; sourceTree = "<group>"; };
+		D0000000000000000000003E /* IntegrateWorktreeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrateWorktreeSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -261,6 +265,7 @@
 			isa = PBXGroup;
 			children = (
 				D00000000000000000000027 /* AIAgentManager.swift */,
+				D0000000000000000000003D /* GitHubCLIService.swift */,
 				D00000000000000000000028 /* AppPaths.swift */,
 				D00000000000000000000029 /* CommandRunner.swift */,
 				D0000000000000000000002A /* DevVaultError.swift */,
@@ -332,6 +337,7 @@
 				D0000000000000000000001A /* CloneRepositorySheet.swift */,
 				D0000000000000000000001B /* CreateWorktreeSheet.swift */,
 				D00000000000000000000037 /* GitCommitSheet.swift */,
+				D0000000000000000000003E /* IntegrateWorktreeSheet.swift */,
 				D00000000000000000000039 /* NamespaceEditorSheet.swift */,
 				D0000000000000000000001C /* PublishBranchSheet.swift */,
 				D0000000000000000000003A /* ProjectEditorSheet.swift */,
@@ -443,7 +449,8 @@
 				E00000000000000000000019 /* StatChip.swift in Sources */,
 				E0000000000000000000001A /* CloneRepositorySheet.swift in Sources */,
 				E0000000000000000000001B /* CreateWorktreeSheet.swift in Sources */,
-				E00000000000000000000037 /* GitCommitSheet.swift in Sources */,
+						E00000000000000000000037 /* GitCommitSheet.swift in Sources */,
+						E0000000000000000000003E /* IntegrateWorktreeSheet.swift in Sources */,
 				E00000000000000000000039 /* NamespaceEditorSheet.swift in Sources */,
 				E0000000000000000000001C /* PublishBranchSheet.swift in Sources */,
 				E0000000000000000000003A /* ProjectEditorSheet.swift in Sources */,
@@ -459,7 +466,8 @@
 				E00000000000000000000024 /* StoredSSHKey.swift in Sources */,
 				E00000000000000000000025 /* WorktreeRecord.swift in Sources */,
 				E00000000000000000000026 /* NodeRuntimeManager.swift in Sources */,
-				E00000000000000000000027 /* AIAgentManager.swift in Sources */,
+						E00000000000000000000027 /* AIAgentManager.swift in Sources */,
+						E0000000000000000000003D /* GitHubCLIService.swift in Sources */,
 				E00000000000000000000028 /* AppPaths.swift in Sources */,
 				E00000000000000000000029 /* CommandRunner.swift in Sources */,
 				E0000000000000000000002A /* DevVaultError.swift in Sources */,

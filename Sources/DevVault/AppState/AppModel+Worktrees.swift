@@ -166,22 +166,82 @@ extension AppModel {
         modelContext: ModelContext
     ) async {
         guard !sourceWorktree.isDefaultBranchWorkspace else { return }
-        guard let defaultWorktree = await ensureDefaultBranchWorkspace(for: repository, in: modelContext) else {
-            return
+        let outcome = await performLocalMerge(sourceWorktree, repository: repository, modelContext: modelContext)
+        if case .committed = outcome {
+            pendingErrorMessage = "Integrated \(sourceWorktree.branchName) into \(repository.defaultBranch)."
         }
+        await refreshWorktreeStatuses(for: repository)
+    }
 
+    // MARK: - Integration Workflow
+
+    func startIntegration(
+        _ worktree: WorktreeRecord,
+        repository: ManagedRepository,
+        draft: IntegrationDraft,
+        modelContext: ModelContext
+    ) async {
+        guard !worktree.isDefaultBranchWorkspace else { return }
+
+        switch draft.method {
+        case .localMerge:
+            let outcome = await performLocalMerge(worktree, repository: repository, modelContext: modelContext)
+            await refreshWorktreeStatuses(for: repository)
+            if case .committed = outcome {
+                pendingErrorMessage = "Integrated \(worktree.branchName) into \(repository.defaultBranch)."
+                worktree.lifecycleState = .merged
+                save(modelContext)
+                if draft.deleteAfterIntegration {
+                    await removeWorktree(worktree, in: modelContext)
+                }
+            }
+
+        case .githubPR:
+            do {
+                let prInfo = try await GitHubCLIService.createPR(
+                    worktreePath: URL(fileURLWithPath: worktree.path),
+                    title: draft.prTitle,
+                    body: draft.prBody,
+                    baseBranch: repository.defaultBranch
+                )
+                worktree.prNumber = prInfo.number
+                worktree.prURL = prInfo.url
+                worktree.lifecycleState = .integrating
+                worktree.shouldDeleteOnMerge = draft.deleteAfterIntegration
+                save(modelContext)
+                startPRMonitoring(for: worktree, repository: repository, in: modelContext)
+            } catch {
+                pendingErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    // MARK: - Internal Merge Helper
+
+    private enum LocalMergeOutcome: Sendable {
+        case committed, conflict, failed
+    }
+
+    private func performLocalMerge(
+        _ sourceWorktree: WorktreeRecord,
+        repository: ManagedRepository,
+        modelContext: ModelContext
+    ) async -> LocalMergeOutcome {
+        guard !sourceWorktree.isDefaultBranchWorkspace else { return .failed }
+        guard let defaultWorktree = await ensureDefaultBranchWorkspace(for: repository, in: modelContext) else {
+            return .failed
+        }
         do {
             let result = try await services.worktreeStatusService.integrate(
                 sourceBranch: sourceWorktree.branchName,
                 defaultBranch: repository.defaultBranch,
                 defaultWorktreePath: URL(fileURLWithPath: defaultWorktree.path)
             )
-
             switch result {
             case .committed:
                 pendingIntegrationConflict = nil
                 selectedWorktreeIDsByRepository[repository.id] = defaultWorktree.id
-                pendingErrorMessage = "Integrated \(sourceWorktree.branchName) into \(repository.defaultBranch)."
+                return .committed
             case let .conflicts(message):
                 pendingIntegrationConflict = IntegrationConflictDraft(
                     repositoryID: repository.id,
@@ -192,11 +252,75 @@ extension AppModel {
                     message: message
                 )
                 selectedWorktreeIDsByRepository[repository.id] = defaultWorktree.id
+                return .conflict
             }
-
-            await refreshWorktreeStatuses(for: repository)
         } catch {
             pendingErrorMessage = error.localizedDescription
+            return .failed
+        }
+    }
+
+    // MARK: - PR Monitoring
+
+    func startPRMonitoring(
+        for worktree: WorktreeRecord,
+        repository: ManagedRepository,
+        in modelContext: ModelContext
+    ) {
+        let worktreeID = worktree.id
+        stopPRMonitoring(for: worktreeID)
+
+        let task = Task { [self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(60))
+                } catch {
+                    break
+                }
+                guard !Task.isCancelled else { break }
+                guard
+                    let record = self.worktreeRecord(with: worktreeID),
+                    let prNumber = record.prNumber
+                else { break }
+
+                do {
+                    let status = try await GitHubCLIService.getPRStatus(
+                        worktreePath: URL(fileURLWithPath: record.path),
+                        prNumber: prNumber
+                    )
+                    if status == .merged {
+                        record.lifecycleState = .merged
+                        self.save(modelContext)
+                        if record.shouldDeleteOnMerge {
+                            await self.removeWorktree(record, in: modelContext)
+                        }
+                        break
+                    }
+                } catch {
+                    // Netzwerk- oder CLI-Fehler — nächsten Zyklus erneut versuchen
+                }
+            }
+            self.prMonitoringTasks.removeValue(forKey: worktreeID)
+        }
+
+        prMonitoringTasks[worktreeID] = task
+    }
+
+    func stopPRMonitoring(for worktreeID: UUID) {
+        prMonitoringTasks[worktreeID]?.cancel()
+        prMonitoringTasks.removeValue(forKey: worktreeID)
+    }
+
+    func restoreAllPRMonitoring(in modelContext: ModelContext) {
+        let descriptor = FetchDescriptor<WorktreeRecord>()
+        let allWorktrees = (try? modelContext.fetch(descriptor)) ?? []
+        for worktree in allWorktrees {
+            if worktree.lifecycleState == .integrating,
+               worktree.prNumber != nil,
+               let repository = worktree.repository
+            {
+                startPRMonitoring(for: worktree, repository: repository, in: modelContext)
+            }
         }
     }
 

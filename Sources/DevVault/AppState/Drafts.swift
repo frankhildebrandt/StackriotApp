@@ -21,6 +21,37 @@ struct PublishBranchDraft {
     var remoteName = ""
 }
 
+struct IntegrationDraft {
+    enum Method: String, CaseIterable, Hashable {
+        case localMerge
+        case githubPR
+
+        var displayName: String {
+            switch self {
+            case .localMerge: "Lokal mergen"
+            case .githubPR: "GitHub PR"
+            }
+        }
+    }
+
+    var method: Method = .localMerge
+    var deleteAfterIntegration: Bool = true
+    var prTitle: String = ""
+    var prBody: String = ""
+
+    init(
+        method: Method = .localMerge,
+        deleteAfterIntegration: Bool = true,
+        prTitle: String = "",
+        prBody: String = ""
+    ) {
+        self.method = method
+        self.deleteAfterIntegration = deleteAfterIntegration
+        self.prTitle = prTitle
+        self.prBody = prBody
+    }
+}
+
 enum NameEditorMode {
     case create
     case rename

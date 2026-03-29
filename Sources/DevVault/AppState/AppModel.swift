@@ -28,6 +28,7 @@ final class AppModel: @unchecked Sendable {
     var pendingNamespaceDeletionID: UUID?
     var pendingProjectDeletionID: UUID?
     var publishDraft = PublishBranchDraft()
+    var integrationDraft = IntegrationDraft()
     var nodeRuntimeStatus = NodeRuntimeStatusSnapshot(
         runtimeRootPath: AppPaths.nodeRuntimeRoot.path,
         npmCachePath: AppPaths.npmCacheDirectory.path
@@ -42,6 +43,8 @@ final class AppModel: @unchecked Sendable {
     var terminalSessions: [UUID: AgentTerminalSession] = [:]
     @ObservationIgnored
     var terminalTabAutoHideTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored
+    var prMonitoringTasks: [UUID: Task<Void, Never>] = [:]
     var storedModelContext: ModelContext?
     var autoRefreshTask: Task<Void, Never>?
     var nodeRuntimeRefreshTask: Task<Void, Never>?
@@ -61,6 +64,7 @@ final class AppModel: @unchecked Sendable {
                 await services.nodeRuntimeManager.refreshDefaultRuntimeIfNeeded(force: false)
                 nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
                 await refreshAllRepositories(force: false)
+                restoreAllPRMonitoring(in: modelContext)
             }
         }
     }

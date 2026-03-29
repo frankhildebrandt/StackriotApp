@@ -144,6 +144,14 @@ enum TerminalTabRetentionMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum WorktreeLifecycle: String, Codable, CaseIterable, Identifiable {
+    case active
+    case integrating
+    case merged
+
+    var id: String { rawValue }
+}
+
 enum SSHKeyKind: String, Codable, CaseIterable, Identifiable {
     case imported
     case generated

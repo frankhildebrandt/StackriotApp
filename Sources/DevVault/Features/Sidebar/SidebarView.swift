@@ -492,7 +492,7 @@ private struct NamespacePickerRow: View {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.accentColor)
+                    .foregroundStyle(Color.accentColor)
                     .opacity(isSelected ? 1 : 0)
                     .frame(width: 12)
 

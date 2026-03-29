@@ -13,6 +13,12 @@ final class WorktreeRecord {
     var lastOpenedAt: Date?
     var repository: ManagedRepository?
 
+    // Integration / PR tracking
+    var prNumber: Int?
+    var prURL: String?
+    var lifecycleStateRaw: String?
+    var deleteOnMerge: Bool?
+
     init(
         id: UUID = UUID(),
         branchName: String,
@@ -22,7 +28,11 @@ final class WorktreeRecord {
         assignedAgentRawValue: String = AIAgentTool.none.rawValue,
         createdAt: Date = .now,
         lastOpenedAt: Date? = nil,
-        repository: ManagedRepository? = nil
+        repository: ManagedRepository? = nil,
+        prNumber: Int? = nil,
+        prURL: String? = nil,
+        lifecycleStateRaw: String? = nil,
+        deleteOnMerge: Bool? = nil
     ) {
         self.id = id
         self.branchName = branchName
@@ -33,6 +43,10 @@ final class WorktreeRecord {
         self.createdAt = createdAt
         self.lastOpenedAt = lastOpenedAt
         self.repository = repository
+        self.prNumber = prNumber
+        self.prURL = prURL
+        self.lifecycleStateRaw = lifecycleStateRaw
+        self.deleteOnMerge = deleteOnMerge
     }
 
     var assignedAgent: AIAgentTool {
@@ -43,5 +57,15 @@ final class WorktreeRecord {
     var isDefaultBranchWorkspace: Bool {
         get { isDefaultBranchWorkspaceRaw ?? false }
         set { isDefaultBranchWorkspaceRaw = newValue }
+    }
+
+    var lifecycleState: WorktreeLifecycle {
+        get { WorktreeLifecycle(rawValue: lifecycleStateRaw ?? WorktreeLifecycle.active.rawValue) ?? .active }
+        set { lifecycleStateRaw = newValue.rawValue }
+    }
+
+    var shouldDeleteOnMerge: Bool {
+        get { deleteOnMerge ?? false }
+        set { deleteOnMerge = newValue }
     }
 }
