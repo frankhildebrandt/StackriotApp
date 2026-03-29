@@ -7,6 +7,7 @@ struct RepositoryDetailView: View {
 
     let repository: ManagedRepository
     @State private var worktreePendingRemoval: WorktreeRemovalDraft?
+    @State private var removingWorktreeIDs: Set<UUID> = []
     @State private var isRefreshingStatuses = false
     @State private var isPushingDefaultBranch = false
     @State private var hoveredWorktreeID: UUID?
@@ -48,13 +49,14 @@ struct RepositoryDetailView: View {
             Button("Remove", role: .destructive) {
                 worktreePendingRemoval = nil
                 if let record = appModel.worktreeRecord(with: worktree.id) {
-                    Task {
-                        await appModel.removeWorktree(record, in: modelContext)
-                    }
+                    removeWorktree(record)
                 }
             }
         } message: { worktree in
-            Text(worktree.path)
+            Text("""
+            This removes the local worktree at \(worktree.path).
+            Open tabs and local run history for this worktree will be cleaned up, while the bare repository and remote branch stay untouched.
+            """)
         }
         .alert("Rebase fehlgeschlagen", isPresented: Binding(
             get: { appModel.worktreePendingMergeOfferID != nil },
@@ -170,6 +172,7 @@ struct RepositoryDetailView: View {
                                             .frame(width: 18, height: 18)
                                     }
                                     .buttonStyle(.plain)
+                                    .disabled(isRemovingWorktree(worktree))
                                     .help("\(worktree.branchName) jetzt mit \(repository.defaultBranch) synchronisieren")
                                 }
 
@@ -215,7 +218,11 @@ struct RepositoryDetailView: View {
 
                                 Spacer()
 
-                                if showsIntegrationButton(for: worktree) {
+                                if isRemovingWorktree(worktree) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .help("Worktree wird entfernt")
+                                } else if showsIntegrationButton(for: worktree) {
                                     Button {
                                         appModel.integrationDraft = IntegrationDraft(
                                             prTitle: worktree.branchName
@@ -297,6 +304,7 @@ struct RepositoryDetailView: View {
                                 Button("Remove Worktree", role: .destructive) {
                                     worktreePendingRemoval = WorktreeRemovalDraft(id: worktree.id, path: worktree.path)
                                 }
+                                .disabled(isRemovingWorktree(worktree))
                             }
                         }
 
@@ -344,6 +352,18 @@ struct RepositoryDetailView: View {
         return (status?.behindCount ?? 0) > 0
             && !(status?.hasUncommittedChanges ?? false)
             && !(status?.hasConflicts ?? false)
+    }
+
+    private func isRemovingWorktree(_ worktree: WorktreeRecord) -> Bool {
+        removingWorktreeIDs.contains(worktree.id)
+    }
+
+    private func removeWorktree(_ worktree: WorktreeRecord) {
+        removingWorktreeIDs.insert(worktree.id)
+        Task {
+            await appModel.removeWorktree(worktree, in: modelContext)
+            removingWorktreeIDs.remove(worktree.id)
+        }
     }
 
     private func showsIntegrationButton(for worktree: WorktreeRecord) -> Bool {

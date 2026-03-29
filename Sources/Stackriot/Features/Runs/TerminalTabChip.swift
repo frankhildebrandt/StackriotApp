@@ -10,9 +10,15 @@ struct TerminalTabChip: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 7, height: 7)
+            if isRunning {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 12, height: 12)
+            } else {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 7, height: 7)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(run.title)
@@ -68,4 +74,3 @@ struct TerminalTabChip: View {
         }
     }
 }
-
