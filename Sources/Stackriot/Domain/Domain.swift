@@ -25,13 +25,81 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     case installDependencies
     case aiAgent
     case gitOperation
+    case runConfiguration
 
     var id: String { rawValue }
 }
 
-enum SupportedIDE: String, Codable, CaseIterable, Identifiable {
+enum RunConfigurationSource: String, Codable, CaseIterable, Identifiable, Sendable {
+    case native
+    case vscode
+    case cursor
+    case xcode
+    case jetbrains
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .native:
+            "Native Configs"
+        case .vscode:
+            "VS Code"
+        case .cursor:
+            "Cursor"
+        case .xcode:
+            "Xcode"
+        case .jetbrains:
+            "JetBrains"
+        }
+    }
+}
+
+enum RunConfigurationKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    case makeTarget
+    case npmScript
+    case shellCommand
+    case nodeLaunch
+    case xcodeScheme
+    case jetbrainsConfiguration
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .makeTarget:
+            "Make"
+        case .npmScript:
+            "NPM Script"
+        case .shellCommand:
+            "Shell"
+        case .nodeLaunch:
+            "Node"
+        case .xcodeScheme:
+            "Xcode Scheme"
+        case .jetbrainsConfiguration:
+            "JetBrains"
+        }
+    }
+}
+
+enum RunConfigurationExecutionBehavior: String, Codable, CaseIterable, Identifiable, Sendable {
+    case direct
+    case buildOnly
+    case openInDevTool
+
+    var id: String { rawValue }
+}
+
+enum SupportedDevTool: String, Codable, CaseIterable, Identifiable, Sendable {
     case cursor
     case vscode
+    case zed
+    case xcode
+    case intellijIdea
+    case goland
+    case phpstorm
+    case webstorm
 
     var id: String { rawValue }
 
@@ -41,6 +109,18 @@ enum SupportedIDE: String, Codable, CaseIterable, Identifiable {
             "Cursor"
         case .vscode:
             "VS Code"
+        case .zed:
+            "Zed"
+        case .xcode:
+            "Xcode"
+        case .intellijIdea:
+            "IntelliJ IDEA"
+        case .goland:
+            "GoLand"
+        case .phpstorm:
+            "PhpStorm"
+        case .webstorm:
+            "WebStorm"
         }
     }
 
@@ -50,7 +130,137 @@ enum SupportedIDE: String, Codable, CaseIterable, Identifiable {
             "Cursor"
         case .vscode:
             "Visual Studio Code"
+        case .zed:
+            "Zed"
+        case .xcode:
+            "Xcode"
+        case .intellijIdea:
+            "IntelliJ IDEA"
+        case .goland:
+            "GoLand"
+        case .phpstorm:
+            "PhpStorm"
+        case .webstorm:
+            "WebStorm"
         }
+    }
+
+    var bundleIdentifier: String? {
+        switch self {
+        case .cursor:
+            nil
+        case .vscode:
+            "com.microsoft.VSCode"
+        case .zed:
+            "dev.zed.Zed"
+        case .xcode:
+            "com.apple.dt.Xcode"
+        case .intellijIdea:
+            "com.jetbrains.intellij"
+        case .goland:
+            "com.jetbrains.goland"
+        case .phpstorm:
+            "com.jetbrains.PhpStorm"
+        case .webstorm:
+            "com.jetbrains.WebStorm"
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .xcode:
+            "hammer"
+        case .cursor, .vscode, .zed:
+            "laptopcomputer"
+        case .intellijIdea, .goland, .phpstorm, .webstorm:
+            "shippingbox"
+        }
+    }
+
+    var sortPriority: Int {
+        switch self {
+        case .cursor:
+            0
+        case .vscode:
+            1
+        case .zed:
+            2
+        case .xcode:
+            3
+        case .goland:
+            4
+        case .webstorm:
+            5
+        case .phpstorm:
+            6
+        case .intellijIdea:
+            7
+        }
+    }
+}
+
+struct RunConfiguration: Identifiable, Sendable {
+    let id: String
+    let name: String
+    let source: RunConfigurationSource
+    let kind: RunConfigurationKind
+    let runnerType: String
+    let workingDirectory: String?
+    let command: String?
+    let arguments: [String]
+    let environment: [String: String]
+    let isDebugCapable: Bool
+    let rawSourcePath: String
+    let executionBehavior: RunConfigurationExecutionBehavior
+    let preferredDevTool: SupportedDevTool?
+    let runtimeRequirement: NodeRuntimeRequirement?
+
+    init(
+        id: String,
+        name: String,
+        source: RunConfigurationSource,
+        kind: RunConfigurationKind,
+        runnerType: String,
+        workingDirectory: String? = nil,
+        command: String? = nil,
+        arguments: [String] = [],
+        environment: [String: String] = [:],
+        isDebugCapable: Bool = false,
+        rawSourcePath: String,
+        executionBehavior: RunConfigurationExecutionBehavior = .direct,
+        preferredDevTool: SupportedDevTool? = nil,
+        runtimeRequirement: NodeRuntimeRequirement? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.source = source
+        self.kind = kind
+        self.runnerType = runnerType
+        self.workingDirectory = workingDirectory
+        self.command = command
+        self.arguments = arguments
+        self.environment = environment
+        self.isDebugCapable = isDebugCapable
+        self.rawSourcePath = rawSourcePath
+        self.executionBehavior = executionBehavior
+        self.preferredDevTool = preferredDevTool
+        self.runtimeRequirement = runtimeRequirement
+    }
+
+    var isDirectlyRunnable: Bool {
+        command?.nonEmpty != nil && executionBehavior != .openInDevTool
+    }
+
+    var displaySourceName: String {
+        if source == .jetbrains, let preferredDevTool {
+            return preferredDevTool.displayName
+        }
+        return source.displayName
+    }
+
+    var displayCommandLine: String? {
+        guard let command = command?.nonEmpty else { return nil }
+        return ([command] + arguments).joined(separator: " ")
     }
 }
 
@@ -213,6 +423,33 @@ struct CommandExecutionDescriptor: Sendable {
     let worktreeID: UUID?
     let runtimeRequirement: NodeRuntimeRequirement?
     let stdinText: String?
+    let environment: [String: String]
+
+    init(
+        title: String,
+        actionKind: ActionKind,
+        executable: String,
+        arguments: [String],
+        displayCommandLine: String? = nil,
+        currentDirectoryURL: URL? = nil,
+        repositoryID: UUID,
+        worktreeID: UUID? = nil,
+        runtimeRequirement: NodeRuntimeRequirement? = nil,
+        stdinText: String? = nil,
+        environment: [String: String] = [:]
+    ) {
+        self.title = title
+        self.actionKind = actionKind
+        self.executable = executable
+        self.arguments = arguments
+        self.displayCommandLine = displayCommandLine
+        self.currentDirectoryURL = currentDirectoryURL
+        self.repositoryID = repositoryID
+        self.worktreeID = worktreeID
+        self.runtimeRequirement = runtimeRequirement
+        self.stdinText = stdinText
+        self.environment = environment
+    }
 }
 
 struct RemoteExecutionContext: Sendable {

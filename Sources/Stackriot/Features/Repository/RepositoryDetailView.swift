@@ -250,14 +250,11 @@ struct RepositoryDetailView: View {
                             hoveredWorktreeID = isHovering ? worktree.id : nil
                         }
                         .contextMenu {
-                            Button("Open in Cursor") {
-                                Task {
-                                    await appModel.openIDE(.cursor, for: worktree, in: modelContext)
-                                }
-                            }
-                            Button("Open in VS Code") {
-                                Task {
-                                    await appModel.openIDE(.vscode, for: worktree, in: modelContext)
+                            ForEach(appModel.availableDevTools(for: worktree)) { tool in
+                                Button("Open in \(tool.displayName)") {
+                                    Task {
+                                        await appModel.openDevTool(tool, for: worktree, in: modelContext)
+                                    }
                                 }
                             }
                             Button("In Finder zeigen") {
@@ -319,7 +316,7 @@ struct RepositoryDetailView: View {
     }
 
     private var emptyWorktreeState: some View {
-        ContentUnavailableView("Select a Worktree", systemImage: "point.3.connected.trianglepath.dotted", description: Text("Choose or create a worktree to launch editors, run Make targets, and execute npm scripts."))
+        ContentUnavailableView("Select a Worktree", systemImage: "point.3.connected.trianglepath.dotted", description: Text("Choose or create a worktree to launch editors and run discovered configurations from native tools and supported IDEs."))
             .frame(maxWidth: .infinity, minHeight: 280)
     }
 

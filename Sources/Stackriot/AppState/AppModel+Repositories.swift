@@ -231,10 +231,29 @@ extension AppModel {
     }
 
     func defaultTemplates(for repository: ManagedRepository) -> [ActionTemplateRecord] {
-        [
-            ActionTemplateRecord(kind: .openIDE, title: "Open in Cursor", payload: SupportedIDE.cursor.rawValue, repository: repository),
-            ActionTemplateRecord(kind: .openIDE, title: "Open in VS Code", payload: SupportedIDE.vscode.rawValue, repository: repository),
-            ActionTemplateRecord(kind: .installDependencies, title: "Install dependencies", payload: DependencyInstallMode.install.rawValue, repository: repository),
+        let toolTemplates: [ActionTemplateRecord]
+        if let worktree = worktrees(for: repository).first {
+            toolTemplates = availableDevTools(for: worktree)
+                .prefix(2)
+                .map {
+                    ActionTemplateRecord(
+                        kind: .openIDE,
+                        title: "Open in \($0.displayName)",
+                        payload: $0.rawValue,
+                        repository: repository
+                    )
+                }
+        } else {
+            toolTemplates = []
+        }
+
+        return toolTemplates + [
+            ActionTemplateRecord(
+                kind: .installDependencies,
+                title: "Install dependencies",
+                payload: DependencyInstallMode.install.rawValue,
+                repository: repository
+            ),
         ]
     }
 
