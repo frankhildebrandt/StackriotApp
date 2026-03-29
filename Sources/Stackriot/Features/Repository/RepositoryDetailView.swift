@@ -11,7 +11,8 @@ struct RepositoryDetailView: View {
     @State private var isPushingDefaultBranch = false
     @State private var hoveredWorktreeID: UUID?
     @State private var isIntegrationSheetPresented = false
-    @State private var integrationTargetWorktree: WorktreeRecord?
+    @State private var integrationTargetWorktreeID: UUID?
+    @State private var integrationTargetBranchName = ""
     @AppStorage("hasSeenWorktreeOnboarding") private var hasSeenWorktreeOnboarding = false
 
     var body: some View {
@@ -35,8 +36,12 @@ struct RepositoryDetailView: View {
             appModel.restoreAllPRMonitoring(in: modelContext)
         }
         .sheet(isPresented: $isIntegrationSheetPresented) {
-            if let worktree = integrationTargetWorktree {
-                IntegrateWorktreeSheet(worktree: worktree, repository: repository)
+            if let worktreeID = integrationTargetWorktreeID {
+                IntegrateWorktreeSheet(
+                    worktreeID: worktreeID,
+                    repository: repository,
+                    initialBranchName: integrationTargetBranchName
+                )
             }
         }
         .confirmationDialog("Remove worktree?", item: $worktreePendingRemoval) { worktree in
@@ -219,7 +224,8 @@ struct RepositoryDetailView: View {
                                         appModel.integrationDraft = IntegrationDraft(
                                             prTitle: worktree.branchName
                                         )
-                                        integrationTargetWorktree = worktree
+                                        integrationTargetWorktreeID = worktree.id
+                                        integrationTargetBranchName = worktree.branchName
                                         isIntegrationSheetPresented = true
                                     } label: {
                                         Image(systemName: worktree.lifecycleState == .integrating
@@ -282,7 +288,8 @@ struct RepositoryDetailView: View {
                                     appModel.integrationDraft = IntegrationDraft(
                                         prTitle: worktree.branchName
                                     )
-                                    integrationTargetWorktree = worktree
+                                    integrationTargetWorktreeID = worktree.id
+                                    integrationTargetBranchName = worktree.branchName
                                     isIntegrationSheetPresented = true
                                 }
                                 Button("Publish Branch") {

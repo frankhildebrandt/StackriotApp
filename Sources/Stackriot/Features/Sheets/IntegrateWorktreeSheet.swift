@@ -6,12 +6,21 @@ struct IntegrateWorktreeSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
-    let worktree: WorktreeRecord
+    let worktreeID: UUID
     let repository: ManagedRepository
+    let initialBranchName: String
 
     @State private var draft: IntegrationDraft
     @State private var isGHAvailable = false
     @State private var isRunning = false
+
+    private var worktree: WorktreeRecord? {
+        appModel.worktreeRecord(with: worktreeID)
+    }
+
+    private var branchName: String {
+        worktree?.branchName ?? initialBranchName
+    }
 
     private var hasGitHubRemote: Bool {
         repository.remotes.contains { GitHubCLIService.isGitHubRemote(url: $0.url) }
@@ -21,30 +30,28 @@ struct IntegrateWorktreeSheet: View {
         isGHAvailable && hasGitHubRemote
     }
 
-    init(worktree: WorktreeRecord, repository: ManagedRepository) {
-        self.worktree = worktree
+    init(worktreeID: UUID, repository: ManagedRepository, initialBranchName: String) {
+        self.worktreeID = worktreeID
         self.repository = repository
+        self.initialBranchName = initialBranchName
         _draft = State(initialValue: IntegrationDraft(
             method: .localMerge,
             deleteAfterIntegration: true,
-            prTitle: worktree.branchName,
+            prTitle: initialBranchName,
             prBody: ""
         ))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-
-            // Header
             VStack(alignment: .leading, spacing: 4) {
                 Text("Integrieren in \(repository.defaultBranch)")
                     .font(.title2.weight(.semibold))
-                Text(worktree.branchName)
+                Text(branchName)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
-            // Lifecycle-Hinweis
             HStack(spacing: 10) {
                 Image(systemName: "info.circle.fill")
                     .foregroundStyle(.blue)
@@ -55,7 +62,6 @@ struct IntegrateWorktreeSheet: View {
             .padding(12)
             .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            // Methode wählen
             VStack(alignment: .leading, spacing: 6) {
                 Text("Integrations-Methode")
                     .font(.caption.weight(.medium))
@@ -69,7 +75,6 @@ struct IntegrateWorktreeSheet: View {
                 .pickerStyle(.segmented)
             }
 
-            // GitHub PR Felder
             if draft.method == .githubPR {
                 if !canUseGitHubPR {
                     HStack(spacing: 8) {
@@ -114,12 +119,10 @@ struct IntegrateWorktreeSheet: View {
 
             Divider()
 
-            // Worktree-Delete Toggle
             Toggle("Worktree nach Integration löschen", isOn: $draft.deleteAfterIntegration)
 
             Divider()
 
-            // Actions
             HStack {
                 Spacer()
                 Button("Abbrechen") {
@@ -128,6 +131,10 @@ struct IntegrateWorktreeSheet: View {
                 .keyboardShortcut(.cancelAction)
 
                 Button(draft.method == .githubPR ? "PR erstellen" : "Jetzt integrieren") {
+                    guard let worktree else {
+                        dismiss()
+                        return
+                    }
                     isRunning = true
                     Task {
                         await appModel.startIntegration(
@@ -147,6 +154,11 @@ struct IntegrateWorktreeSheet: View {
         .padding(24)
         .frame(width: 540)
         .background(.regularMaterial)
+        .onChange(of: worktree == nil) { _, isMissing in
+            if isMissing {
+                dismiss()
+            }
+        }
         .task {
             isGHAvailable = await appModel.services.gitHubCLIService.isGHAvailable()
             if !isGHAvailable || !hasGitHubRemote {
