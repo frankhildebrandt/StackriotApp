@@ -80,6 +80,7 @@
 			E00000000000000000000044 /* DevToolDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000044 /* DevToolDiscoveryService.swift */; };
 			E00000000000000000000045 /* RunConfigurationDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000045 /* RunConfigurationDiscoveryService.swift */; };
 			E00000000000000000000047 /* WorkspaceDiffFileList.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000047 /* WorkspaceDiffFileList.swift */; };
+			E00000000000000000000049 /* CodexExecJSONLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000049 /* CodexExecJSONLParser.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -156,6 +157,7 @@
 			D00000000000000000000044 /* DevToolDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevToolDiscoveryService.swift; sourceTree = "<group>"; };
 			D00000000000000000000045 /* RunConfigurationDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConfigurationDiscoveryService.swift; sourceTree = "<group>"; };
 			D00000000000000000000047 /* WorkspaceDiffFileList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDiffFileList.swift; sourceTree = "<group>"; };
+			D00000000000000000000049 /* CodexExecJSONLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexExecJSONLParser.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -289,6 +291,7 @@
 			children = (
 				D00000000000000000000042 /* AIProviderService.swift */,
 				D00000000000000000000027 /* AIAgentManager.swift */,
+				D00000000000000000000049 /* CodexExecJSONLParser.swift */,
 				D00000000000000000000044 /* DevToolDiscoveryService.swift */,
 				D0000000000000000000003D /* GitHubCLIService.swift */,
 				D00000000000000000000028 /* AppPaths.swift */,
@@ -533,6 +536,7 @@
 				E00000000000000000000043 /* AgentRunSummaryWindow.swift in Sources */,
 				E00000000000000000000044 /* DevToolDiscoveryService.swift in Sources */,
 				E00000000000000000000045 /* RunConfigurationDiscoveryService.swift in Sources */,
+				E00000000000000000000049 /* CodexExecJSONLParser.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

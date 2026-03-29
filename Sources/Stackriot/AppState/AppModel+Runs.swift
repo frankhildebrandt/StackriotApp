@@ -195,15 +195,14 @@ extension AppModel {
     func launchRun(runID: UUID, descriptor: CommandExecutionDescriptor) async {
         do {
             if descriptor.actionKind == .aiAgent && descriptor.usesTerminalSession {
-                let environment = ProcessInfo.processInfo.environment.merging(
-                    [
-                        "PATH": await ShellEnvironment.loginShellPath(),
+                let environment = await ShellEnvironment.resolvedEnvironment(
+                    additional: [
                         "TERM": "xterm-256color",
                         "COLORTERM": "truecolor",
                         "TERM_PROGRAM": "Stackriot",
-                    ]
-                ) { _, new in new }
-                .merging(descriptor.environment) { _, new in new }
+                    ],
+                    overrides: descriptor.environment
+                )
                 let session = AgentTerminalSession(
                     runID: runID,
                     onData: { [weak self] chunk in
@@ -235,12 +234,13 @@ extension AppModel {
 
             let prepared = try await services.nodeRuntimeManager.prepareExecution(for: descriptor)
             nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
+            let environment = await ShellEnvironment.resolvedEnvironment(overrides: prepared.environment)
 
             let handle = try CommandRunner.start(
                 executable: prepared.executable,
                 arguments: prepared.arguments,
                 currentDirectoryURL: descriptor.currentDirectoryURL,
-                environment: prepared.environment,
+                environment: environment,
                 onOutput: { [weak self] chunk in
                     Task { @MainActor in
                         guard let self else { return }
