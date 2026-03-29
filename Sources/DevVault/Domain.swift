@@ -124,6 +124,25 @@ enum DependencyInstallMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum TerminalTabRetentionMode: String, Codable, CaseIterable, Identifiable {
+    case shortRetain
+    case manualClose
+    case runningOnly
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .shortRetain:
+            "Short Retain"
+        case .manualClose:
+            "Manual Close"
+        case .runningOnly:
+            "Running Only"
+        }
+    }
+}
+
 enum SSHKeyKind: String, Codable, CaseIterable, Identifiable {
     case imported
     case generated
@@ -177,6 +196,106 @@ struct RepositoryRefreshInfo: Sendable {
     let defaultBranch: String
     let fetchedAt: Date?
     let errorMessage: String?
+}
+
+struct WorktreeStatus: Sendable {
+    var aheadCount: Int = 0
+    var behindCount: Int = 0
+    var addedLines: Int = 0
+    var deletedLines: Int = 0
+    var hasUncommittedChanges: Bool = false
+}
+
+enum SyncStrategy {
+    case rebase
+    case merge
+}
+
+struct TerminalTabState: Sendable {
+    let runID: UUID
+    let worktreeID: UUID
+    var isVisible = true
+    var isPinned = false
+    var lastViewedAt: Date?
+    var completedAt: Date?
+    var closedAt: Date?
+}
+
+struct WorktreeRemovalDraft: Identifiable, Sendable {
+    let id: UUID
+    let path: String
+}
+
+struct TerminalTabBookkeeping: Sendable {
+    private(set) var tabs: [UUID: TerminalTabState] = [:]
+    private(set) var selectedRunIDsByWorktree: [UUID: UUID] = [:]
+
+    mutating func activate(runID: UUID, worktreeID: UUID, viewedAt: Date = .now) {
+        var tab = tabs[runID] ?? TerminalTabState(runID: runID, worktreeID: worktreeID)
+        tab.isVisible = true
+        tab.closedAt = nil
+        tab.lastViewedAt = viewedAt
+        tabs[runID] = tab
+        selectedRunIDsByWorktree[worktreeID] = runID
+    }
+
+    mutating func markCompleted(runID: UUID, at: Date = .now) {
+        guard var tab = tabs[runID] else { return }
+        tab.completedAt = at
+        tabs[runID] = tab
+    }
+
+    mutating func setPinned(_ isPinned: Bool, for runID: UUID) {
+        guard var tab = tabs[runID] else { return }
+        tab.isPinned = isPinned
+        tabs[runID] = tab
+    }
+
+    mutating func hide(runID: UUID) {
+        guard var tab = tabs[runID] else { return }
+        tab.isVisible = false
+        tab.closedAt = .now
+        tabs[runID] = tab
+
+        guard selectedRunIDsByWorktree[tab.worktreeID] == runID else { return }
+        selectedRunIDsByWorktree[tab.worktreeID] = visibleRunIDs(for: tab.worktreeID).first
+    }
+
+    mutating func removeWorktree(_ worktreeID: UUID) {
+        tabs = tabs.filter { $0.value.worktreeID != worktreeID }
+        selectedRunIDsByWorktree.removeValue(forKey: worktreeID)
+    }
+
+    func tabState(for runID: UUID) -> TerminalTabState? {
+        tabs[runID]
+    }
+
+    func visibleRunIDs(for worktreeID: UUID) -> [UUID] {
+        tabs.values
+            .filter { $0.worktreeID == worktreeID && $0.isVisible }
+            .sorted(by: compareTabs(_:_:))
+            .map(\.runID)
+    }
+
+    func selectedVisibleRunID(for worktreeID: UUID) -> UUID? {
+        if let selected = selectedRunIDsByWorktree[worktreeID], tabs[selected]?.isVisible == true {
+            return selected
+        }
+        return visibleRunIDs(for: worktreeID).first
+    }
+
+    private func compareTabs(_ lhs: TerminalTabState, _ rhs: TerminalTabState) -> Bool {
+        switch (lhs.lastViewedAt, rhs.lastViewedAt) {
+        case let (left?, right?) where left != right:
+            return left > right
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            return lhs.runID.uuidString > rhs.runID.uuidString
+        }
+    }
 }
 
 struct SSHKeyMaterial: Sendable {
@@ -239,12 +358,14 @@ enum AppPreferences {
     static let autoRefreshIntervalKey = "repositories.autoRefreshIntervalSeconds"
     static let defaultAutoRefreshEnabled = true
     static let defaultAutoRefreshInterval: Double = 900
+    static let terminalTabRetentionModeKey = "terminal.tabs.retentionMode"
     static let nodeAutoUpdateEnabledKey = "node.autoUpdateEnabled"
     static let nodeAutoUpdateIntervalKey = "node.autoUpdateIntervalSeconds"
     static let nodeDefaultVersionSpecKey = "node.defaultVersionSpec"
     static let defaultNodeAutoUpdateEnabled = true
     static let defaultNodeAutoUpdateInterval: Double = 21_600
     static let defaultNodeVersionSpec = "lts/*"
+    static let defaultTerminalTabRetentionMode = TerminalTabRetentionMode.shortRetain
 
     static var autoRefreshEnabled: Bool {
         let defaults = UserDefaults.standard
@@ -258,6 +379,17 @@ enum AppPreferences {
         let defaults = UserDefaults.standard
         let value = defaults.double(forKey: autoRefreshIntervalKey)
         return value > 0 ? value : defaultAutoRefreshInterval
+    }
+
+    static var terminalTabRetentionMode: TerminalTabRetentionMode {
+        let defaults = UserDefaults.standard
+        guard
+            let value = defaults.string(forKey: terminalTabRetentionModeKey),
+            let mode = TerminalTabRetentionMode(rawValue: value)
+        else {
+            return defaultTerminalTabRetentionMode
+        }
+        return mode
     }
 
     static var nodeAutoUpdateEnabled: Bool {

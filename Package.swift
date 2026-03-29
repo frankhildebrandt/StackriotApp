@@ -8,9 +8,15 @@ let package = Package(
     platforms: [
         .macOS(.v14),
     ],
+    dependencies: [
+        .package(path: "Vendor/SwiftTerm"),
+    ],
     targets: [
         .executableTarget(
-            name: "DevVault"
+            name: "DevVault",
+            dependencies: [
+                .product(name: "SwiftTerm", package: "SwiftTerm"),
+            ]
         ),
         .testTarget(
             name: "DevVaultTests",

@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage(AppPreferences.autoRefreshEnabledKey) private var autoRefreshEnabled = AppPreferences.defaultAutoRefreshEnabled
     @AppStorage(AppPreferences.autoRefreshIntervalKey) private var autoRefreshInterval = AppPreferences.defaultAutoRefreshInterval
+    @AppStorage(AppPreferences.terminalTabRetentionModeKey) private var terminalTabRetentionMode = AppPreferences.defaultTerminalTabRetentionMode.rawValue
     @AppStorage(AppPreferences.nodeAutoUpdateEnabledKey) private var nodeAutoUpdateEnabled = AppPreferences.defaultNodeAutoUpdateEnabled
     @Query(sort: \StoredSSHKey.displayName) private var sshKeys: [StoredSSHKey]
 
@@ -24,6 +25,14 @@ struct SettingsView: View {
                     Text("60 minutes").tag(3600.0)
                 }
                 LabeledContent("Workflow", value: "Bare repos + worktrees")
+            }
+
+            Section("Terminal Tabs") {
+                Picker("Completed tab retention", selection: $terminalTabRetentionMode) {
+                    ForEach(TerminalTabRetentionMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode.rawValue)
+                    }
+                }
             }
 
             Section("Node Runtime") {

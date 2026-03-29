@@ -5,7 +5,6 @@ struct RootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ManagedRepository.displayName) private var repositories: [ManagedRepository]
-    @Query(sort: \RunRecord.startedAt, order: .reverse) private var runs: [RunRecord]
 
     var body: some View {
         @Bindable var appModel = appModel
@@ -38,8 +37,13 @@ struct RootView: View {
                 ContentUnavailableView("No Repositories", systemImage: "shippingbox", description: Text("Clone a bare repository to start creating worktrees and actions."))
             }
         } detail: {
-            RunConsoleView(run: appModel.run(for: runs), activeRunIDs: appModel.activeRunIDs)
-                .navigationSplitViewColumnWidth(min: 360, ideal: 420)
+            if let repository = appModel.repository(for: repositories) {
+                RunConsoleColumn(repository: repository)
+                    .navigationSplitViewColumnWidth(min: 360, ideal: 420)
+            } else {
+                ContentUnavailableView("No Console", systemImage: "terminal", description: Text("Select a repository and worktree to inspect terminal tabs."))
+                    .navigationSplitViewColumnWidth(min: 360, ideal: 420)
+            }
         }
         .task {
             appModel.configure(modelContext: modelContext)
@@ -225,17 +229,18 @@ private struct RepositoryDetailView: View {
     @Environment(\.modelContext) private var modelContext
 
     let repository: ManagedRepository
-    @State private var selectedWorktreeID: UUID?
-    @State private var worktreePendingRemoval: WorktreeRecord?
+    @State private var worktreePendingRemoval: WorktreeRemovalDraft?
     @State private var pendingMakeTarget: String?
     @State private var pendingScript: String?
     @State private var pendingDependencyMode: DependencyInstallMode?
 
     var body: some View {
+        let worktrees = appModel.worktrees(for: repository)
+
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 repositoryHeader
-                worktreeSection
+                worktreeSection(worktrees: worktrees)
 
                 if let worktree = selectedWorktree {
                     actionSection(for: worktree)
@@ -248,12 +253,16 @@ private struct RepositoryDetailView: View {
         }
         .navigationTitle(repository.displayName)
         .task(id: repository.id) {
-            selectedWorktreeID = repository.worktrees.sorted(by: { $0.createdAt > $1.createdAt }).first?.id
+            appModel.ensureSelectedWorktree(in: repository)
+            await appModel.refreshWorktreeStatuses(for: repository)
         }
         .confirmationDialog("Remove worktree?", item: $worktreePendingRemoval) { worktree in
             Button("Remove", role: .destructive) {
-                Task {
-                    await appModel.removeWorktree(worktree, in: modelContext)
+                worktreePendingRemoval = nil
+                if let record = appModel.worktreeRecord(with: worktree.id) {
+                    Task {
+                        await appModel.removeWorktree(record, in: modelContext)
+                    }
                 }
             }
         } message: { worktree in
@@ -297,6 +306,35 @@ private struct RepositoryDetailView: View {
             }
         } message: {
             Text("This action may modify lockfiles and installed dependencies.")
+        }
+        .alert("Rebase fehlgeschlagen", isPresented: Binding(
+            get: { appModel.worktreePendingMergeOfferID != nil },
+            set: { newValue in
+                if !newValue {
+                    appModel.worktreePendingMergeOfferID = nil
+                }
+            }
+        )) {
+            Button("Merge versuchen") {
+                if
+                    let worktreeID = appModel.worktreePendingMergeOfferID,
+                    let worktree = appModel.worktreeRecord(with: worktreeID)
+                {
+                    Task {
+                        await appModel.syncWorktreeFromMain(
+                            worktree,
+                            repository: repository,
+                            strategy: .merge,
+                            modelContext: modelContext
+                        )
+                    }
+                }
+            }
+            Button("Abbrechen", role: .cancel) {
+                appModel.worktreePendingMergeOfferID = nil
+            }
+        } message: {
+            Text("Der Rebase von \(repository.defaultBranch) konnte nicht abgeschlossen werden. Möchtest du stattdessen einen Merge versuchen?")
         }
     }
 
@@ -354,7 +392,7 @@ private struct RepositoryDetailView: View {
         }
     }
 
-    private var worktreeSection: some View {
+    private func worktreeSection(worktrees: [WorktreeRecord]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Worktrees")
@@ -367,7 +405,7 @@ private struct RepositoryDetailView: View {
                 }
             }
 
-            if repository.worktrees.isEmpty {
+            if worktrees.isEmpty {
                 Text("No worktrees yet. Create one from the bare repository to start development.")
                     .foregroundStyle(.secondary)
                     .padding(16)
@@ -375,43 +413,47 @@ private struct RepositoryDetailView: View {
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             } else {
                 VStack(spacing: 10) {
-                    ForEach(repository.worktrees.sorted(by: { $0.createdAt > $1.createdAt })) { worktree in
-                        Button {
-                            selectedWorktreeID = worktree.id
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 8) {
-                                        Text(worktree.branchName)
-                                            .font(.headline)
-                                        if appModel.isAgentRunning(for: worktree) {
-                                            AgentActivityDot()
-                                        }
+                    ForEach(worktrees) { worktree in
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    Text(worktree.branchName)
+                                        .font(.headline)
+                                    if appModel.isAgentRunning(for: worktree) {
+                                        AgentActivityDot()
                                     }
-                                    Text(worktree.path)
+                                }
+                                Text(worktree.path)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+
+                                worktreeStatusRow(for: worktree)
+
+                                if let issueContext = worktree.issueContext {
+                                    Label(issueContext, systemImage: "number")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                    if let issueContext = worktree.issueContext {
-                                        Label(issueContext, systemImage: "number")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                if selectedWorktreeID == worktree.id {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.tint)
                                 }
                             }
-                            .padding(16)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                selectedWorktreeID == worktree.id ? .regularMaterial : .thinMaterial,
-                                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            )
+
+                            Spacer()
+
+                            if selectedWorktree?.id == worktree.id {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.tint)
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            selectedWorktree?.id == worktree.id ? .regularMaterial : .thinMaterial,
+                            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .onTapGesture {
+                            appModel.selectWorktree(worktree, in: repository)
+                        }
                         .contextMenu {
                             Button("Open in Cursor") {
                                 Task {
@@ -427,11 +469,66 @@ private struct RepositoryDetailView: View {
                                 appModel.presentPublishSheet(for: repository, worktree: worktree)
                             }
                             Button("Remove Worktree", role: .destructive) {
-                                worktreePendingRemoval = worktree
+                                worktreePendingRemoval = WorktreeRemovalDraft(id: worktree.id, path: worktree.path)
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func worktreeStatusRow(for worktree: WorktreeRecord) -> some View {
+        if let status = appModel.worktreeStatuses[worktree.id] {
+            HStack(spacing: 10) {
+                Text("↑\(status.aheadCount)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(status.aheadCount > 0 ? .primary : .secondary)
+
+                Text("↓\(status.behindCount)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(status.behindCount > 0 ? .orange : .secondary)
+
+                if status.hasUncommittedChanges {
+                    Text("+\(status.addedLines)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.green)
+                    Text("-\(status.deletedLines)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.red)
+                } else {
+                    Text("clean")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.thinMaterial, in: Capsule())
+                }
+
+                Spacer(minLength: 8)
+
+                Button {
+                    Task {
+                        await appModel.syncWorktreeFromMain(
+                            worktree,
+                            repository: repository,
+                            strategy: .rebase,
+                            modelContext: modelContext
+                        )
+                    }
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .help("Mit \(repository.defaultBranch) synchronisieren")
+            }
+        } else {
+            HStack {
+                ProgressView()
+                    .controlSize(.small)
+                Spacer()
             }
         }
     }
@@ -508,15 +605,15 @@ private struct RepositoryDetailView: View {
             Text("Run History")
                 .font(.title3.weight(.semibold))
 
-            let recentRuns = repository.runs.sorted(by: { $0.startedAt > $1.startedAt }).prefix(8)
+            let recentRuns = selectedWorktreeID.map { appModel.runs(forWorktreeID: $0, in: repository) } ?? []
             if recentRuns.isEmpty {
-                Text("No runs recorded for this repository yet.")
+                Text("No runs recorded for this worktree yet.")
                     .foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 10) {
-                    ForEach(Array(recentRuns)) { run in
+                    ForEach(Array(recentRuns.prefix(8))) { run in
                         Button {
-                            appModel.selectedRunID = run.id
+                            appModel.reopenTab(run)
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 6) {
@@ -551,8 +648,11 @@ private struct RepositoryDetailView: View {
     }
 
     private var selectedWorktree: WorktreeRecord? {
-        repository.worktrees.first(where: { $0.id == selectedWorktreeID }) ??
-            repository.worktrees.sorted(by: { $0.createdAt > $1.createdAt }).first
+        appModel.selectedWorktree(for: repository)
+    }
+
+    private var selectedWorktreeID: UUID? {
+        appModel.selectedWorktreeID(for: repository)
     }
 
     private func statusColor(for status: RunStatusKind) -> Color {
@@ -661,10 +761,168 @@ private struct AgentActivityDot: View {
     }
 }
 
+private struct RunConsoleColumn: View {
+    @Environment(AppModel.self) private var appModel
+
+    let repository: ManagedRepository
+
+    var body: some View {
+        let worktree = appModel.selectedWorktree(for: repository)
+        let selectedRunID = worktree.flatMap { appModel.selectedTab(for: $0, in: repository)?.id }
+
+        VStack(alignment: .leading, spacing: 16) {
+            if let worktree {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(worktree.branchName)
+                        .font(.title3.weight(.semibold))
+                    Text(worktree.path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                let tabs = appModel.visibleTabs(for: worktree, in: repository)
+                if tabs.isEmpty {
+                    ContentUnavailableView(
+                        "No Tabs for This Worktree",
+                        systemImage: "rectangle.stack",
+                        description: Text("Start a command or reopen a previous run from history to create a terminal tab.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    TerminalTabStrip(repository: repository, worktree: worktree, tabs: tabs)
+                    RunConsoleView(
+                        run: appModel.selectedTab(for: worktree, in: repository),
+                        activeRunIDs: appModel.activeRunIDs
+                    )
+                    .id(selectedRunID ?? worktree.id)
+                }
+            } else {
+                ContentUnavailableView(
+                    "No Worktree Selected",
+                    systemImage: "terminal",
+                    description: Text("Select a worktree to inspect its terminal tabs.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .padding(24)
+        .id(worktree?.id ?? repository.id)
+        .navigationTitle("Run Console")
+        .background(
+            LinearGradient(
+                colors: [Color.black.opacity(0.06), Color.clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+}
+
+private struct TerminalTabStrip: View {
+    @Environment(AppModel.self) private var appModel
+
+    let repository: ManagedRepository
+    let worktree: WorktreeRecord
+    let tabs: [RunRecord]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(tabs) { run in
+                    TerminalTabChip(
+                        run: run,
+                        isSelected: appModel.selectedTab(for: worktree, in: repository)?.id == run.id,
+                        isRunning: appModel.activeRunIDs.contains(run.id),
+                        onSelect: {
+                            appModel.selectTab(run)
+                        },
+                        onClose: {
+                            appModel.closeTab(run)
+                        }
+                    )
+                }
+            }
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.2))
+                    .frame(height: 1)
+            }
+        }
+    }
+}
+
+private struct TerminalTabChip: View {
+    let run: RunRecord
+    let isSelected: Bool
+    let isRunning: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(statusColor)
+                .frame(width: 3, height: 22)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(run.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Text(run.startedAt.formatted(date: .omitted, time: .shortened))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !isRunning {
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption2.weight(.bold))
+                        .frame(width: 14, height: 14)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(minWidth: 180, alignment: .leading)
+        .background(isSelected ? Color(nsColor: .windowBackgroundColor) : Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.2))
+                .frame(height: isSelected ? 2 : 1)
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.15))
+                .frame(width: 1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect()
+        }
+    }
+
+    private var statusColor: Color {
+        switch run.status {
+        case .pending, .running:
+            .orange
+        case .succeeded:
+            .green
+        case .failed:
+            .red
+        case .cancelled:
+            .gray
+        }
+    }
+}
+
 private struct RunConsoleView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
-    @State private var pendingInput = ""
 
     let run: RunRecord?
     let activeRunIDs: Set<UUID>
@@ -685,52 +943,31 @@ private struct RunConsoleView: View {
                         Button("Cancel", role: .destructive) {
                             appModel.cancelRun(run, in: modelContext)
                         }
+                    } else {
+                        Button("Close") {
+                            appModel.closeTab(run)
+                        }
                     }
                 }
 
-                VStack(spacing: 12) {
+                if let session = appModel.terminalSession(for: run) {
+                    TerminalSessionView(session: session)
+                        .id(session.runID)
+                        .background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                } else {
                     TextEditor(text: .constant(run.outputText))
                         .font(.system(.body, design: .monospaced))
                         .scrollContentBackground(.hidden)
                         .padding(12)
                         .background(.black.opacity(0.9), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                         .foregroundStyle(.white)
-
-                    if activeRunIDs.contains(run.id) {
-                        HStack(spacing: 12) {
-                            TextField("Send input to session", text: $pendingInput)
-                                .textFieldStyle(.roundedBorder)
-                                .onSubmit {
-                                    submitInput(for: run)
-                                }
-
-                            Button("Send") {
-                                submitInput(for: run)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(pendingInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-                    }
                 }
             } else {
-                ContentUnavailableView("No Run Selected", systemImage: "terminal", description: Text("Select a run from the repository history to inspect logs and exit state."))
+                ContentUnavailableView("No Tab Selected", systemImage: "terminal", description: Text("Select a tab to inspect logs and exit state."))
             }
         }
-        .padding(24)
-        .navigationTitle("Run Console")
-        .background(
-            LinearGradient(
-                colors: [Color.black.opacity(0.06), Color.clear],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-    }
-
-    private func submitInput(for run: RunRecord) {
-        let text = pendingInput
-        pendingInput = ""
-        appModel.sendInput(text, to: run)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 

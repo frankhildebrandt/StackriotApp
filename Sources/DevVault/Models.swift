@@ -215,6 +215,7 @@ final class RunRecord {
     var exitCode: Int?
     var outputText: String
     var statusRawValue: String
+    var worktreeID: UUID?
     var repository: ManagedRepository?
     var worktree: WorktreeRecord?
 
@@ -228,6 +229,7 @@ final class RunRecord {
         exitCode: Int? = nil,
         outputText: String = "",
         status: RunStatusKind = .pending,
+        worktreeID: UUID? = nil,
         repository: ManagedRepository? = nil,
         worktree: WorktreeRecord? = nil
     ) {
@@ -240,6 +242,7 @@ final class RunRecord {
         self.exitCode = exitCode
         self.outputText = outputText
         self.statusRawValue = status.rawValue
+        self.worktreeID = worktreeID ?? worktree?.id
         self.repository = repository
         self.worktree = worktree
     }

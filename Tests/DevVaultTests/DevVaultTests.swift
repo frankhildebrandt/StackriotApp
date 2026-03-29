@@ -139,6 +139,7 @@ struct DevVaultTests {
             actionKind: .installDependencies,
             executable: "npm",
             arguments: ["--version"],
+            displayCommandLine: nil,
             currentDirectoryURL: root,
             repositoryID: UUID(),
             worktreeID: nil,
@@ -164,7 +165,7 @@ struct DevVaultTests {
             environment: prepared.environment
         )
         #expect(result.exitCode == 0)
-        #expect(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("v"))
+        #expect(result.stdout.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).hasPrefix("v"))
     }
 
     @Test
@@ -176,6 +177,7 @@ struct DevVaultTests {
             actionKind: .installDependencies,
             executable: "npm",
             arguments: ["install"],
+            displayCommandLine: nil,
             currentDirectoryURL: root,
             repositoryID: UUID(),
             worktreeID: nil,
@@ -198,8 +200,47 @@ struct DevVaultTests {
         }
 
         #expect(results.count == 2)
-        #expect(Set(results.map(\.executable)).count == 1)
+        #expect(Set(results.map { $0.executable }).count == 1)
         #expect(Set(results.compactMap { $0.environment["NVM_BIN"] }).count == 1)
+    }
+
+    @Test
+    func terminalTabBookkeepingTracksVisibilityPerWorktree() {
+        let worktreeOne = UUID()
+        let worktreeTwo = UUID()
+        let runOne = UUID()
+        let runTwo = UUID()
+        let runThree = UUID()
+        var tabs = TerminalTabBookkeeping()
+
+        tabs.activate(runID: runOne, worktreeID: worktreeOne, viewedAt: Date(timeIntervalSince1970: 10))
+        tabs.activate(runID: runTwo, worktreeID: worktreeOne, viewedAt: Date(timeIntervalSince1970: 20))
+        tabs.activate(runID: runThree, worktreeID: worktreeTwo, viewedAt: Date(timeIntervalSince1970: 30))
+
+        #expect(tabs.visibleRunIDs(for: worktreeOne) == [runTwo, runOne])
+        #expect(tabs.visibleRunIDs(for: worktreeTwo) == [runThree])
+        #expect(tabs.selectedVisibleRunID(for: worktreeOne) == runTwo)
+
+        tabs.hide(runID: runTwo)
+
+        #expect(tabs.visibleRunIDs(for: worktreeOne) == [runOne])
+        #expect(tabs.selectedVisibleRunID(for: worktreeOne) == runOne)
+    }
+
+    @Test
+    func terminalTabBookkeepingRestoresClosedTabWhenReactivated() {
+        let worktreeID = UUID()
+        let olderRun = UUID()
+        let newerRun = UUID()
+        var tabs = TerminalTabBookkeeping()
+
+        tabs.activate(runID: olderRun, worktreeID: worktreeID, viewedAt: Date(timeIntervalSince1970: 10))
+        tabs.activate(runID: newerRun, worktreeID: worktreeID, viewedAt: Date(timeIntervalSince1970: 20))
+        tabs.hide(runID: newerRun)
+        tabs.activate(runID: newerRun, worktreeID: worktreeID, viewedAt: Date(timeIntervalSince1970: 30))
+
+        #expect(tabs.visibleRunIDs(for: worktreeID) == [newerRun, olderRun])
+        #expect(tabs.selectedVisibleRunID(for: worktreeID) == newerRun)
     }
 
     @Test

@@ -6,10 +6,12 @@ import SwiftUI
 @Observable
 final class AppModel: @unchecked Sendable {
     var selectedRepositoryID: UUID?
-    var selectedRunID: UUID?
+    var selectedWorktreeIDsByRepository: [UUID: UUID] = [:]
     var cloneDraft = CloneRepositoryDraft()
     var worktreeDraft = WorktreeDraft()
     var pendingErrorMessage: String?
+    var worktreeStatuses: [UUID: WorktreeStatus] = [:]
+    var worktreePendingMergeOfferID: UUID?
     var activeRunIDs: Set<UUID> = []
     var refreshingRepositoryIDs: Set<UUID> = []
     var isCloneSheetPresented = false
@@ -23,6 +25,7 @@ final class AppModel: @unchecked Sendable {
     )
     var availableAgents: Set<AIAgentTool> = []
     var runningAgentWorktreeIDs: Set<UUID> = []
+    var terminalTabs = TerminalTabBookkeeping()
 
     private let repositoryManager = RepositoryManager()
     private let worktreeManager = WorktreeManager()
@@ -32,7 +35,12 @@ final class AppModel: @unchecked Sendable {
     private let nodeTooling = NodeToolingService()
     private let nodeRuntimeManager = NodeRuntimeManager()
     private let makeTooling = MakeToolingService()
+    private let worktreeStatusService = WorktreeStatusService()
     private var runningProcesses: [UUID: RunningProcess] = [:]
+    @ObservationIgnored
+    private var terminalSessions: [UUID: AgentTerminalSession] = [:]
+    @ObservationIgnored
+    private var terminalTabAutoHideTasks: [UUID: Task<Void, Never>] = [:]
     private var storedModelContext: ModelContext?
     private var autoRefreshTask: Task<Void, Never>?
     private var nodeRuntimeRefreshTask: Task<Void, Never>?
@@ -80,8 +88,90 @@ final class AppModel: @unchecked Sendable {
         return try? modelContext.fetch(descriptor).first
     }
 
-    func run(for runs: [RunRecord]) -> RunRecord? {
-        runs.first(where: { $0.id == selectedRunID }) ?? runs.first
+    func worktrees(for repository: ManagedRepository) -> [WorktreeRecord] {
+        guard let modelContext = storedModelContext else {
+            return repository.worktrees.sorted(by: { $0.createdAt > $1.createdAt })
+        }
+
+        let repositoryID = repository.id
+        let descriptor = FetchDescriptor<WorktreeRecord>(
+            predicate: #Predicate { $0.repository?.id == repositoryID },
+            sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
+
+    func selectedWorktreeID(for repository: ManagedRepository) -> UUID? {
+        if let selectedID = selectedWorktreeIDsByRepository[repository.id] {
+            return selectedID
+        }
+
+        return worktrees(for: repository).first?.id
+    }
+
+    func selectedWorktree(for repository: ManagedRepository) -> WorktreeRecord? {
+        if let selectedID = selectedWorktreeID(for: repository) {
+            return worktreeRecord(with: selectedID)
+        }
+        return nil
+    }
+
+    func ensureSelectedWorktree(in repository: ManagedRepository) {
+        guard let selectedID = selectedWorktreeID(for: repository) else {
+            selectedWorktreeIDsByRepository.removeValue(forKey: repository.id)
+            return
+        }
+
+        if selectedWorktreeIDsByRepository[repository.id] != selectedID {
+            selectedWorktreeIDsByRepository[repository.id] = selectedID
+        }
+    }
+
+    func selectWorktree(_ worktree: WorktreeRecord, in repository: ManagedRepository) {
+        selectedWorktreeIDsByRepository[repository.id] = worktree.id
+    }
+
+    func visibleTabs(for worktree: WorktreeRecord, in repository: ManagedRepository) -> [RunRecord] {
+        let runsByID = Dictionary(uniqueKeysWithValues: repository.runs.map { ($0.id, $0) })
+        return terminalTabs.visibleRunIDs(for: worktree.id).compactMap { runsByID[$0] }
+    }
+
+    func selectedTab(for worktree: WorktreeRecord, in repository: ManagedRepository) -> RunRecord? {
+        let runsByID = Dictionary(uniqueKeysWithValues: repository.runs.map { ($0.id, $0) })
+        if let selectedID = terminalTabs.selectedVisibleRunID(for: worktree.id) {
+            return runsByID[selectedID]
+        }
+        return visibleTabs(for: worktree, in: repository).first
+    }
+
+    func selectTab(_ run: RunRecord) {
+        guard let worktreeID = run.worktree?.id else { return }
+        cancelAutoHide(for: run.id)
+        if let repositoryID = run.repository?.id {
+            selectedWorktreeIDsByRepository[repositoryID] = worktreeID
+        }
+        terminalTabs.activate(runID: run.id, worktreeID: worktreeID)
+    }
+
+    func closeTab(_ run: RunRecord) {
+        guard !activeRunIDs.contains(run.id) else { return }
+        cancelAutoHide(for: run.id)
+        terminalTabs.hide(runID: run.id)
+    }
+
+    func reopenTab(_ run: RunRecord) {
+        guard let worktreeID = run.worktree?.id else { return }
+        if let repositoryID = run.repository?.id {
+            selectedWorktreeIDsByRepository[repositoryID] = worktreeID
+        }
+        terminalTabs.activate(runID: run.id, worktreeID: worktreeID)
+        if !activeRunIDs.contains(run.id), run.status != .running {
+            scheduleAutoHideIfNeeded(for: run.id)
+        }
+    }
+
+    func tabState(for run: RunRecord) -> TerminalTabState? {
+        terminalTabs.tabState(for: run.id)
     }
 
     func presentCloneSheet() {
@@ -248,7 +338,9 @@ final class AppModel: @unchecked Sendable {
             modelContext.insert(worktree)
             try modelContext.save()
 
+            selectedWorktreeIDsByRepository[repository.id] = worktree.id
             isWorktreeSheetPresented = false
+            await refreshWorktreeStatuses(for: repository)
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
@@ -260,14 +352,100 @@ final class AppModel: @unchecked Sendable {
                 throw DevVaultError.unsupportedRepositoryPath
             }
 
+            let worktreeID = worktree.id
+            let worktreePath = worktree.path
+            let repositoryID = repository.id
+            let bareRepositoryPath = repository.bareRepositoryPath
+            let remainingWorktreeID = repository.worktrees
+                .filter { $0.id != worktreeID }
+                .sorted(by: { $0.createdAt > $1.createdAt })
+                .first?
+                .id
+            let runIDsForWorktree = repository.runs
+                .filter { $0.worktree?.id == worktreeID }
+                .map(\.id)
+
             try await worktreeManager.removeWorktree(
-                bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
-                worktreePath: URL(fileURLWithPath: worktree.path)
+                bareRepositoryPath: URL(fileURLWithPath: bareRepositoryPath),
+                worktreePath: URL(fileURLWithPath: worktreePath)
             )
 
             modelContext.delete(worktree)
             repository.updatedAt = .now
             try modelContext.save()
+            worktreeStatuses.removeValue(forKey: worktreeID)
+            for runID in runIDsForWorktree {
+                cancelAutoHide(for: runID)
+            }
+            terminalTabs.removeWorktree(worktreeID)
+            if selectedWorktreeIDsByRepository[repositoryID] == worktreeID {
+                selectedWorktreeIDsByRepository[repositoryID] = remainingWorktreeID
+            }
+            if worktreePendingMergeOfferID == worktreeID {
+                worktreePendingMergeOfferID = nil
+            }
+            await refreshWorktreeStatuses(for: repository)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func refreshWorktreeStatuses(for repository: ManagedRepository) async {
+        let defaultBranch = repository.defaultBranch
+        var statuses: [UUID: WorktreeStatus] = [:]
+
+        await withTaskGroup(of: (UUID, WorktreeStatus).self) { group in
+            for worktree in repository.worktrees {
+                let worktreeID = worktree.id
+                let worktreePath = worktree.path
+                group.addTask { [worktreeStatusService] in
+                    let status = await worktreeStatusService.fetchStatus(
+                        worktreePath: URL(fileURLWithPath: worktreePath),
+                        defaultBranch: defaultBranch
+                    )
+                    return (worktreeID, status)
+                }
+            }
+
+            for await (worktreeID, status) in group {
+                statuses[worktreeID] = status
+            }
+        }
+
+        for (worktreeID, status) in statuses {
+            worktreeStatuses[worktreeID] = status
+        }
+    }
+
+    func syncWorktreeFromMain(
+        _ worktree: WorktreeRecord,
+        repository: ManagedRepository,
+        strategy: SyncStrategy,
+        modelContext: ModelContext
+    ) async {
+        do {
+            switch strategy {
+            case .rebase:
+                do {
+                    try await worktreeStatusService.rebase(
+                        worktreePath: URL(fileURLWithPath: worktree.path),
+                        onto: repository.defaultBranch
+                    )
+                    worktreePendingMergeOfferID = nil
+                } catch {
+                    worktreePendingMergeOfferID = worktree.id
+                    return
+                }
+            case .merge:
+                try await worktreeStatusService.merge(
+                    worktreePath: URL(fileURLWithPath: worktree.path),
+                    from: repository.defaultBranch
+                )
+                worktreePendingMergeOfferID = nil
+            }
+
+            await refreshWorktreeStatuses(for: repository)
+            _ = modelContext
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
@@ -275,6 +453,9 @@ final class AppModel: @unchecked Sendable {
 
     func deleteRepository(_ repository: ManagedRepository, in modelContext: ModelContext) async {
         do {
+            for run in repository.runs {
+                cancelAutoHide(for: run.id)
+            }
             try await repositoryManager.deleteRepository(
                 bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
                 worktreePaths: repository.worktrees.map { URL(fileURLWithPath: $0.path) }
@@ -285,6 +466,7 @@ final class AppModel: @unchecked Sendable {
             if selectedRepositoryID == repository.id {
                 selectedRepositoryID = nil
             }
+            selectedWorktreeIDsByRepository.removeValue(forKey: repository.id)
             clearRepositoryDeletionRequest()
         } catch {
             pendingErrorMessage = error.localizedDescription
@@ -338,8 +520,8 @@ final class AppModel: @unchecked Sendable {
             let descriptor = CommandExecutionDescriptor(
                 title: tool.displayName,
                 actionKind: .aiAgent,
-                executable: "/usr/bin/script",
-                arguments: ["-q", "/dev/null", loginShell, "-ilc", shellCommand],
+                executable: loginShell,
+                arguments: ["-ilc", shellCommand],
                 displayCommandLine: tool.launchCommand(in: worktree.path),
                 currentDirectoryURL: URL(fileURLWithPath: worktree.path),
                 repositoryID: repository.id,
@@ -421,11 +603,25 @@ final class AppModel: @unchecked Sendable {
     }
 
     func cancelRun(_ run: RunRecord, in modelContext: ModelContext) {
+        if let session = terminalSessions[run.id] {
+            session.terminate()
+            return
+        }
         runningProcesses[run.id]?.cancel()
         run.status = .cancelled
         run.endedAt = .now
         activeRunIDs.remove(run.id)
         save(modelContext)
+    }
+
+    func terminalSession(for run: RunRecord) -> AgentTerminalSession? {
+        terminalSessions[run.id]
+    }
+
+    func runs(forWorktreeID worktreeID: UUID, in repository: ManagedRepository) -> [RunRecord] {
+        repository.runs
+            .filter { $0.worktreeID == worktreeID }
+            .sorted(by: { $0.startedAt > $1.startedAt })
     }
 
     func saveRemote(
@@ -567,6 +763,7 @@ final class AppModel: @unchecked Sendable {
             title: descriptor.title,
             commandLine: commandLine,
             status: .running,
+            worktreeID: worktree?.id,
             repository: repository,
             worktree: worktree
         )
@@ -578,7 +775,10 @@ final class AppModel: @unchecked Sendable {
             try modelContext.save()
             let runID = run.id
             activeRunIDs.insert(runID)
-            selectedRunID = runID
+            if let worktree {
+                terminalTabs.activate(runID: runID, worktreeID: worktree.id)
+                selectedWorktreeIDsByRepository[repository.id] = worktree.id
+            }
             Task { [weak self] in
                 await self?.launchRun(runID: runID, descriptor: descriptor)
             }
@@ -599,7 +799,17 @@ final class AppModel: @unchecked Sendable {
     private func handleRunOutput(runID: UUID, chunk: String) {
         guard let run = runRecord(with: runID) else { return }
         run.outputText += chunk
-        selectedRunID = runID
+        guard
+            run.actionKind == .aiAgent,
+            let repositoryID = run.repository?.id,
+            let worktreeID = run.worktree?.id,
+            selectedRepositoryID == repositoryID,
+            selectedWorktreeIDsByRepository[repositoryID] == worktreeID
+        else {
+            return
+        }
+
+        terminalTabs.activate(runID: runID, worktreeID: worktreeID)
     }
 
     private func handleRunTermination(runID: UUID, exitCode: Int32, wasCancelled: Bool) {
@@ -609,6 +819,8 @@ final class AppModel: @unchecked Sendable {
         run.status = wasCancelled ? .cancelled : (exitCode == 0 ? .succeeded : .failed)
         activeRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
+        terminalTabs.markCompleted(runID: runID)
+        scheduleAutoHideIfNeeded(for: runID)
         refreshRunningAgentWorktrees()
         save(modelContext)
     }
@@ -620,17 +832,10 @@ final class AppModel: @unchecked Sendable {
         run.status = .failed
         activeRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
+        terminalTabs.markCompleted(runID: runID)
+        scheduleAutoHideIfNeeded(for: runID)
         refreshRunningAgentWorktrees()
         save(modelContext)
-    }
-
-    func sendInput(_ input: String, to run: RunRecord) {
-        guard activeRunIDs.contains(run.id) else { return }
-        let text = input.trimmingCharacters(in: .newlines)
-        guard !text.isEmpty else { return }
-
-        runningProcesses[run.id]?.send(text + "\n")
-        handleRunOutput(runID: run.id, chunk: "> \(text)\n")
     }
 
     private func runRecord(with id: UUID) -> RunRecord? {
@@ -718,6 +923,33 @@ final class AppModel: @unchecked Sendable {
         )
     }
 
+    private func scheduleAutoHideIfNeeded(for runID: UUID) {
+        cancelAutoHide(for: runID)
+
+        let mode = AppPreferences.terminalTabRetentionMode
+        switch mode {
+        case .manualClose:
+            return
+        case .runningOnly:
+            terminalTabs.hide(runID: runID)
+        case .shortRetain:
+            let task = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(8))
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self?.terminalTabs.hide(runID: runID)
+                    self?.terminalTabAutoHideTasks.removeValue(forKey: runID)
+                }
+            }
+            terminalTabAutoHideTasks[runID] = task
+        }
+    }
+
+    private func cancelAutoHide(for runID: UUID) {
+        terminalTabAutoHideTasks[runID]?.cancel()
+        terminalTabAutoHideTasks.removeValue(forKey: runID)
+    }
+
     private func startAutoRefreshLoopIfNeeded() {
         guard autoRefreshTask == nil else { return }
 
@@ -753,6 +985,34 @@ final class AppModel: @unchecked Sendable {
 
     private func launchRun(runID: UUID, descriptor: CommandExecutionDescriptor) async {
         do {
+            if descriptor.actionKind == .aiAgent {
+                let environment = ProcessInfo.processInfo.environment.merging(
+                    [
+                        "PATH": await ShellEnvironment.loginShellPath(),
+                        "TERM": "xterm-256color",
+                        "COLORTERM": "truecolor",
+                        "TERM_PROGRAM": "DevVault",
+                    ]
+                ) { _, new in new }
+                let session = AgentTerminalSession(
+                    runID: runID,
+                    onData: { [weak self] chunk in
+                        self?.handleRunOutput(runID: runID, chunk: chunk)
+                    },
+                    onTermination: { [weak self] exitCode, wasCancelled in
+                        self?.handleRunTermination(runID: runID, exitCode: exitCode, wasCancelled: wasCancelled)
+                    }
+                )
+                terminalSessions[runID] = session
+                session.start(
+                    executable: descriptor.executable,
+                    arguments: descriptor.arguments,
+                    environment: environment,
+                    currentDirectory: descriptor.currentDirectoryURL?.path
+                )
+                return
+            }
+
             if descriptor.runtimeRequirement != nil {
                 handleRunOutput(runID: runID, chunk: "[devvault] Preparing managed Node runtime…\n")
             }
