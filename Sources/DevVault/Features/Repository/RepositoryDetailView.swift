@@ -102,35 +102,6 @@ struct RepositoryDetailView: View {
             Wähle einen Agenten, der die Konflikte löst und den Commit `\(draft.commitMessage)` erstellt.
             """)
         }
-        .confirmationDialog(
-            "Lokaler Branch divergiert",
-            isPresented: Binding(
-                get: { appModel.pendingMainDivergence?.repositoryID == repository.id },
-                set: { if !$0 { appModel.pendingMainDivergence = nil } }
-            ),
-            presenting: appModel.pendingMainDivergence.flatMap { $0.repositoryID == repository.id ? $0 : nil }
-        ) { draft in
-            ForEach(SupportedIDE.allCases) { ide in
-                Button("In \(ide.displayName) \u{00f6}ffnen") {
-                    if let worktree = repository.worktrees.first(where: { $0.isDefaultBranchWorkspace }) {
-                        Task { await appModel.openIDE(ide, for: worktree, in: modelContext) }
-                    }
-                }
-            }
-            ForEach(availableAgents) { tool in
-                Button("Mit \(tool.displayName) l\u{00f6}sen") {
-                    appModel.launchMainDivergenceAgent(tool, for: draft, in: modelContext)
-                }
-            }
-            Button("Auf \(draft.defaultRemoteName)/\(draft.defaultBranch) zur\u{00fc}cksetzen", role: .destructive) {
-                Task { await appModel.forceResetMain(for: repository, in: modelContext) }
-            }
-            Button("Ignorieren", role: .cancel) {
-                appModel.pendingMainDivergence = nil
-            }
-        } message: { draft in
-            Text("Der lokale \(draft.defaultBranch)-Branch hat \(draft.aheadCount) Commit(s), die nicht auf \(draft.defaultRemoteName)/\(draft.defaultBranch) vorhanden sind.")
-        }
     }
 
     private func worktreeSection(worktrees: [WorktreeRecord]) -> some View {
@@ -475,7 +446,7 @@ struct RepositoryDetailView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(isRefreshingStatuses)
-            .help("Fetch von Remote und lokales \(repository.defaultBranch) zurücksetzen")
+            .help("Den periodischen Fetch- und Sync-Ablauf für \(repository.defaultBranch) sofort ausführen")
 
             Button {
                 isPushingDefaultBranch = true

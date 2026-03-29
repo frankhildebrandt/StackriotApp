@@ -129,6 +129,7 @@ extension AppModel {
         }
 
         ensureDefaultRemoteSelection(for: repository)
+        _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
         let contexts = repository.remotes.map(remoteExecutionContext(for:))
         let defaultRemoteName = resolvedDefaultRemote(for: repository)?.name
         let result = await services.repositoryManager.refreshRepository(
@@ -154,26 +155,12 @@ extension AppModel {
         }
         if let syncErr = result.defaultBranchSyncErrorMessage {
             logLines.append("⚠ Sync: \(syncErr)")
-        } else if let div = result.mainDivergence {
-            logLines.append("⚠ Divergenz erkannt: \(div.aheadCount) lokale Commit(s) vor \(remoteName)/\(result.defaultBranch) \u{2014} kein auto-Reset")
+        } else if let syncSummary = result.defaultBranchSyncSummary {
+            logLines.append("✓ Sync: \(syncSummary)")
         } else {
-            logLines.append("✓ \(result.defaultBranch) auf \(remoteName)/\(result.defaultBranch) zur\u{00fc}ckgesetzt")
+            logLines.append("✓ Sync: Kein Default-Worktree für \(result.defaultBranch) gefunden")
         }
         syncLogs[repository.id] = logLines.joined(separator: "\n")
-
-        if let divergence = result.mainDivergence {
-            if pendingMainDivergence?.repositoryID != repository.id {
-                pendingMainDivergence = MainDivergenceDraft(
-                    repositoryID: repository.id,
-                    worktreePath: divergence.worktreePath,
-                    aheadCount: divergence.aheadCount,
-                    defaultBranch: result.defaultBranch,
-                    defaultRemoteName: defaultRemoteName ?? "origin"
-                )
-            }
-        } else if pendingMainDivergence?.repositoryID == repository.id {
-            pendingMainDivergence = nil
-        }
 
         _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
         await refreshWorktreeStatuses(for: repository)
@@ -209,21 +196,6 @@ extension AppModel {
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
-    }
-
-    func forceResetMain(for repository: ManagedRepository, in modelContext: ModelContext) async {
-        guard let draft = pendingMainDivergence, draft.repositoryID == repository.id else { return }
-        pendingMainDivergence = nil
-        do {
-            try await services.repositoryManager.forceResetDefaultBranch(
-                worktreePath: draft.worktreePath,
-                remoteName: draft.defaultRemoteName,
-                defaultBranch: draft.defaultBranch
-            )
-        } catch {
-            pendingErrorMessage = error.localizedDescription
-        }
-        await refreshWorktreeStatuses(for: repository)
     }
 
     func deleteRepository(_ repository: ManagedRepository, in modelContext: ModelContext) async {

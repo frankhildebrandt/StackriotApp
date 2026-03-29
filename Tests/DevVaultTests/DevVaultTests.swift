@@ -616,6 +616,7 @@ struct DevVaultTests {
 
         #expect(refresh.status == .ready)
         #expect(refresh.defaultBranchSyncErrorMessage == nil)
+        #expect(refresh.defaultBranchSyncSummary?.contains("upstream/main") == true)
 
         let head = try await CommandRunner.runCollected(
             executable: "git",
@@ -628,6 +629,188 @@ struct DevVaultTests {
         #expect(head.exitCode == 0)
         #expect(upstreamHead.exitCode == 0)
         #expect(head.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == upstreamHead.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    @Test
+    func refreshDiscardChangesInDefaultWorktreeAndSyncsRemote() async throws {
+        let origin = try await createSeededRemote(named: "dirty-default")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: origin.remote,
+            preferredName: "Dirty-Default-\(UUID().uuidString)"
+        )
+
+        let defaultWorkspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        try await configureGitIdentity(in: defaultWorkspace.path)
+
+        let remoteCheckout = try await cloneRemoteForEditing(origin.remote, name: "dirty-default-remote")
+        try "remote change\n".write(
+            to: remoteCheckout.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await commitAll(in: remoteCheckout, message: "Remote update")
+        try await runGit(["-C", remoteCheckout.path, "push", "origin", "HEAD:main"], currentDirectoryURL: remoteCheckout)
+
+        try "local dirty change\n".write(
+            to: defaultWorkspace.path.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "temporary\n".write(
+            to: defaultWorkspace.path.appendingPathComponent("TEMP.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let refresh = await RepositoryManager().refreshRepository(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            remotes: [
+                RemoteExecutionContext(name: "origin", url: origin.remote.path, fetchEnabled: true, privateKeyRef: nil),
+            ],
+            defaultRemoteName: "origin"
+        )
+
+        #expect(refresh.status == .ready)
+        #expect(refresh.defaultBranchSyncErrorMessage == nil)
+        #expect(refresh.defaultBranchSyncSummary?.contains("origin/main") == true)
+        #expect(!FileManager.default.fileExists(atPath: defaultWorkspace.path.appendingPathComponent("TEMP.txt").path))
+        let readme = try String(contentsOf: defaultWorkspace.path.appendingPathComponent("README.md"), encoding: .utf8)
+        #expect(readme == "remote change\n")
+    }
+
+    @Test
+    func refreshMergesLocalDefaultBranchCommitsWithRemote() async throws {
+        let origin = try await createSeededRemote(named: "merge-default")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: origin.remote,
+            preferredName: "Merge-Default-\(UUID().uuidString)"
+        )
+
+        let defaultWorkspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        try await configureGitIdentity(in: defaultWorkspace.path)
+
+        try "hello\nlocal change\n".write(
+            to: defaultWorkspace.path.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await commitAll(in: defaultWorkspace.path, message: "Local update")
+
+        let remoteCheckout = try await cloneRemoteForEditing(origin.remote, name: "merge-default-remote")
+        try "hello\nremote change\n".write(
+            to: remoteCheckout.appendingPathComponent("NOTES.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await commitAll(in: remoteCheckout, message: "Remote update")
+        try await runGit(["-C", remoteCheckout.path, "push", "origin", "HEAD:main"], currentDirectoryURL: remoteCheckout)
+
+        let refresh = await RepositoryManager().refreshRepository(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            remotes: [
+                RemoteExecutionContext(name: "origin", url: origin.remote.path, fetchEnabled: true, privateKeyRef: nil),
+            ],
+            defaultRemoteName: "origin"
+        )
+
+        #expect(refresh.status == .ready)
+        #expect(refresh.defaultBranchSyncErrorMessage == nil)
+        #expect(refresh.defaultBranchSyncSummary == "main mit origin/main gemergt")
+
+        let parents = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["-C", defaultWorkspace.path.path, "rev-list", "--parents", "-n", "1", "HEAD"]
+        )
+        let parts = parents.stdout.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
+        #expect(parts.count == 3)
+    }
+
+    @MainActor
+    @Test
+    func refreshAllRepositoriesUsesDefaultBranchSyncPath() async throws {
+        let previous = UserDefaults.standard.object(forKey: AppPreferences.autoRefreshEnabledKey)
+        UserDefaults.standard.set(true, forKey: AppPreferences.autoRefreshEnabledKey)
+        defer {
+            if let previous {
+                UserDefaults.standard.set(previous, forKey: AppPreferences.autoRefreshEnabledKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: AppPreferences.autoRefreshEnabledKey)
+            }
+        }
+
+        let origin = try await createSeededRemote(named: "auto-refresh-default")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: origin.remote,
+            preferredName: "Auto-Refresh-\(UUID().uuidString)"
+        )
+        let defaultWorkspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+
+        let remoteCheckout = try await cloneRemoteForEditing(origin.remote, name: "auto-refresh-remote")
+        try "auto refresh\n".write(
+            to: remoteCheckout.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await commitAll(in: remoteCheckout, message: "Auto refresh update")
+        try await runGit(["-C", remoteCheckout.path, "push", "origin", "HEAD:main"], currentDirectoryURL: remoteCheckout)
+
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: cloneInfo.displayName,
+            remoteURL: origin.remote.path,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath.path,
+            defaultBranch: cloneInfo.defaultBranch,
+            defaultRemoteName: "origin"
+        )
+        let remote = RepositoryRemote(
+            name: "origin",
+            url: origin.remote.path,
+            canonicalURL: RepositoryManager.canonicalRemoteURL(from: origin.remote.path)!,
+            repository: repository
+        )
+        let worktree = WorktreeRecord(
+            branchName: cloneInfo.defaultBranch,
+            isDefaultBranchWorkspace: true,
+            path: defaultWorkspace.path.path,
+            repository: repository
+        )
+        repository.remotes = [remote]
+        repository.worktrees = [worktree]
+        modelContext.insert(repository)
+        modelContext.insert(remote)
+        modelContext.insert(worktree)
+        try modelContext.save()
+
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+
+        await appModel.refreshAllRepositories(force: false)
+
+        #expect(repository.lastFetchedAt != nil)
+        #expect(appModel.syncLogs[repository.id]?.contains("Fetch von origin abgeschlossen") == true)
+        #expect(appModel.syncLogs[repository.id]?.contains("Sync:") == true)
+
+        let localHead = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["-C", defaultWorkspace.path.path, "rev-parse", "HEAD"]
+        )
+        let remoteHead = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["--git-dir", cloneInfo.bareRepositoryPath.path, "rev-parse", "--verify", "refs/remotes/origin/main"]
+        )
+        #expect(localHead.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == remoteHead.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     @MainActor
@@ -787,6 +970,19 @@ struct DevVaultTests {
         try await runGit(["-C", directory.path, "config", "user.email", "tests@example.com"], currentDirectoryURL: directory)
         try await runGit(["-C", directory.path, "config", "user.name", "DevVault Tests"], currentDirectoryURL: directory)
         try await runGit(["-C", directory.path, "config", "commit.gpgsign", "false"], currentDirectoryURL: directory)
+    }
+
+    private func cloneRemoteForEditing(_ remote: URL, name: String) async throws -> URL {
+        let root = try temporaryDirectory(named: name)
+        let checkout = root.appendingPathComponent("checkout")
+        try await runGit(["clone", remote.path, checkout.path], currentDirectoryURL: root)
+        try await configureGitIdentity(in: checkout)
+        return checkout
+    }
+
+    private func commitAll(in directory: URL, message: String) async throws {
+        try await runGit(["-C", directory.path, "add", "."], currentDirectoryURL: directory)
+        try await runGit(["-C", directory.path, "commit", "-m", message], currentDirectoryURL: directory)
     }
 
     private func runGit(_ arguments: [String], currentDirectoryURL: URL) async throws {

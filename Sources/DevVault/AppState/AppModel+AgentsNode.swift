@@ -175,32 +175,6 @@ extension AppModel {
         launchAgent(tool, for: defaultWorktree, in: modelContext, initialPrompt: prompt)
     }
 
-    func launchMainDivergenceAgent(
-        _ tool: AIAgentTool,
-        for draft: MainDivergenceDraft,
-        in modelContext: ModelContext
-    ) {
-        guard
-            let repository = repositoryRecord(with: draft.repositoryID),
-            let defaultWorktree = repository.worktrees.first(where: { $0.isDefaultBranchWorkspace })
-        else {
-            pendingErrorMessage = DevVaultError.worktreeUnavailable.localizedDescription
-            return
-        }
-
-        let prompt = """
-        The local \(draft.defaultBranch) branch has \(draft.aheadCount) commit(s) that are not present on \(draft.defaultRemoteName)/\(draft.defaultBranch).
-        Please review and resolve the situation:
-        1. Inspect the diverging commits: git log \(draft.defaultRemoteName)/\(draft.defaultBranch)..HEAD
-        2. If the commits should be discarded: git reset --hard \(draft.defaultRemoteName)/\(draft.defaultBranch)
-        3. If the commits should be kept: git push \(draft.defaultRemoteName) \(draft.defaultBranch)
-        4. Leave the repository in a clean, non-diverged state.
-        """
-        pendingMainDivergence = nil
-        selectedWorktreeIDsByRepository[repository.id] = defaultWorktree.id
-        launchAgent(tool, for: defaultWorktree, in: modelContext, initialPrompt: prompt)
-    }
-
     func assignAgent(_ tool: AIAgentTool, to worktree: WorktreeRecord, in modelContext: ModelContext) {
         worktree.assignedAgent = tool
         do {

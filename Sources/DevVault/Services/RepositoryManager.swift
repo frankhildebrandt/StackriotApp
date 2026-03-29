@@ -104,7 +104,7 @@ struct RepositoryManager {
                 fetchedAt: nil,
                 fetchErrorMessage: "Repository missing or invalid.",
                 defaultBranchSyncErrorMessage: nil,
-                mainDivergence: nil
+                defaultBranchSyncSummary: nil
             )
         }
 
@@ -119,7 +119,11 @@ struct RepositoryManager {
 
                 let result = try await CommandRunner.runCollected(
                     executable: "git",
-                    arguments: ["--git-dir", bareRepositoryPath.path, "fetch", remote.name, "--prune"],
+                    arguments: [
+                        "--git-dir", bareRepositoryPath.path,
+                        "fetch", remote.name, "--prune",
+                        "+refs/heads/*:refs/remotes/\(remote.name)/*",
+                    ],
                     environment: environment.environment
                 )
                 if result.exitCode == 0 {
@@ -151,7 +155,7 @@ struct RepositoryManager {
             fetchedAt: didFetch ? .now : nil,
             fetchErrorMessage: fetchErrorMessage,
             defaultBranchSyncErrorMessage: syncResult.errorMessage,
-            mainDivergence: syncResult.divergence
+            defaultBranchSyncSummary: syncResult.summary
         )
     }
 
@@ -319,41 +323,30 @@ struct RepositoryManager {
         bareRepositoryPath: URL,
         defaultBranch: String,
         defaultRemoteName: String?
-    ) async -> (errorMessage: String?, divergence: MainDivergenceRef?) {
+    ) async -> (errorMessage: String?, summary: String?) {
         guard let defaultRemoteName, !defaultRemoteName.isEmpty else {
-            return (errorMessage: nil, divergence: nil)
+            return (errorMessage: nil, summary: nil)
         }
 
         do {
             let remoteRef = "refs/remotes/\(defaultRemoteName)/\(defaultBranch)"
-            let localBranchRef = "refs/heads/\(defaultBranch)"
             let remoteRefResult = try await CommandRunner.runCollected(
                 executable: "git",
                 arguments: ["--git-dir", bareRepositoryPath.path, "rev-parse", "--verify", remoteRef]
             )
-            let targetCommit: String
-            let targetRefForReset: String
-            if remoteRefResult.exitCode == 0 {
-                targetCommit = remoteRefResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-                targetRefForReset = "\(defaultRemoteName)/\(defaultBranch)"
-            } else {
-                let localBranchResult = try await CommandRunner.runCollected(
-                    executable: "git",
-                    arguments: ["--git-dir", bareRepositoryPath.path, "rev-parse", "--verify", localBranchRef]
-                )
-                guard localBranchResult.exitCode == 0 else {
-                    return (errorMessage: "Default-branch sync failed: \(remoteRefResult.stderr.isEmpty ? remoteRefResult.stdout : remoteRefResult.stderr)", divergence: nil)
-                }
-                targetCommit = localBranchResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-                targetRefForReset = targetCommit
+            guard remoteRefResult.exitCode == 0 else {
+                return (errorMessage: "Default-branch sync failed: \(remoteRefResult.stderr.isEmpty ? remoteRefResult.stdout : remoteRefResult.stderr)", summary: nil)
             }
 
+            let targetCommit = remoteRefResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            let syncTargetRef = remoteRef
+            let remoteTrackingBranch = "\(defaultRemoteName)/\(defaultBranch)"
             let worktreeListResult = try await CommandRunner.runCollected(
                 executable: "git",
                 arguments: ["--git-dir", bareRepositoryPath.path, "worktree", "list", "--porcelain"]
             )
             guard worktreeListResult.exitCode == 0 else {
-                return (errorMessage: "Default-branch sync failed: \(worktreeListResult.stderr.isEmpty ? worktreeListResult.stdout : worktreeListResult.stderr)", divergence: nil)
+                return (errorMessage: "Default-branch sync failed: \(worktreeListResult.stderr.isEmpty ? worktreeListResult.stdout : worktreeListResult.stderr)", summary: nil)
             }
 
             let defaultWorktreePaths = await worktreePathsOnDefaultBranch(
@@ -362,42 +355,97 @@ struct RepositoryManager {
                 defaultBranch: defaultBranch
             )
             if !defaultWorktreePaths.isEmpty {
-                // Check if local branch has commits ahead of the remote target before resetting.
-                let aheadResult = try? await CommandRunner.runCollected(
-                    executable: "git",
-                    arguments: ["--git-dir", bareRepositoryPath.path, "rev-list", "--count", "\(targetCommit)..refs/heads/\(defaultBranch)"]
-                )
-                let aheadCount = aheadResult.flatMap { Int($0.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
-                if aheadCount > 0 {
-                    let worktreePath = defaultWorktreePaths[0]
-                    return (errorMessage: nil, divergence: MainDivergenceRef(worktreePath: worktreePath, aheadCount: aheadCount))
-                }
-
+                var summaries: [String] = []
                 for worktreePath in defaultWorktreePaths {
-                    let resetResult = try await CommandRunner.runCollected(
-                        executable: "git",
-                        arguments: ["-C", worktreePath, "reset", "--hard", targetRefForReset]
+                    _ = try await runGit(
+                        ["-C", worktreePath, "reset", "--hard"],
+                        errorPrefix: "Default-branch sync failed"
                     )
-                    guard resetResult.exitCode == 0 else {
-                        return (errorMessage: "Default-branch sync failed: \(resetResult.stderr.isEmpty ? resetResult.stdout : resetResult.stderr)", divergence: nil)
+                    _ = try await runGit(
+                        ["-C", worktreePath, "clean", "-fd"],
+                        errorPrefix: "Default-branch sync failed"
+                    )
+                    _ = try await runGit(
+                        ["-C", worktreePath, "checkout", defaultBranch],
+                        errorPrefix: "Default-branch sync failed"
+                    )
+
+                    let ffOnlyResult = try await CommandRunner.runCollected(
+                        executable: "git",
+                        arguments: ["-C", worktreePath, "merge", "--ff-only", syncTargetRef]
+                    )
+                    if ffOnlyResult.exitCode == 0 {
+                        if let submoduleError = await updateSubmodulesToGitlinks(worktreePath: worktreePath) {
+                            return (errorMessage: submoduleError, summary: nil)
+                        }
+                        let ffSummary = ffOnlyResult.stdout
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .contains("Already up to date")
+                            ? "\(defaultBranch) bereits auf Stand von \(remoteTrackingBranch)"
+                            : "\(defaultBranch) fast-forward auf \(remoteTrackingBranch)"
+                        summaries.append(ffSummary)
+                        continue
                     }
-                    if let submoduleError = await updateSubmodulesToGitlinks(worktreePath: worktreePath) {
-                        return (errorMessage: submoduleError, divergence: nil)
+
+                    let mergeResult = try await CommandRunner.runCollected(
+                        executable: "git",
+                        arguments: ["-C", worktreePath, "merge", syncTargetRef]
+                    )
+                    if mergeResult.exitCode == 0 {
+                        if let submoduleError = await updateSubmodulesToGitlinks(worktreePath: worktreePath) {
+                            return (errorMessage: submoduleError, summary: nil)
+                        }
+                        let mergeSummary = mergeResult.stdout
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .contains("Already up to date")
+                            ? "\(defaultBranch) bereits auf Stand von \(remoteTrackingBranch)"
+                            : "\(defaultBranch) mit \(remoteTrackingBranch) gemergt"
+                        summaries.append(mergeSummary)
+                        continue
                     }
+
+                    _ = try? await CommandRunner.runCollected(
+                        executable: "git",
+                        arguments: ["-C", worktreePath, "merge", "--abort"]
+                    )
+
+                    let rebaseResult = try await CommandRunner.runCollected(
+                        executable: "git",
+                        arguments: ["-C", worktreePath, "rebase", syncTargetRef]
+                    )
+                    if rebaseResult.exitCode == 0 {
+                        if let submoduleError = await updateSubmodulesToGitlinks(worktreePath: worktreePath) {
+                            return (errorMessage: submoduleError, summary: nil)
+                        }
+                        summaries.append("\(defaultBranch) per Rebase auf \(remoteTrackingBranch) synchronisiert")
+                        continue
+                    }
+
+                    _ = try? await CommandRunner.runCollected(
+                        executable: "git",
+                        arguments: ["-C", worktreePath, "rebase", "--abort"]
+                    )
+                    let mergeDetail = mergeResult.stderr.isEmpty ? mergeResult.stdout : mergeResult.stderr
+                    let rebaseDetail = rebaseResult.stderr.isEmpty ? rebaseResult.stdout : rebaseResult.stderr
+                    return (
+                        errorMessage: "Default-branch sync failed: merge against \(remoteTrackingBranch) failed: \(mergeDetail)\n\nRebase fallback failed: \(rebaseDetail)",
+                        summary: nil
+                    )
                 }
-            } else {
-                let updateResult = try await CommandRunner.runCollected(
-                    executable: "git",
-                    arguments: ["--git-dir", bareRepositoryPath.path, "update-ref", "refs/heads/\(defaultBranch)", targetCommit]
-                )
-                guard updateResult.exitCode == 0 else {
-                    return (errorMessage: "Default-branch sync failed: \(updateResult.stderr.isEmpty ? updateResult.stdout : updateResult.stderr)", divergence: nil)
-                }
+                return (errorMessage: nil, summary: summaries.joined(separator: "\n"))
             }
 
-            return (errorMessage: nil, divergence: nil)
+            let updateResult = try await CommandRunner.runCollected(
+                executable: "git",
+                arguments: ["--git-dir", bareRepositoryPath.path, "update-ref", "refs/heads/\(defaultBranch)", targetCommit]
+            )
+            guard updateResult.exitCode == 0 else {
+                return (errorMessage: "Default-branch sync failed: \(updateResult.stderr.isEmpty ? updateResult.stdout : updateResult.stderr)", summary: nil)
+            }
+
+            return (errorMessage: nil, summary: "Kein Default-Worktree vorhanden, Bare-Ref auf \(remoteTrackingBranch) gesetzt")
         } catch {
-            return (errorMessage: "Default-branch sync failed: \(error.localizedDescription)", divergence: nil)
+            return (errorMessage: "Default-branch sync failed: \(error.localizedDescription)", summary: nil)
         }
     }
 
@@ -471,20 +519,17 @@ struct RepositoryManager {
         try? FileManager.default.removeItem(at: url)
     }
 
-    func forceResetDefaultBranch(
-        worktreePath: String,
-        remoteName: String,
-        defaultBranch: String
-    ) async throws {
+    private func runGit(
+        _ arguments: [String],
+        errorPrefix: String
+    ) async throws -> CommandResult {
         let result = try await CommandRunner.runCollected(
             executable: "git",
-            arguments: ["-C", worktreePath, "reset", "--hard", "\(remoteName)/\(defaultBranch)"]
+            arguments: arguments
         )
         guard result.exitCode == 0 else {
-            throw DevVaultError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+            throw DevVaultError.commandFailed("\(errorPrefix): \(result.stderr.isEmpty ? result.stdout : result.stderr)")
         }
-        if let submoduleError = await updateSubmodulesToGitlinks(worktreePath: worktreePath) {
-            throw DevVaultError.commandFailed(submoduleError)
-        }
+        return result
     }
 }
