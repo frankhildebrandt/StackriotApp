@@ -23,6 +23,7 @@
 		E0000000000000000000000C /* Drafts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000C /* Drafts.swift */; };
 		E0000000000000000000000D /* AppChromeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000D /* AppChromeViews.swift */; };
 		E0000000000000000000000E /* Domain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000E /* Domain.swift */; };
+		E00000000000000000000048 /* GeneratedCommitMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000048 /* GeneratedCommitMessage.swift */; };
 		E0000000000000000000000F /* AgentActivityDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000F /* AgentActivityDot.swift */; };
 		E00000000000000000000010 /* DiffInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000010 /* DiffInspectorView.swift */; };
 		E00000000000000000000011 /* RepositoryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000011 /* RepositoryDetailView.swift */; };
@@ -98,6 +99,7 @@
 		D0000000000000000000000C /* Drafts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Drafts.swift; sourceTree = "<group>"; };
 		D0000000000000000000000D /* AppChromeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppChromeViews.swift; sourceTree = "<group>"; };
 		D0000000000000000000000E /* Domain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain.swift; sourceTree = "<group>"; };
+		D00000000000000000000048 /* GeneratedCommitMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneratedCommitMessage.swift; sourceTree = "<group>"; };
 		D0000000000000000000000F /* AgentActivityDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivityDot.swift; sourceTree = "<group>"; };
 		D00000000000000000000010 /* DiffInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffInspectorView.swift; sourceTree = "<group>"; };
 		D00000000000000000000011 /* RepositoryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryDetailView.swift; sourceTree = "<group>"; };
@@ -241,6 +243,7 @@
 			isa = PBXGroup;
 			children = (
 				D0000000000000000000000E /* Domain.swift */,
+				D00000000000000000000048 /* GeneratedCommitMessage.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -475,6 +478,7 @@
 				E0000000000000000000000C /* Drafts.swift in Sources */,
 				E0000000000000000000000D /* AppChromeViews.swift in Sources */,
 				E0000000000000000000000E /* Domain.swift in Sources */,
+				E00000000000000000000048 /* GeneratedCommitMessage.swift in Sources */,
 				E0000000000000000000000F /* AgentActivityDot.swift in Sources */,
 					E00000000000000000000010 /* DiffInspectorView.swift in Sources */,
 					E00000000000000000000011 /* RepositoryDetailView.swift in Sources */,
