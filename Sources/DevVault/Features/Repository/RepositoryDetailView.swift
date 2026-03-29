@@ -8,6 +8,7 @@ struct RepositoryDetailView: View {
     let repository: ManagedRepository
     @State private var worktreePendingRemoval: WorktreeRemovalDraft?
     @State private var showRunHistory = false
+    @State private var isRefreshingStatuses = false
 
     var body: some View {
         let worktrees = appModel.worktrees(for: repository)
@@ -102,6 +103,21 @@ struct RepositoryDetailView: View {
                     .font(.title3.weight(.semibold))
                 Spacer()
                 Button {
+                    isRefreshingStatuses = true
+                    Task {
+                        await appModel.refreshWorktreeStatuses(for: repository)
+                        isRefreshingStatuses = false
+                    }
+                } label: {
+                    if isRefreshingStatuses {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .disabled(isRefreshingStatuses)
+                Button {
                     appModel.presentWorktreeSheet(for: repository)
                 } label: {
                     Label("Create Worktree", systemImage: "plus")
@@ -138,6 +154,8 @@ struct RepositoryDetailView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
+
+                                worktreeStatusRow(for: worktree)
 
                                 if let issueContext = worktree.issueContext {
                                     Label(issueContext, systemImage: "number")
@@ -372,6 +390,43 @@ struct RepositoryDetailView: View {
 
     private func worktreeTitle(for worktree: WorktreeRecord) -> String {
         worktree.isDefaultBranchWorkspace ? "Main/Default" : worktree.branchName
+    }
+
+    @ViewBuilder
+    private func worktreeStatusRow(for worktree: WorktreeRecord) -> some View {
+        let status = appModel.worktreeStatuses[worktree.id]
+        let ahead = status?.aheadCount ?? 0
+        let behind = status?.behindCount ?? 0
+        let added = status?.addedLines ?? 0
+        let deleted = status?.deletedLines ?? 0
+        let hasChanges = status?.hasUncommittedChanges ?? false
+
+        if ahead > 0 || behind > 0 || hasChanges {
+            HStack(spacing: 8) {
+                if behind > 0 {
+                    Label("\(behind)", systemImage: "arrow.down")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.orange)
+                }
+                if ahead > 0 {
+                    Label("\(ahead)", systemImage: "arrow.up")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                if hasChanges {
+                    if ahead > 0 || behind > 0 {
+                        Divider()
+                            .frame(height: 10)
+                    }
+                    Text("+\(added)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.green)
+                    Text("-\(deleted)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.red)
+                }
+            }
+        }
     }
 
     private func statusColor(for status: RunStatusKind) -> Color {

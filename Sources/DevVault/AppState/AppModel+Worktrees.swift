@@ -138,10 +138,12 @@ extension AppModel {
             for worktree in repository.worktrees {
                 let worktreeID = worktree.id
                 let worktreePath = worktree.path
+                let isDefault = worktree.isDefaultBranchWorkspace
+                let compareBranch = isDefault ? "origin/\(defaultBranch)" : defaultBranch
                 group.addTask { [statusService] in
                     let status = await statusService.fetchStatus(
                         worktreePath: URL(fileURLWithPath: worktreePath),
-                        defaultBranch: defaultBranch
+                        defaultBranch: compareBranch
                     )
                     return (worktreeID, status)
                 }
