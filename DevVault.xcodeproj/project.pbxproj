@@ -63,6 +63,11 @@
 		E00000000000000000000035 /* TerminalSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000035 /* TerminalSessions.swift */; };
 		E00000000000000000000036 /* WorktreeActionBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000036 /* WorktreeActionBar.swift */; };
 		E00000000000000000000037 /* GitCommitSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000037 /* GitCommitSheet.swift */; };
+		E00000000000000000000038 /* AppModel+Namespaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000038 /* AppModel+Namespaces.swift */; };
+		E00000000000000000000039 /* NamespaceEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000039 /* NamespaceEditorSheet.swift */; };
+		E0000000000000000000003A /* ProjectEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000003A /* ProjectEditorSheet.swift */; };
+		E0000000000000000000003B /* RepositoryNamespace.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000003B /* RepositoryNamespace.swift */; };
+		E0000000000000000000003C /* RepositoryProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000003C /* RepositoryProject.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -122,6 +127,11 @@
 		D00000000000000000000035 /* TerminalSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessions.swift; sourceTree = "<group>"; };
 		D00000000000000000000036 /* WorktreeActionBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeActionBar.swift; sourceTree = "<group>"; };
 		D00000000000000000000037 /* GitCommitSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitCommitSheet.swift; sourceTree = "<group>"; };
+		D00000000000000000000038 /* AppModel+Namespaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Namespaces.swift"; sourceTree = "<group>"; };
+		D00000000000000000000039 /* NamespaceEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NamespaceEditorSheet.swift; sourceTree = "<group>"; };
+		D0000000000000000000003A /* ProjectEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectEditorSheet.swift; sourceTree = "<group>"; };
+		D0000000000000000000003B /* RepositoryNamespace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryNamespace.swift; sourceTree = "<group>"; };
+		D0000000000000000000003C /* RepositoryProject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryProject.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -182,6 +192,7 @@
 			isa = PBXGroup;
 			children = (
 				D00000000000000000000004 /* AppModel+AgentsNode.swift */,
+				D00000000000000000000038 /* AppModel+Namespaces.swift */,
 				D00000000000000000000005 /* AppModel+Persistence.swift */,
 				D00000000000000000000006 /* AppModel+RemotesSSH.swift */,
 				D00000000000000000000007 /* AppModel+Repositories.swift */,
@@ -228,6 +239,8 @@
 			children = (
 				D00000000000000000000020 /* ActionTemplateRecord.swift */,
 				D00000000000000000000021 /* ManagedRepository.swift */,
+				D0000000000000000000003B /* RepositoryNamespace.swift */,
+				D0000000000000000000003C /* RepositoryProject.swift */,
 				D00000000000000000000022 /* RepositoryRemote.swift */,
 				D00000000000000000000023 /* RunRecord.swift */,
 				D00000000000000000000024 /* StoredSSHKey.swift */,
@@ -319,7 +332,9 @@
 				D0000000000000000000001A /* CloneRepositorySheet.swift */,
 				D0000000000000000000001B /* CreateWorktreeSheet.swift */,
 				D00000000000000000000037 /* GitCommitSheet.swift */,
+				D00000000000000000000039 /* NamespaceEditorSheet.swift */,
 				D0000000000000000000001C /* PublishBranchSheet.swift */,
+				D0000000000000000000003A /* ProjectEditorSheet.swift */,
 				D0000000000000000000001D /* RemoteEditorSheet.swift */,
 				D0000000000000000000001E /* RemoteManagementSheet.swift */,
 			);
@@ -403,6 +418,7 @@
 				E00000000000000000000002 /* DevVaultApp.swift in Sources */,
 				E00000000000000000000003 /* ModelContainer+DevVault.swift in Sources */,
 				E00000000000000000000004 /* AppModel+AgentsNode.swift in Sources */,
+				E00000000000000000000038 /* AppModel+Namespaces.swift in Sources */,
 				E00000000000000000000005 /* AppModel+Persistence.swift in Sources */,
 				E00000000000000000000006 /* AppModel+RemotesSSH.swift in Sources */,
 				E00000000000000000000007 /* AppModel+Repositories.swift in Sources */,
@@ -428,12 +444,16 @@
 				E0000000000000000000001A /* CloneRepositorySheet.swift in Sources */,
 				E0000000000000000000001B /* CreateWorktreeSheet.swift in Sources */,
 				E00000000000000000000037 /* GitCommitSheet.swift in Sources */,
+				E00000000000000000000039 /* NamespaceEditorSheet.swift in Sources */,
 				E0000000000000000000001C /* PublishBranchSheet.swift in Sources */,
+				E0000000000000000000003A /* ProjectEditorSheet.swift in Sources */,
 				E0000000000000000000001D /* RemoteEditorSheet.swift in Sources */,
 				E0000000000000000000001E /* RemoteManagementSheet.swift in Sources */,
 				E0000000000000000000001F /* SidebarView.swift in Sources */,
 				E00000000000000000000020 /* ActionTemplateRecord.swift in Sources */,
 				E00000000000000000000021 /* ManagedRepository.swift in Sources */,
+				E0000000000000000000003B /* RepositoryNamespace.swift in Sources */,
+				E0000000000000000000003C /* RepositoryProject.swift in Sources */,
 				E00000000000000000000022 /* RepositoryRemote.swift in Sources */,
 				E00000000000000000000023 /* RunRecord.swift in Sources */,
 				E00000000000000000000024 /* StoredSSHKey.swift in Sources */,
