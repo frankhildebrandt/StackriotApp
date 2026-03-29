@@ -164,6 +164,9 @@ final class AppModel: @unchecked Sendable {
             if lhs.isDefaultBranchWorkspace != rhs.isDefaultBranchWorkspace {
                 return lhs.isDefaultBranchWorkspace
             }
+            if lhs.isPinned != rhs.isPinned {
+                return lhs.isPinned
+            }
             return lhs.createdAt > rhs.createdAt
         }
     }

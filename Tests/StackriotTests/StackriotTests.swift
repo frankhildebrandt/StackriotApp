@@ -365,6 +365,66 @@ struct StackriotTests {
     }
 
     @Test
+    @MainActor
+    func worktreeOrderingPlacesPinnedEntriesBetweenDefaultAndRegular() {
+        let appModel = AppModel()
+        let repository = ManagedRepository(
+            displayName: "Stackriot",
+            bareRepositoryPath: "/tmp/repo.git",
+            defaultBranch: "main"
+        )
+        let defaultWorktree = WorktreeRecord(
+            branchName: "main",
+            isDefaultBranchWorkspace: true,
+            path: "/tmp/main",
+            createdAt: Date(timeIntervalSince1970: 10),
+            repository: repository
+        )
+        let pinnedWorktree = WorktreeRecord(
+            branchName: "feature/pinned",
+            isPinned: true,
+            path: "/tmp/pinned",
+            createdAt: Date(timeIntervalSince1970: 20),
+            repository: repository
+        )
+        let regularWorktree = WorktreeRecord(
+            branchName: "feature/newer",
+            path: "/tmp/regular",
+            createdAt: Date(timeIntervalSince1970: 30),
+            repository: repository
+        )
+        repository.worktrees = [regularWorktree, pinnedWorktree, defaultWorktree]
+
+        let sorted = appModel.worktrees(for: repository)
+
+        #expect(sorted.map(\.id) == [defaultWorktree.id, pinnedWorktree.id, regularWorktree.id])
+    }
+
+    @Test
+    func worktreeRecordDefaultsAndStoresPinAndCardColor() {
+        let worktree = WorktreeRecord(
+            branchName: "feature/colors",
+            path: "/tmp/worktree-colors"
+        )
+
+        #expect(!worktree.isPinned)
+        #expect(worktree.cardColor == .none)
+        #expect(worktree.isPinnedRaw == nil)
+        #expect(worktree.cardColorRaw == nil)
+
+        worktree.isPinned = true
+        worktree.cardColor = .purple
+
+        #expect(worktree.isPinned)
+        #expect(worktree.isPinnedRaw == true)
+        #expect(worktree.cardColor == .purple)
+        #expect(worktree.cardColorRaw == WorktreeCardColor.purple.rawValue)
+
+        worktree.cardColor = .none
+        #expect(worktree.cardColorRaw == nil)
+    }
+
+    @Test
     func backgroundNodeRefreshUpdatesStatus() async {
         let manager = NodeRuntimeManager()
         await manager.refreshDefaultRuntimeIfNeeded(force: true)

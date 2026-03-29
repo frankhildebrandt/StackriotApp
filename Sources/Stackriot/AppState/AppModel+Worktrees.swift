@@ -238,6 +238,36 @@ extension AppModel {
         }
     }
 
+    func setPinned(
+        _ isPinned: Bool,
+        for worktree: WorktreeRecord,
+        in repository: ManagedRepository,
+        modelContext: ModelContext
+    ) {
+        guard !worktree.isDefaultBranchWorkspace else { return }
+        guard worktree.isPinned != isPinned else { return }
+
+        worktree.isPinned = isPinned
+        if isPinned {
+            worktree.shouldDeleteOnMerge = false
+        }
+        repository.updatedAt = .now
+        save(modelContext)
+    }
+
+    func setCardColor(
+        _ color: WorktreeCardColor,
+        for worktree: WorktreeRecord,
+        in repository: ManagedRepository,
+        modelContext: ModelContext
+    ) {
+        guard worktree.cardColor != color else { return }
+
+        worktree.cardColor = color
+        repository.updatedAt = .now
+        save(modelContext)
+    }
+
     func removeWorktree(_ worktree: WorktreeRecord, in modelContext: ModelContext) async {
         do {
             if worktree.isDefaultBranchWorkspace {
@@ -348,6 +378,7 @@ extension AppModel {
         modelContext: ModelContext
     ) async {
         guard !worktree.isDefaultBranchWorkspace else { return }
+        let deleteAfterIntegration = draft.deleteAfterIntegration && !worktree.isPinned
 
         switch draft.method {
         case .localMerge:
@@ -357,7 +388,7 @@ extension AppModel {
                 pendingErrorMessage = "Integrated \(worktree.branchName) into \(repository.defaultBranch)."
                 worktree.lifecycleState = .merged
                 save(modelContext)
-                if draft.deleteAfterIntegration {
+                if deleteAfterIntegration {
                     await removeWorktree(worktree, in: modelContext)
                 }
             }
@@ -373,7 +404,7 @@ extension AppModel {
                 worktree.prNumber = prInfo.number
                 worktree.prURL = prInfo.url
                 worktree.lifecycleState = .integrating
-                worktree.shouldDeleteOnMerge = draft.deleteAfterIntegration
+                worktree.shouldDeleteOnMerge = deleteAfterIntegration
                 save(modelContext)
                 startPRMonitoring(for: worktree, repository: repository, in: modelContext)
             } catch {

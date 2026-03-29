@@ -486,6 +486,37 @@ enum WorktreeLifecycle: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum WorktreeCardColor: String, Codable, CaseIterable, Identifiable, Sendable {
+    case none
+    case blue
+    case green
+    case orange
+    case purple
+    case pink
+    case slate
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .none:
+            "Keine"
+        case .blue:
+            "Blau"
+        case .green:
+            "Gruen"
+        case .orange:
+            "Orange"
+        case .purple:
+            "Lila"
+        case .pink:
+            "Pink"
+        case .slate:
+            "Slate"
+        }
+    }
+}
+
 enum TicketProviderKind: String, Codable, CaseIterable, Identifiable {
     case github
 
