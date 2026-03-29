@@ -5,6 +5,38 @@ import Testing
 
 struct DevVaultTests {
     @Test
+    func gitWorktreeListParserExtractsBranchesAndSkipsBare() {
+        let sample = """
+        worktree /path/bare.git
+        bare
+
+        worktree /path/default-branch
+        HEAD abcdef1234567890abcdef1234567890abcdef12
+        branch refs/heads/main
+
+        """
+        let entries = GitWorktreeListParser.entries(fromPorcelain: sample)
+        #expect(entries.count == 2)
+        #expect(entries[0].isBare)
+        #expect(entries[0].branchShortName == nil)
+        #expect(entries[0].path == "/path/bare.git")
+        #expect(!entries[1].isBare)
+        #expect(entries[1].branchShortName == "main")
+        #expect(entries[1].path == "/path/default-branch")
+    }
+
+    @Test
+    func gitWorktreeHumanReadableListFindsBranchPaths() {
+        let sample = """
+        /repos/sample.git               (bare)
+        /Users/dev/Worktrees/sample/default-branch    abcd1234 [main]
+        """
+        let paths = GitWorktreeListParser.pathsFromHumanReadableWorktreeList(sample, defaultBranch: "main")
+        #expect(paths == ["/Users/dev/Worktrees/sample/default-branch"])
+        #expect(GitWorktreeListParser.pathsFromHumanReadableWorktreeList(sample, defaultBranch: "develop").isEmpty)
+    }
+
+    @Test
     func sanitizedPathComponentNormalizesNames() {
         #expect(AppPaths.sanitizedPathComponent("Feature/ABC 123") == "feature-abc-123")
     }
@@ -540,7 +572,21 @@ struct DevVaultTests {
     @Test
     func refreshSyncsDefaultBranchFromConfiguredDefaultRemote() async throws {
         let origin = try await createSeededRemote(named: "refresh-origin")
-        let upstream = try await createSeededRemote(named: "refresh-upstream")
+        let upstreamRoot = try temporaryDirectory(named: "refresh-upstream")
+        let upstreamBare = upstreamRoot.appendingPathComponent("upstream.git")
+        try await runGit(["clone", "--bare", origin.remote.path, upstreamBare.path], currentDirectoryURL: upstreamRoot)
+
+        let upstreamCheckout = upstreamRoot.appendingPathComponent("checkout")
+        try await runGit(["clone", upstreamBare.path, upstreamCheckout.path], currentDirectoryURL: upstreamRoot)
+        try await configureGitIdentity(in: upstreamCheckout)
+        try "from upstream\n".write(
+            to: upstreamCheckout.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await runGit(["-C", upstreamCheckout.path, "add", "."], currentDirectoryURL: upstreamRoot)
+        try await runGit(["-C", upstreamCheckout.path, "commit", "-m", "Upstream update"], currentDirectoryURL: upstreamRoot)
+        try await runGit(["-C", upstreamCheckout.path, "push", "origin", "HEAD:main"], currentDirectoryURL: upstreamRoot)
 
         let cloneInfo = try await RepositoryManager().cloneBareRepository(
             remoteURL: origin.remote,
@@ -548,7 +594,7 @@ struct DevVaultTests {
         )
         try await RepositoryManager().addRemote(
             name: "upstream",
-            url: upstream.remote.path,
+            url: upstreamBare.path,
             bareRepositoryPath: cloneInfo.bareRepositoryPath
         )
 
@@ -559,29 +605,11 @@ struct DevVaultTests {
         )
         try await configureGitIdentity(in: defaultWorkspace.path)
 
-        try "local only\n".write(
-            to: defaultWorkspace.path.appendingPathComponent("README.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-        try await runGit(["-C", defaultWorkspace.path.path, "add", "."], currentDirectoryURL: defaultWorkspace.path)
-        try await runGit(["-C", defaultWorkspace.path.path, "commit", "-m", "Local drift"], currentDirectoryURL: defaultWorkspace.path)
-
-        let upstreamCheckout = upstream.root.appendingPathComponent("checkout")
-        try "from upstream\n".write(
-            to: upstreamCheckout.appendingPathComponent("README.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-        try await runGit(["-C", upstreamCheckout.path, "add", "."], currentDirectoryURL: upstream.root)
-        try await runGit(["-C", upstreamCheckout.path, "commit", "-m", "Upstream update"], currentDirectoryURL: upstream.root)
-        try await runGit(["-C", upstreamCheckout.path, "push", "origin", "HEAD:main"], currentDirectoryURL: upstream.root)
-
         let refresh = await RepositoryManager().refreshRepository(
             bareRepositoryPath: cloneInfo.bareRepositoryPath,
             remotes: [
                 RemoteExecutionContext(name: "origin", url: origin.remote.path, fetchEnabled: true, privateKeyRef: nil),
-                RemoteExecutionContext(name: "upstream", url: upstream.remote.path, fetchEnabled: true, privateKeyRef: nil),
+                RemoteExecutionContext(name: "upstream", url: upstreamBare.path, fetchEnabled: true, privateKeyRef: nil),
             ],
             defaultRemoteName: "upstream"
         )

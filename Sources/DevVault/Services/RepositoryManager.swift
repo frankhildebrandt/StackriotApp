@@ -293,6 +293,28 @@ struct RepositoryManager {
         }
     }
 
+    private func worktreePathsOnDefaultBranch(
+        porcelainOutput: String,
+        bareRepositoryPath: URL,
+        defaultBranch: String
+    ) async -> [String] {
+        let fromPorcelain = GitWorktreeListParser.entries(fromPorcelain: porcelainOutput)
+            .filter { entry in
+                !entry.isBare
+                    && (entry.branchShortName == defaultBranch || entry.rawBranchField == "refs/heads/\(defaultBranch)")
+            }
+            .map(\.path)
+        if !fromPorcelain.isEmpty {
+            return fromPorcelain
+        }
+        let humanList = try? await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["--git-dir", bareRepositoryPath.path, "worktree", "list"]
+        )
+        guard let humanList, humanList.exitCode == 0 else { return [] }
+        return GitWorktreeListParser.pathsFromHumanReadableWorktreeList(humanList.stdout, defaultBranch: defaultBranch)
+    }
+
     private func syncDefaultBranch(
         bareRepositoryPath: URL,
         defaultBranch: String,
@@ -334,7 +356,12 @@ struct RepositoryManager {
                 return (errorMessage: "Default-branch sync failed: \(worktreeListResult.stderr.isEmpty ? worktreeListResult.stdout : worktreeListResult.stderr)", divergence: nil)
             }
 
-            if let worktreePath = parseWorktreePath(for: defaultBranch, from: worktreeListResult.stdout) {
+            let defaultWorktreePaths = await worktreePathsOnDefaultBranch(
+                porcelainOutput: worktreeListResult.stdout,
+                bareRepositoryPath: bareRepositoryPath,
+                defaultBranch: defaultBranch
+            )
+            if !defaultWorktreePaths.isEmpty {
                 // Check if local branch has commits ahead of the remote target before resetting.
                 let aheadResult = try? await CommandRunner.runCollected(
                     executable: "git",
@@ -342,15 +369,21 @@ struct RepositoryManager {
                 )
                 let aheadCount = aheadResult.flatMap { Int($0.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
                 if aheadCount > 0 {
+                    let worktreePath = defaultWorktreePaths[0]
                     return (errorMessage: nil, divergence: MainDivergenceRef(worktreePath: worktreePath, aheadCount: aheadCount))
                 }
 
-                let resetResult = try await CommandRunner.runCollected(
-                    executable: "git",
-                    arguments: ["-C", worktreePath, "reset", "--hard", targetRefForReset]
-                )
-                guard resetResult.exitCode == 0 else {
-                    return (errorMessage: "Default-branch sync failed: \(resetResult.stderr.isEmpty ? resetResult.stdout : resetResult.stderr)", divergence: nil)
+                for worktreePath in defaultWorktreePaths {
+                    let resetResult = try await CommandRunner.runCollected(
+                        executable: "git",
+                        arguments: ["-C", worktreePath, "reset", "--hard", targetRefForReset]
+                    )
+                    guard resetResult.exitCode == 0 else {
+                        return (errorMessage: "Default-branch sync failed: \(resetResult.stderr.isEmpty ? resetResult.stdout : resetResult.stderr)", divergence: nil)
+                    }
+                    if let submoduleError = await updateSubmodulesToGitlinks(worktreePath: worktreePath) {
+                        return (errorMessage: submoduleError, divergence: nil)
+                    }
                 }
             } else {
                 let updateResult = try await CommandRunner.runCollected(
@@ -368,39 +401,67 @@ struct RepositoryManager {
         }
     }
 
-    private func parseWorktreePath(for branchName: String, from output: String) -> String? {
-        // We must buffer attributes until the end of each block (empty line) because the
-        // `bare` attribute appears AFTER `branch` in porcelain output. Returning immediately
-        // on seeing `branch refs/heads/<name>` would incorrectly match the bare repo itself.
-        var currentPath: String?
-        var currentBranch: String?
-        var currentIsBare = false
-
-        for line in output.split(whereSeparator: \.isNewline).map(String.init) {
-            if let value = line.stripPrefix("worktree ") {
-                // Start of a new block — evaluate previous block first.
-                if let path = currentPath, currentBranch == branchName, !currentIsBare {
-                    return path
-                }
-                currentPath = value
-                currentBranch = nil
-                currentIsBare = false
-            } else if let value = line.stripPrefix("branch refs/heads/") {
-                currentBranch = value
-            } else if line == "bare" {
-                currentIsBare = true
-            } else if line.isEmpty {
-                if let path = currentPath, currentBranch == branchName, !currentIsBare {
-                    return path
-                }
-                currentPath = nil
-                currentBranch = nil
-                currentIsBare = false
-            }
+    /// Align submodule checkouts with the current commit even when `reset --hard` was a no-op for the superproject.
+    private func updateSubmodulesToGitlinks(worktreePath: String) async -> String? {
+        let updateResult = try? await CommandRunner.runCollected(
+            executable: "git",
+            arguments: [
+                "-c", "protocol.file.allow=always",
+                "-C", worktreePath,
+                "submodule", "update", "--init", "--recursive", "--force",
+            ]
+        )
+        guard let updateResult else {
+            return "Submodule-Update fehlgeschlagen."
         }
-        // Handle the final block when there is no trailing newline.
-        if let path = currentPath, currentBranch == branchName, !currentIsBare {
-            return path
+        guard updateResult.exitCode == 0 else {
+            let detail = updateResult.stderr.isEmpty ? updateResult.stdout : updateResult.stderr
+            return "Submodule-Update fehlgeschlagen: \(detail)"
+        }
+        return await checkoutSubmodulesToRecordedGitlinks(worktreePath: worktreePath)
+    }
+
+    /// `submodule update` can leave the wrong commit checked out in some worktree setups; force each path to `HEAD:<path>`.
+    private func checkoutSubmodulesToRecordedGitlinks(worktreePath: String) async -> String? {
+        let configResult = try? await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["-C", worktreePath, "config", "--file", ".gitmodules", "--get-regexp", "^submodule\\..*\\.path$"]
+        )
+        guard let configResult, configResult.exitCode == 0 else {
+            return nil
+        }
+        let lines = configResult.stdout.split(whereSeparator: \.isNewline).map(String.init)
+            .filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return nil }
+
+        let worktreeURL = URL(fileURLWithPath: worktreePath)
+        for line in lines {
+            let parts = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true).map(String.init)
+            guard parts.count == 2 else { continue }
+            let relativePath = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !relativePath.isEmpty else { continue }
+
+            let shaResult = try? await CommandRunner.runCollected(
+                executable: "git",
+                arguments: ["-C", worktreePath, "rev-parse", "HEAD:\(relativePath)"]
+            )
+            guard let shaResult, shaResult.exitCode == 0 else { continue }
+            let sha = shaResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard sha.count == 40, sha.allSatisfy({ $0.isHexDigit }) else { continue }
+
+            let submoduleURL = worktreeURL.appendingPathComponent(relativePath, isDirectory: true)
+            let checkoutResult = try? await CommandRunner.runCollected(
+                executable: "git",
+                arguments: [
+                    "-c", "protocol.file.allow=always",
+                    "-C", submoduleURL.path,
+                    "checkout", "-q", "-f", sha,
+                ]
+            )
+            guard let checkoutResult, checkoutResult.exitCode == 0 else {
+                let detail = checkoutResult.map { $0.stderr.isEmpty ? $0.stdout : $0.stderr } ?? ""
+                return "Submodule-Checkout fehlgeschlagen (\(relativePath)): \(detail)"
+            }
         }
         return nil
     }
@@ -421,6 +482,9 @@ struct RepositoryManager {
         )
         guard result.exitCode == 0 else {
             throw DevVaultError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
+        if let submoduleError = await updateSubmodulesToGitlinks(worktreePath: worktreePath) {
+            throw DevVaultError.commandFailed(submoduleError)
         }
     }
 }

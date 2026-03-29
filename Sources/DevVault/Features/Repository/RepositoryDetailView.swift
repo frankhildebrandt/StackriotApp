@@ -8,6 +8,7 @@ struct RepositoryDetailView: View {
     let repository: ManagedRepository
     @State private var worktreePendingRemoval: WorktreeRemovalDraft?
     @State private var isRefreshingStatuses = false
+    @State private var isPushingDefaultBranch = false
     @State private var hoveredWorktreeID: UUID?
     @State private var isIntegrationSheetPresented = false
     @State private var integrationTargetWorktree: WorktreeRecord?
@@ -477,14 +478,28 @@ struct RepositoryDetailView: View {
             .help("Fetch von Remote und lokales \(repository.defaultBranch) zurücksetzen")
 
             Button {
+                isPushingDefaultBranch = true
+                Task {
+                    await appModel.runGitPush(in: worktree, repository: repository, modelContext: modelContext)
+                    await appModel.refresh(repository, in: modelContext)
+                    isPushingDefaultBranch = false
+                }
             } label: {
-                Label(ahead == 0 ? "Push" : "Push \(ahead)", systemImage: "arrow.up.to.line")
+                if isPushingDefaultBranch {
+                    Label("Push…", systemImage: "arrow.up.to.line")
+                } else {
+                    Label(ahead == 0 ? "Push" : "Push \(ahead)", systemImage: "arrow.up.to.line")
+                }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(true)
+            .disabled(ahead == 0 || isPushingDefaultBranch || isRefreshingStatuses)
             .opacity(ahead > 0 ? 1 : 0.6)
-            .help("Nur Anzeige: Lokale Commits im Default-Branch müssten publiziert werden.")
+            .help(
+                ahead == 0
+                    ? "Keine lokalen Commits zum Pushen."
+                    : "Lokale Commits auf \(repository.defaultBranch) zum Remote pushen."
+            )
         }
         Group {
             if let log = appModel.syncLogs[repository.id] {

@@ -1,4 +1,99 @@
 import Foundation
+
+/// Parsed entry from `git worktree list --porcelain`.
+struct GitWorktreeListEntry: Sendable {
+    let path: String
+    let isBare: Bool
+    /// Value after the `branch ` line (e.g. `refs/heads/main`, `detached`).
+    let rawBranchField: String?
+    /// Short branch name (e.g. `main`) when on `refs/heads/...`; nil when bare or detached.
+    let branchShortName: String?
+}
+
+enum GitWorktreeListParser {
+    static func entries(fromPorcelain output: String) -> [GitWorktreeListEntry] {
+        var results: [GitWorktreeListEntry] = []
+        var currentPath: String?
+        var currentBranchRef: String?
+        var currentIsBare = false
+
+        func closeBlock() {
+            guard let path = currentPath else {
+                currentPath = nil
+                currentBranchRef = nil
+                currentIsBare = false
+                return
+            }
+            let rawBranch = currentBranchRef
+            let shortName: String?
+            if currentIsBare {
+                shortName = nil
+            } else if let ref = currentBranchRef {
+                if ref == "detached" {
+                    shortName = nil
+                } else if ref.hasPrefix("refs/heads/") {
+                    shortName = String(ref.dropFirst("refs/heads/".count))
+                } else {
+                    shortName = ref
+                }
+            } else {
+                shortName = nil
+            }
+            results.append(
+                GitWorktreeListEntry(path: path, isBare: currentIsBare, rawBranchField: rawBranch, branchShortName: shortName)
+            )
+            currentPath = nil
+            currentBranchRef = nil
+            currentIsBare = false
+        }
+
+        let normalizedLines = output.split(separator: "\n").map { line in
+            String(line).replacingOccurrences(of: "\r", with: "")
+        }
+        for line in normalizedLines {
+            if let value = line.stripPrefix("worktree ") {
+                closeBlock()
+                currentPath = value
+                currentBranchRef = nil
+                currentIsBare = false
+            } else if let value = line.stripPrefix("branch ") {
+                currentBranchRef = value
+            } else if line == "bare" {
+                currentIsBare = true
+            } else if line.isEmpty {
+                closeBlock()
+            }
+        }
+        closeBlock()
+        return results
+    }
+
+    /// Parses `git worktree list` (non-porcelain) lines for entries checked out on `defaultBranch`.
+    static func pathsFromHumanReadableWorktreeList(_ output: String, defaultBranch: String) -> [String] {
+        var paths: [String] = []
+        for rawLine in output.split(separator: "\n") {
+            let line = String(rawLine).replacingOccurrences(of: "\r", with: "").trimmingCharacters(in: CharacterSet.whitespaces)
+            guard !line.isEmpty else { continue }
+            if line.hasSuffix("(bare)") {
+                continue
+            }
+            guard let openBracket = line.lastIndex(of: "["),
+                  let closeIdx = line[line.index(after: openBracket)...].firstIndex(of: "]")
+            else { continue }
+            let branchName = String(line[line.index(after: openBracket)..<closeIdx])
+            guard branchName == defaultBranch else { continue }
+            let before = line[..<openBracket].trimmingCharacters(in: CharacterSet.whitespaces)
+            let tokens = before.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+            guard tokens.count >= 2, let last = tokens.last else { continue }
+            guard last.count >= 7, last.allSatisfy({ $0.isHexDigit }) else { continue }
+            let path = tokens.dropLast().joined(separator: " ")
+            guard !path.isEmpty else { continue }
+            paths.append(path)
+        }
+        return paths
+    }
+}
+
 struct WorktreeManager {
     func createWorktree(
         bareRepositoryPath: URL,
@@ -90,25 +185,13 @@ struct WorktreeManager {
             throw DevVaultError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
 
-        var currentPath: String?
-        var currentBranch: String?
-        for line in result.stdout.split(whereSeparator: \.isNewline).map(String.init) + [""] {
-            if line.isEmpty {
-                if currentBranch == "refs/heads/\(branchName)", let currentPath {
-                    return URL(fileURLWithPath: currentPath)
-                }
-                currentPath = nil
-                currentBranch = nil
-                continue
-            }
-
-            if let value = line.stripPrefix("worktree ") {
-                currentPath = value
-            } else if let value = line.stripPrefix("branch ") {
-                currentBranch = value
+        for entry in GitWorktreeListParser.entries(fromPorcelain: result.stdout) {
+            if !entry.isBare,
+               entry.branchShortName == branchName || entry.rawBranchField == "refs/heads/\(branchName)"
+            {
+                return URL(fileURLWithPath: entry.path)
             }
         }
-
         return nil
     }
 
