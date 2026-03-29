@@ -50,6 +50,8 @@ final class AppModel: @unchecked Sendable {
     @ObservationIgnored
     var forceClosingTerminalRunIDs: Set<UUID> = []
     @ObservationIgnored
+    var delegatedAgentRunIDs: Set<UUID> = []
+    @ObservationIgnored
     var prMonitoringTasks: [UUID: Task<Void, Never>] = [:]
     var storedModelContext: ModelContext?
     var autoRefreshTask: Task<Void, Never>?
