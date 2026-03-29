@@ -1,4 +1,4 @@
-# GitHub Copilot CLI — Referenz & DevVault Integration
+# GitHub Copilot CLI — Referenz & Stackriot Integration
 
 ## Status / Migration
 
@@ -12,7 +12,7 @@ Es wurde durch das eigenständige **GitHub Copilot CLI** (`github/copilot-cli`) 
 | `gh extension install github/gh-copilot` | `brew install copilot-cli` |
 | Binary: `gh` | Binary: `copilot` |
 
-DevVault verwendet seit diesem Fix: `executableName = "copilot"` und `launchCommand = "copilot"`.
+Stackriot verwendet seit diesem Fix: `executableName = "copilot"` und `launchCommand = "copilot"`.
 
 ---
 
@@ -214,7 +214,7 @@ einzubinden, ohne Terminal-Emulation zu benötigen.
 
 ---
 
-## DevVault — Aktueller Integrationsstand
+## Stackriot — Aktueller Integrationsstand
 
 ### Was funktioniert
 
