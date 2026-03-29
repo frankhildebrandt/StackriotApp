@@ -4,21 +4,21 @@
             "type": "swift",
             "request": "launch",
             "args": [],
-            "cwd": "${workspaceFolder:DevVault}",
-            "name": "Debug DevVault",
-            "target": "DevVault",
+            "cwd": "${workspaceFolder}",
+            "name": "Debug Stackriot",
+            "target": "Stackriot",
             "configuration": "debug",
-            "preLaunchTask": "swift: Build Debug DevVault"
+            "preLaunchTask": "swift: Build Debug Stackriot"
         },
         {
             "type": "swift",
             "request": "launch",
             "args": [],
-            "cwd": "${workspaceFolder:DevVault}",
-            "name": "Release DevVault",
-            "target": "DevVault",
+            "cwd": "${workspaceFolder}",
+            "name": "Release Stackriot",
+            "target": "Stackriot",
             "configuration": "release",
-            "preLaunchTask": "swift: Build Release DevVault"
+            "preLaunchTask": "swift: Build Release Stackriot"
         }
     ]
 }

@@ -2,7 +2,7 @@
 
 ## Übersicht
 
-Integration von AI CLI Tools (Claude Code, Codex, GitHub Copilot CLI, Cursor) in DevVault, sodass pro Worktree ein AI Agent zugewiesen und gestartet werden kann. Laufende Agents werden im Repository- und Worktree-Level visuell signalisiert.
+Integration von AI CLI Tools (Claude Code, Codex, GitHub Copilot CLI, Cursor) in Stackriot, sodass pro Worktree ein AI Agent zugewiesen und gestartet werden kann. Laufende Agents werden im Repository- und Worktree-Level visuell signalisiert.
 
 ---
 
@@ -20,7 +20,7 @@ Statt einem In-App-Terminal-Emulator wird Terminal.app per AppleScript geöffnet
 
 ### Laufzeit-Detection: PID-Polling
 
-PID-Ermittlung via Temp-File (`/tmp/dv_agent_<uuid>.pid`) — das Terminal-Startskript schreibt `echo $$ >` in die Datei. Danach prüft ein Swift-Task alle 2 Sekunden via `kill(pid, 0)` ob der Prozess noch läuft.
+PID-Ermittlung via Temp-File (`/tmp/stackriot_agent_<uuid>.pid`) — das Terminal-Startskript schreibt `echo $$ >` in die Datei. Danach prüft ein Swift-Task alle 2 Sekunden via `kill(pid, 0)` ob der Prozess noch läuft.
 
 **Begründung:**
 - Signal 0 prüft Prozess-Existenz ohne tatsächliches Signal
@@ -139,7 +139,7 @@ func checkAvailability() async -> Set<AIAgentTool> {
 
 ```swift
 func launchAgent(_ tool: AIAgentTool, for worktree: WorktreeRecord) throws -> AgentSessionState {
-    let pidFile = "/tmp/dv_agent_\(worktree.id.uuidString).pid"
+    let pidFile = "/tmp/stackriot_agent_\(worktree.id.uuidString).pid"
     let shellCmd = "echo $$ > \(pidFile); \(tool.launchCommand(in: worktree.path))"
     let appleScript = """
         tell application "Terminal"
@@ -342,9 +342,9 @@ Falls App Store-Distribution: zusätzlich Temporary Exception für `com.apple.Te
 
 ## Implementierungsreihenfolge
 
-1. `Sources/DevVault/Domain.swift` — `AIAgentTool` + `AgentSessionState` + String-Extensions
-2. `Sources/DevVault/Models.swift` — `WorktreeRecord.assignedAgentRawValue`
-3. `Sources/DevVault/Services.swift` — `AIAgentManager`
-4. `Sources/DevVault/AppModel.swift` — Integration der neuen Service-Methoden
-5. `Sources/DevVault/RootView.swift` — `AgentActivityDot`, `AgentAssignmentRow`, Sidebar-Indikatoren
-6. `DevVault.entitlements` — Apple Events Berechtigung
+1. `Sources/Stackriot/Domain.swift` — `AIAgentTool` + `AgentSessionState` + String-Extensions
+2. `Sources/Stackriot/Models.swift` — `WorktreeRecord.assignedAgentRawValue`
+3. `Sources/Stackriot/Services.swift` — `AIAgentManager`
+4. `Sources/Stackriot/AppModel.swift` — Integration der neuen Service-Methoden
+5. `Sources/Stackriot/RootView.swift` — `AgentActivityDot`, `AgentAssignmentRow`, Sidebar-Indikatoren
+6. `Stackriot.entitlements` — Apple Events Berechtigung

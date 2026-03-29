@@ -4,7 +4,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "DevVault",
+    name: "Stackriot",
     platforms: [
         .macOS(.v14),
     ],
@@ -13,14 +13,14 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "DevVault",
+            name: "Stackriot",
             dependencies: [
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
             ]
         ),
         .testTarget(
-            name: "DevVaultTests",
-            dependencies: ["DevVault"]
+            name: "StackriotTests",
+            dependencies: ["Stackriot"]
         ),
     ],
     swiftLanguageModes: [.v6]
