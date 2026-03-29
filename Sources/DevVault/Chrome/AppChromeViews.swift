@@ -195,17 +195,3 @@ private struct GenerateSSHKeySheet: View {
         .background(.regularMaterial)
     }
 }
-
-private extension View {
-    func confirmationDialog<Item: Identifiable>(
-        _ title: String,
-        item: Binding<Item?>,
-        @ViewBuilder actions: @escaping (Item) -> some View,
-        @ViewBuilder message: @escaping (Item) -> some View
-    ) -> some View {
-        confirmationDialog(title, isPresented: Binding(
-            get: { item.wrappedValue != nil },
-            set: { if !$0 { item.wrappedValue = nil } }
-        ), presenting: item.wrappedValue, actions: actions, message: message)
-    }
-}
