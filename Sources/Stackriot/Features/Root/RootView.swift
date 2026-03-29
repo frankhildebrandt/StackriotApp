@@ -218,6 +218,26 @@ struct RootView: View {
                 Text("Repositories in \(project.name) move to \(AppModel.defaultNamespaceName) without a project.")
             }
         }
+        .confirmationDialog(
+            appModel.pendingTerminalCloseConfirmation?.title ?? "Terminal schließen?",
+            isPresented: Binding(
+                get: { appModel.pendingTerminalCloseConfirmation != nil },
+                set: { newValue in
+                    if !newValue {
+                        appModel.clearPendingTerminalCloseConfirmation()
+                    }
+                }
+            )
+        ) {
+            Button("Force Close", role: .destructive) {
+                appModel.confirmPendingTerminalClose(in: modelContext)
+            }
+            Button("Cancel", role: .cancel) {
+                appModel.clearPendingTerminalCloseConfirmation()
+            }
+        } message: {
+            Text(appModel.pendingTerminalCloseConfirmation?.message ?? "")
+        }
         .alert("Stackriot", isPresented: Binding(
             get: { appModel.pendingErrorMessage != nil },
             set: { newValue in

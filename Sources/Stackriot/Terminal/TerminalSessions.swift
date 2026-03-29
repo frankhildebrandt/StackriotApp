@@ -49,8 +49,35 @@ final class AgentTerminalSession: ObservableObject {
         view.terminate()
     }
 
+    func forceTerminate() {
+        terminationRequested = true
+
+        let shellPID = view.process.shellPid
+        if shellPID != 0 {
+            _ = kill(-shellPID, SIGKILL)
+            _ = kill(shellPID, SIGKILL)
+        }
+
+        view.terminate()
+    }
+
     func send(text: String) {
         view.process.send(data: ArraySlice(text.utf8))
+    }
+
+    func runningDescendantProcesses() async -> [String] {
+        let rootPID = Int(view.process.shellPid)
+        guard rootPID > 0 else { return [] }
+
+        do {
+            let result = try await CommandRunner.runCollected(
+                executable: "ps",
+                arguments: ["-axo", "ppid=,pid=,comm="]
+            )
+            return Self.parseDescendantProcesses(from: result.stdout, rootPID: rootPID)
+        } catch {
+            return []
+        }
     }
 
     fileprivate func handleData(_ slice: ArraySlice<UInt8>) {
@@ -60,6 +87,41 @@ final class AgentTerminalSession: ObservableObject {
 
     fileprivate func handleTermination(_ exitCode: Int32?) {
         onTermination(exitCode ?? 1, terminationRequested)
+    }
+
+    private static func parseDescendantProcesses(from output: String, rootPID: Int) -> [String] {
+        struct ProcessEntry {
+            let parentPID: Int
+            let pid: Int
+            let command: String
+        }
+
+        let entries = output.split(separator: "\n").compactMap { line -> ProcessEntry? in
+            let parts = line.split(maxSplits: 2, whereSeparator: \.isWhitespace)
+            guard parts.count == 3,
+                  let parentPID = Int(parts[0]),
+                  let pid = Int(parts[1]) else {
+                return nil
+            }
+
+            return ProcessEntry(parentPID: parentPID, pid: pid, command: String(parts[2]))
+        }
+
+        let childrenByParent = Dictionary(grouping: entries, by: \.parentPID)
+        var queue = [rootPID]
+        var visited = Set<Int>([rootPID])
+        var processNames: [String] = []
+
+        while !queue.isEmpty {
+            let parentPID = queue.removeFirst()
+            for child in childrenByParent[parentPID] ?? [] {
+                guard visited.insert(child.pid).inserted else { continue }
+                queue.append(child.pid)
+                processNames.append(URL(fileURLWithPath: child.command).lastPathComponent)
+            }
+        }
+
+        return Array(NSOrderedSet(array: processNames)) as? [String] ?? processNames
     }
 }
 

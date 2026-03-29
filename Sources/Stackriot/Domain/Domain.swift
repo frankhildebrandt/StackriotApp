@@ -641,6 +641,14 @@ struct TerminalTabState: Sendable {
     var closedAt: Date?
 }
 
+struct TerminalCloseConfirmationDraft: Identifiable, Sendable {
+    let runID: UUID
+    let title: String
+    let message: String
+
+    var id: UUID { runID }
+}
+
 struct WorktreeRemovalDraft: Identifiable, Sendable {
     let id: UUID
     let path: String

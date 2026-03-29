@@ -5,6 +5,7 @@ struct TerminalTabChip: View {
     let run: RunRecord
     let isSelected: Bool
     let isRunning: Bool
+    let usesCloseActionWhileRunning: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
     let onCancel: () -> Void
@@ -29,7 +30,11 @@ struct TerminalTabChip: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Button {
-                if isRunning { onCancel() } else { onClose() }
+                if isRunning, !usesCloseActionWhileRunning {
+                    onCancel()
+                } else {
+                    onClose()
+                }
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))

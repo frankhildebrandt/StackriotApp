@@ -22,11 +22,12 @@ struct TerminalTabStrip: View {
                         run: run,
                         isSelected: !isPlanSelected && appModel.selectedTab(for: worktree, in: repository)?.id == run.id,
                         isRunning: appModel.activeRunIDs.contains(run.id),
+                        usesCloseActionWhileRunning: appModel.terminalSession(for: run) != nil,
                         onSelect: {
                             appModel.selectTab(run)
                         },
                         onClose: {
-                            appModel.closeTab(run)
+                            appModel.requestCloseTab(run, in: modelContext)
                         },
                         onCancel: {
                             appModel.cancelRun(run, in: modelContext)
