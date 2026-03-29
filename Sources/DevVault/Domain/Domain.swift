@@ -87,7 +87,7 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         case .codex:
             "codex"
         case .githubCopilot:
-            "gh"
+            "copilot"
         case .cursorCLI:
             "cursor"
         }
@@ -102,9 +102,30 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         case .codex:
             "cd \(path.shellEscaped) && codex"
         case .githubCopilot:
-            "cd \(path.shellEscaped) && gh copilot suggest"
+            "cd \(path.shellEscaped) && copilot"
         case .cursorCLI:
             "cd \(path.shellEscaped) && cursor ."
+        }
+    }
+
+    /// Starts the agent with a pre-filled task prompt.
+    /// For tools that support a `--prompt`/`-p` flag, uses that for reliable non-interactive
+    /// execution. Falls back to the interactive launch command for tools without this support.
+    func launchCommandWithPrompt(_ prompt: String, in path: String) -> String {
+        switch self {
+        case .none:
+            ""
+        case .claudeCode:
+            // claude reads stdin naturally when launched via PTY; use --message flag for clarity
+            "cd \(path.shellEscaped) && claude --message \(prompt.shellEscaped)"
+        case .codex:
+            // codex has no direct --prompt flag; initial prompt is injected via PTY stdin
+            launchCommand(in: path)
+        case .githubCopilot:
+            // copilot -p executes the task and exits cleanly; --allow-all-tools enables agentic execution
+            "cd \(path.shellEscaped) && copilot -p \(prompt.shellEscaped) --allow-all-tools"
+        case .cursorCLI:
+            launchCommand(in: path)
         }
     }
 }

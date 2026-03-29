@@ -127,18 +127,38 @@ extension AppModel {
 
             let shell = ProcessInfo.processInfo.environment["SHELL"]?.trimmingCharacters(in: .whitespacesAndNewlines)
             let loginShell = (shell?.isEmpty == false ? shell! : "/bin/zsh")
-            let shellCommand = tool.launchCommand(in: worktree.path)
+            // If a prompt is provided, prefer the tool's dedicated prompt-flag command (e.g. `copilot -p`)
+            // which exits cleanly after completion. For tools without a prompt flag the interactive
+            // launch command is used and the prompt is written to PTY stdin as before.
+            let promptText = initialPrompt?.nonEmpty
+            let shellCommand: String
+            let stdinText: String?
+            if let prompt = promptText {
+                let cmd = tool.launchCommandWithPrompt(prompt, in: worktree.path)
+                if cmd != tool.launchCommand(in: worktree.path) {
+                    // Tool handles the prompt via flag — no PTY stdin injection needed
+                    shellCommand = cmd
+                    stdinText = nil
+                } else {
+                    // Tool uses interactive mode — inject prompt via PTY stdin
+                    shellCommand = tool.launchCommand(in: worktree.path)
+                    stdinText = "\(prompt)\n"
+                }
+            } else {
+                shellCommand = tool.launchCommand(in: worktree.path)
+                stdinText = nil
+            }
             let descriptor = CommandExecutionDescriptor(
                 title: tool.displayName,
                 actionKind: .aiAgent,
                 executable: loginShell,
                 arguments: ["-ilc", shellCommand],
-                displayCommandLine: tool.launchCommand(in: worktree.path),
+                displayCommandLine: shellCommand,
                 currentDirectoryURL: URL(fileURLWithPath: worktree.path),
                 repositoryID: repository.id,
                 worktreeID: worktree.id,
                 runtimeRequirement: nil,
-                stdinText: initialPrompt?.nonEmpty.map { "\($0)\n" }
+                stdinText: stdinText
             )
             startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
             refreshRunningAgentWorktrees()
