@@ -96,52 +96,69 @@ struct AgentRunFeedView: View {
                 rawLogView
             }
         }
+        .onChange(of: run.status) { old, new in
+            switch new {
+            case .succeeded, .failed, .cancelled:
+                guard old == .running || old == .pending else { return }
+                appModel.presentCursorAgentMarkdownSnapshotIfNeeded(for: run)
+            default:
+                break
+            }
+        }
         .task(id: run.id) {
             appModel.ensureStructuredSegmentsLoaded(for: run)
         }
     }
 
     private var feedView: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        if showFeedEmptyPlaceholder {
-                            ContentUnavailableView(
-                                "Noch kein Feed",
-                                systemImage: "bubble.left.and.text.bubble.right",
-                                description: Text("Sobald strukturierte Agent-Events eintreffen, erscheinen sie hier. Rohdaten bleiben jederzeit im Raw Log sichtbar.")
-                            )
-                            .frame(maxWidth: .infinity, minHeight: 240)
-                        } else {
-                            ForEach(rows) { row in
-                                AgentRunFeedRowView(row: row)
-                                    .id(row.id)
-                            }
-                        }
-
-                        Color.clear
-                            .frame(height: 1)
-                            .id(bottomAnchorID)
-                    }
-                    .padding(16)
-                }
-                .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                )
-                .onAppear {
-                    scrollToLatest(using: proxy)
-                }
-                .onChange(of: scrollTrigger) { _, _ in
-                    scrollToLatest(using: proxy)
-                }
-            }
-
+        Group {
             if isCursorStreamInterpreter {
-                cursorAssistantDrawer
+                VSplitView {
+                    feedScrollCard
+                    cursorAssistantDrawer
+                }
+                .frame(maxHeight: .infinity)
+            } else {
+                feedScrollCard
+            }
+        }
+    }
+
+    private var feedScrollCard: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if showFeedEmptyPlaceholder {
+                        ContentUnavailableView(
+                            "Noch kein Feed",
+                            systemImage: "bubble.left.and.text.bubble.right",
+                            description: Text("Sobald strukturierte Agent-Events eintreffen, erscheinen sie hier. Rohdaten bleiben jederzeit im Raw Log sichtbar.")
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 240)
+                    } else {
+                        ForEach(rows) { row in
+                            AgentRunFeedRowView(row: row)
+                                .id(row.id)
+                        }
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(bottomAnchorID)
+                }
+                .padding(16)
+            }
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+            .onAppear {
+                scrollToLatest(using: proxy)
+            }
+            .onChange(of: scrollTrigger) { _, _ in
+                scrollToLatest(using: proxy)
             }
         }
     }
@@ -209,7 +226,7 @@ struct AgentRunFeedView: View {
                         .frame(height: 1)
                         .id(cursorAssistantBottomID)
                 }
-                .frame(minHeight: 120, maxHeight: 220)
+                .frame(minHeight: 120)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -704,22 +721,26 @@ private struct AgentMarkdownText: View {
     let markdown: String
     let usesSecondaryStyle: Bool
 
-    private var attributed: AttributedString? {
-        try? AttributedString(markdown: markdown)
+    var body: some View {
+        agentMarkdownAttributedText(agentMarkdownNormalizeNewlines(markdown))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(usesSecondaryStyle ? 0.78 : 1)
     }
 
-    var body: some View {
-        Group {
-            if let attributed {
-                Text(attributed)
-            } else {
-                Text(markdown)
-            }
+    private func agentMarkdownAttributedText(_ source: String) -> Text {
+        if let attributed = try? AttributedString(
+            markdown: source,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
+        ) {
+            return Text(attributed)
         }
-        .font(.body)
-        .foregroundStyle(usesSecondaryStyle ? .secondary : .primary)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        return Text(source)
     }
+}
+
+private func agentMarkdownNormalizeNewlines(_ text: String) -> String {
+    text.replacingOccurrences(of: "\r\n", with: "\n")
 }
 
 private struct AgentCodeBlockDisclosure: View {

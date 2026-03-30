@@ -2808,6 +2808,43 @@ struct StackriotTests {
     }
 
     @Test
+    func cursorParserIgnoresWhitespaceOnlyAssistantMessageWithoutFallbackSegment() {
+        let parser = CursorAgentPrintJSONParser()
+        let session = "1690b03e-2db8-4cd8-aab4-ba772c07f05c"
+        let content: [[String: Any]] = [["type": "text", "text": "\n\n\n"]]
+        let o: [String: Any] = [
+            "type": "assistant",
+            "session_id": session,
+            "message": [
+                "role": "assistant",
+                "content": content,
+            ] as [String: Any],
+            "timestamp_ms": 1774876090804,
+        ]
+        let line = String(data: try! JSONSerialization.data(withJSONObject: o), encoding: .utf8)! + "\n"
+        let merged = parser.consume(line)
+        #expect(merged.segments.isEmpty)
+    }
+
+    @Test
+    func cursorParserSystemInitUpdatesSessionAndEmitsNoSegments() {
+        let parser = CursorAgentPrintJSONParser()
+        let o: [String: Any] = [
+            "type": "system",
+            "subtype": "init",
+            "apiKeySource": "login",
+            "cwd": "/tmp",
+            "session_id": "session-abc",
+            "model": "Auto",
+            "permissionMode": "default",
+        ]
+        let line = String(data: try! JSONSerialization.data(withJSONObject: o), encoding: .utf8)! + "\n"
+        let merged = parser.consume(line)
+        #expect(merged.segments.isEmpty)
+        #expect(parser.currentSessionID == "session-abc")
+    }
+
+    @Test
     func cursorPlanResponseParserExtractsEmbeddedStructuredJSON() {
         let structuredResponse = AppModel.parseAgentPlanResponse(from: """
         Got it. I'll scan the worktree and then return the plan.

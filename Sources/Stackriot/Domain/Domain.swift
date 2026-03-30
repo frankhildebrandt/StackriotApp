@@ -18,6 +18,21 @@ enum RunStatusKind: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// Value passed to `WindowGroup(for:)` for read-only Cursor agent markdown snapshots.
+struct AgentMarkdownWindowPayload: Hashable, Codable {
+    let id: UUID
+    var title: String
+    var markdown: String
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
 enum ActionKind: String, Codable, CaseIterable, Identifiable {
     case openIDE
     case makeTarget

@@ -49,6 +49,17 @@ final class CursorAgentPrintJSONParser: StructuredAgentOutputParsing {
         ) ?? currentSessionID
 
         let type = StructuredAgentOutputParserSupport.firstString(in: object, keys: ["type", "event", "kind"]) ?? "event"
+        let normalizedType = type.lowercased()
+
+        if normalizedType == "system" {
+            let subtype = (StructuredAgentOutputParserSupport.firstString(in: object, keys: ["subtype"]) ?? "").lowercased()
+            if subtype == "init" {
+                if let sid = StructuredAgentOutputParserSupport.firstString(in: object, keys: ["session_id", "sessionId", "chat_id", "chatId"]) {
+                    currentSessionID = sid
+                }
+                return StructuredAgentOutputChunk()
+            }
+        }
 
         if let errorChunk = renderErrorIfNeeded(type: type, object: object) {
             return errorChunk
@@ -61,6 +72,9 @@ final class CursorAgentPrintJSONParser: StructuredAgentOutputParsing {
         }
         if let messageChunk = renderMessageIfNeeded(type: type, object: object) {
             return messageChunk
+        }
+        if normalizedType == "assistant" {
+            return StructuredAgentOutputChunk()
         }
         if currentSessionID != nil, object.keys.allSatisfy({ ["type", "event", "kind", "session_id", "sessionId", "chat_id", "chatId", "id", "status"].contains($0) }) {
             return StructuredAgentOutputChunk()
@@ -85,6 +99,9 @@ final class CursorAgentPrintJSONParser: StructuredAgentOutputParsing {
 
         if let text = extractText(from: object) {
             let bodyText = mergedText(text, for: segmentID, store: &bodyTextByID)
+            if bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return StructuredAgentOutputChunk()
+            }
             latestResultText = bodyText
 
             let kind: AgentRunSegment.Kind = isThinking ? .reasoning : .agentMessage
@@ -308,21 +325,40 @@ final class CursorAgentPrintJSONParser: StructuredAgentOutputParsing {
     }
 
     private func extractText(from object: [String: Any]) -> String? {
+        if let message = StructuredAgentOutputParserSupport.nestedDictionary(in: object, keys: ["message"]),
+           let raw = extractRawMessageContentText(from: message) {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return nil }
+            return raw
+        }
         if let text = StructuredAgentOutputParserSupport.firstString(in: object, keys: ["result", "output", "response", "message", "text"]) {
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
             return text
         }
         if let delta = StructuredAgentOutputParserSupport.nestedDictionary(in: object, keys: ["delta"]),
            let text = StructuredAgentOutputParserSupport.joinedText(from: delta) {
             return text
         }
-        if let message = StructuredAgentOutputParserSupport.nestedDictionary(in: object, keys: ["message"]),
-           let text = StructuredAgentOutputParserSupport.joinedText(from: message["content"] ?? message["text"] ?? message["message"]) {
-            return text
-        }
         if let content = object["content"] {
             return StructuredAgentOutputParserSupport.joinedText(from: content)
         }
         return nil
+    }
+
+    /// Concatenates `message.content` blocks without trimming away whitespace-only fragments so newlines are preserved.
+    private func extractRawMessageContentText(from message: [String: Any]) -> String? {
+        guard let content = message["content"] else {
+            return StructuredAgentOutputParserSupport.firstString(in: message, keys: ["text", "message"])
+        }
+        if let blocks = content as? [[String: Any]] {
+            let parts = blocks.compactMap { block -> String? in
+                if let t = block["text"] as? String { return t }
+                return nil
+            }
+            if parts.isEmpty { return nil }
+            return parts.joined(separator: "\n")
+        }
+        return StructuredAgentOutputParserSupport.joinedText(from: content)
     }
 
     private enum SegmentStreamHint {

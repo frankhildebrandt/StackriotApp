@@ -4,6 +4,7 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.openWindow) private var openWindow
     @Query private var namespaceProjects: [RepositoryProject]
     @Query private var namespaces: [RepositoryNamespace]
     @Query(sort: \ManagedRepository.displayName) private var repositories: [ManagedRepository]
@@ -75,6 +76,11 @@ struct RootView: View {
                 ContentUnavailableView("No Console", systemImage: "terminal", description: Text("Select a repository and worktree to inspect terminal tabs."))
                     .navigationSplitViewColumnWidth(min: 360, ideal: 420)
             }
+        }
+        .onChange(of: appModel.pendingAgentMarkdownWindowPayload?.id) { _, _ in
+            guard let payload = appModel.pendingAgentMarkdownWindowPayload else { return }
+            openWindow(id: "cursor-agent-markdown", value: payload)
+            appModel.pendingAgentMarkdownWindowPayload = nil
         }
         .task {
             appModel.configure(modelContext: modelContext)

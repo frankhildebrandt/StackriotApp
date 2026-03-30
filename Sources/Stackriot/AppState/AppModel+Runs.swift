@@ -621,6 +621,31 @@ extension AppModel {
         run.outputInterpreter != nil
     }
 
+    /// Opens a read-only markdown window with the Cursor assistant reply when the run reaches a terminal status (once per run).
+    func presentCursorAgentMarkdownSnapshotIfNeeded(for run: RunRecord) {
+        guard run.outputInterpreter == .cursorAgentPrintJSON else { return }
+        switch run.status {
+        case .succeeded, .failed, .cancelled:
+            break
+        default:
+            return
+        }
+        guard !deliveredCursorAgentMarkdownSnapshotRunIDs.contains(run.id) else { return }
+        let segments = agentRunSegmentsByRunID[run.id] ?? []
+        let text = segments
+            .filter { $0.kind == .agentMessage }
+            .map { $0.bodyText ?? "" }
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n")
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        deliveredCursorAgentMarkdownSnapshotRunIDs.insert(run.id)
+        pendingAgentMarkdownWindowPayload = AgentMarkdownWindowPayload(
+            id: UUID(),
+            title: run.title,
+            markdown: text
+        )
+    }
+
     func ensureStructuredSegmentsLoaded(for run: RunRecord) {
         guard let interpreter = run.outputInterpreter else { return }
         guard agentRunSegmentsByRunID[run.id] == nil else { return }
