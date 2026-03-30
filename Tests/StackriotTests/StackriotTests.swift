@@ -2713,6 +2713,101 @@ struct StackriotTests {
     }
 
     @Test
+    func cursorParserMergesThinkingDeltasIntoOneSegment() {
+        let parser = CursorAgentPrintJSONParser()
+        let session = "8d539ee2-1f26-4c8c-b087-d59cbf5867a0"
+        func thinkingLine(_ text: String, subtype: String) -> String {
+            let o: [String: Any] = [
+                "type": "thinking",
+                "subtype": subtype,
+                "text": text,
+                "session_id": session,
+            ]
+            return String(data: try! JSONSerialization.data(withJSONObject: o), encoding: .utf8)! + "\n"
+        }
+
+        var merged = StructuredAgentOutputChunk()
+        merged.append(parser.consume(thinkingLine("The user is wri", subtype: "delta")))
+        merged.append(parser.consume(thinkingLine("ting in German.", subtype: "delta")))
+        merged.append(parser.consume(thinkingLine("", subtype: "completed")))
+
+        let reasoning = merged.segments.filter { $0.kind == .reasoning }
+        let ids = Set(reasoning.map(\.id))
+        #expect(ids.count == 1)
+        #expect(ids.first == "\(session)-thinking")
+        #expect(reasoning.last?.bodyText == "The user is writing in German.")
+        #expect(reasoning.last?.status == .completed)
+    }
+
+    @Test
+    func cursorParserMergesToolCallStartedAndCompletedByCallID() {
+        let parser = CursorAgentPrintJSONParser()
+        let session = "chat-123"
+        let callID = "tool_call-1"
+        let toolCallInner: [String: Any] = [
+            "semSearchToolCall": [
+                "args": ["query": "find", "targetDirectories": []],
+            ] as [String: Any],
+        ]
+        let started: [String: Any] = [
+            "type": "tool_call",
+            "subtype": "started",
+            "call_id": callID,
+            "session_id": session,
+            "tool_call": toolCallInner,
+        ]
+        let completed: [String: Any] = [
+            "type": "tool_call",
+            "subtype": "completed",
+            "call_id": callID,
+            "session_id": session,
+            "tool_call": [
+                "semSearchToolCall": [
+                    "result": ["error": ["errorMessage": "Tool failed; this may be temporary. Try again."]],
+                ] as [String: Any],
+            ] as [String: Any],
+        ]
+
+        var merged = StructuredAgentOutputChunk()
+        merged.append(parser.consume(String(data: try! JSONSerialization.data(withJSONObject: started), encoding: .utf8)! + "\n"))
+        merged.append(parser.consume(String(data: try! JSONSerialization.data(withJSONObject: completed), encoding: .utf8)! + "\n"))
+
+        let tools = merged.segments.filter { $0.kind == .toolCall }
+        #expect(tools.count == 1)
+        #expect(tools.first?.id == callID)
+        #expect(tools.first?.status == .failed)
+        #expect(tools.first?.aggregatedOutput?.contains("Tool failed") == true)
+    }
+
+    @Test
+    func cursorParserMergesAssistantDeltasWithSameModelCallID() {
+        let parser = CursorAgentPrintJSONParser()
+        let session = "chat-123"
+        let modelCall = "af3aac61-a4f0-4ab8-96c5-335eb768579d-1-njq2"
+        func assistantLine(_ text: String) -> String {
+            let content: [[String: Any]] = [["type": "text", "text": text]]
+            let o: [String: Any] = [
+                "type": "assistant",
+                "session_id": session,
+                "model_call_id": modelCall,
+                "message": [
+                    "role": "assistant",
+                    "content": content,
+                ] as [String: Any],
+            ]
+            return String(data: try! JSONSerialization.data(withJSONObject: o), encoding: .utf8)! + "\n"
+        }
+
+        var merged = StructuredAgentOutputChunk()
+        merged.append(parser.consume(assistantLine("Wir setzen ")))
+        merged.append(parser.consume(assistantLine("Wir setzen `.keyboardShortcut` wie in anderen Sheets.")))
+
+        let messages = merged.segments.filter { $0.kind == .agentMessage }
+        #expect(Set(messages.map(\.id)) == [modelCall])
+        #expect(messages.last?.bodyText == "Wir setzen `.keyboardShortcut` wie in anderen Sheets.")
+    }
+
+    @Test
     func cursorPlanResponseParserExtractsEmbeddedStructuredJSON() {
         let structuredResponse = AppModel.parseAgentPlanResponse(from: """
         Got it. I'll scan the worktree and then return the plan.
