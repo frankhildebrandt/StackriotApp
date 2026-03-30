@@ -17,13 +17,6 @@ struct AgentRunSummaryWindow: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(run.aiSummaryTitle ?? "Agent-Zusammenfassung")
                         .font(.title3.weight(.semibold))
-                    Text(run.title)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text(run.commandLine)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
                 }
                 Spacer()
                 if let commitMessage, let worktree = resolvedWorktree, let repository = resolvedRepository {
