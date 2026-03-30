@@ -31,7 +31,7 @@
 		E00000000000000000000013 /* RunConsoleColumn.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000013 /* RunConsoleColumn.swift */; };
 		E00000000000000000000014 /* RunConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000014 /* RunConsoleView.swift */; };
 		E00000000000000000000050 /* CodexRunFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000050 /* CodexRunFeedView.swift */; };
-		E00000000000000000000052 /* CodexPlanDraftSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000052 /* CodexPlanDraftSheet.swift */; };
+		E00000000000000000000055 /* CodexPlanDraftSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000055 /* CodexPlanDraftSheet.swift */; };
 		E00000000000000000000015 /* TerminalTabChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000015 /* TerminalTabChip.swift */; };
 		E00000000000000000000016 /* TerminalTabStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000016 /* TerminalTabStrip.swift */; };
 		E00000000000000000000017 /* ActionPillGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000017 /* ActionPillGroup.swift */; };
@@ -81,9 +81,12 @@
 			E00000000000000000000043 /* AgentRunSummaryWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000043 /* AgentRunSummaryWindow.swift */; };
 			E00000000000000000000044 /* DevToolDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000044 /* DevToolDiscoveryService.swift */; };
 			E00000000000000000000045 /* RunConfigurationDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000045 /* RunConfigurationDiscoveryService.swift */; };
-			E00000000000000000000047 /* WorkspaceDiffFileList.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000047 /* WorkspaceDiffFileList.swift */; };
-			E00000000000000000000049 /* CodexExecJSONLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000049 /* CodexExecJSONLParser.swift */; };
+		E00000000000000000000047 /* WorkspaceDiffFileList.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000047 /* WorkspaceDiffFileList.swift */; };
+		E00000000000000000000049 /* CodexExecJSONLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000049 /* CodexExecJSONLParser.swift */; };
 		E00000000000000000000051 /* CodexRunSegment.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000051 /* CodexRunSegment.swift */; };
+		E00000000000000000000052 /* ClaudePrintStreamJSONParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000052 /* ClaudePrintStreamJSONParser.swift */; };
+		E00000000000000000000053 /* CopilotPromptJSONLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000053 /* CopilotPromptJSONLParser.swift */; };
+		E00000000000000000000054 /* StructuredAgentOutputParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000054 /* StructuredAgentOutputParser.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -111,7 +114,7 @@
 		D00000000000000000000013 /* RunConsoleColumn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConsoleColumn.swift; sourceTree = "<group>"; };
 		D00000000000000000000014 /* RunConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConsoleView.swift; sourceTree = "<group>"; };
 		D00000000000000000000050 /* CodexRunFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexRunFeedView.swift; sourceTree = "<group>"; };
-		D00000000000000000000052 /* CodexPlanDraftSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexPlanDraftSheet.swift; sourceTree = "<group>"; };
+		D00000000000000000000055 /* CodexPlanDraftSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexPlanDraftSheet.swift; sourceTree = "<group>"; };
 		D00000000000000000000015 /* TerminalTabChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTabChip.swift; sourceTree = "<group>"; };
 		D00000000000000000000016 /* TerminalTabStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTabStrip.swift; sourceTree = "<group>"; };
 		D00000000000000000000017 /* ActionPillGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionPillGroup.swift; sourceTree = "<group>"; };
@@ -164,6 +167,9 @@
 			D00000000000000000000047 /* WorkspaceDiffFileList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDiffFileList.swift; sourceTree = "<group>"; };
 			D00000000000000000000049 /* CodexExecJSONLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexExecJSONLParser.swift; sourceTree = "<group>"; };
 		D00000000000000000000051 /* CodexRunSegment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexRunSegment.swift; sourceTree = "<group>"; };
+		D00000000000000000000052 /* ClaudePrintStreamJSONParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudePrintStreamJSONParser.swift; sourceTree = "<group>"; };
+		D00000000000000000000053 /* CopilotPromptJSONLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotPromptJSONLParser.swift; sourceTree = "<group>"; };
+		D00000000000000000000054 /* StructuredAgentOutputParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredAgentOutputParser.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -297,7 +303,9 @@
 			children = (
 				D00000000000000000000042 /* AIProviderService.swift */,
 				D00000000000000000000027 /* AIAgentManager.swift */,
+				D00000000000000000000052 /* ClaudePrintStreamJSONParser.swift */,
 				D00000000000000000000049 /* CodexExecJSONLParser.swift */,
+				D00000000000000000000053 /* CopilotPromptJSONLParser.swift */,
 				D00000000000000000000044 /* DevToolDiscoveryService.swift */,
 				D0000000000000000000003D /* GitHubCLIService.swift */,
 				D00000000000000000000028 /* AppPaths.swift */,
@@ -312,6 +320,7 @@
 				D00000000000000000000045 /* RunConfigurationDiscoveryService.swift */,
 				D00000000000000000000032 /* ShellEnvironment.swift */,
 				D00000000000000000000031 /* SSHKeyManager.swift */,
+				D00000000000000000000054 /* StructuredAgentOutputParser.swift */,
 				D00000000000000000000033 /* WorktreeManager.swift */,
 				D00000000000000000000034 /* WorktreeStatusService.swift */,
 			);
@@ -353,7 +362,7 @@
 				D00000000000000000000013 /* RunConsoleColumn.swift */,
 				D00000000000000000000014 /* RunConsoleView.swift */,
 				D00000000000000000000050 /* CodexRunFeedView.swift */,
-				D00000000000000000000052 /* CodexPlanDraftSheet.swift */,
+				D00000000000000000000055 /* CodexPlanDraftSheet.swift */,
 				D00000000000000000000051 /* CodexRunSegment.swift */,
 				D00000000000000000000040 /* PlanEditorView.swift */,
 				D00000000000000000000041 /* ReadmeView.swift */,
@@ -500,7 +509,7 @@
 				E00000000000000000000013 /* RunConsoleColumn.swift in Sources */,
 				E00000000000000000000014 /* RunConsoleView.swift in Sources */,
 				E00000000000000000000050 /* CodexRunFeedView.swift in Sources */,
-				E00000000000000000000052 /* CodexPlanDraftSheet.swift in Sources */,
+				E00000000000000000000055 /* CodexPlanDraftSheet.swift in Sources */,
 				E00000000000000000000051 /* CodexRunSegment.swift in Sources */,
 				E00000000000000000000040 /* PlanEditorView.swift in Sources */,
 				E00000000000000000000041 /* ReadmeView.swift in Sources */,
@@ -546,9 +555,12 @@
 				E00000000000000000000035 /* TerminalSessions.swift in Sources */,
 				E00000000000000000000042 /* AIProviderService.swift in Sources */,
 				E00000000000000000000043 /* AgentRunSummaryWindow.swift in Sources */,
+				E00000000000000000000052 /* ClaudePrintStreamJSONParser.swift in Sources */,
+				E00000000000000000000053 /* CopilotPromptJSONLParser.swift in Sources */,
 				E00000000000000000000044 /* DevToolDiscoveryService.swift in Sources */,
 				E00000000000000000000045 /* RunConfigurationDiscoveryService.swift in Sources */,
 				E00000000000000000000049 /* CodexExecJSONLParser.swift in Sources */,
+				E00000000000000000000054 /* StructuredAgentOutputParser.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

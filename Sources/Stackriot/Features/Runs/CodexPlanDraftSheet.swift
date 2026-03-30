@@ -53,7 +53,7 @@ struct CodexPlanDraftSheet: View {
     @ViewBuilder
     private func transcript(for draft: CodexPlanDraft) -> some View {
         if draft.run.outputInterpreter == .codexExecJSONL {
-            CodexRunFeedView(run: draft.run)
+            AgentRunFeedView(run: draft.run)
         } else {
             TextEditor(text: .constant(draft.run.outputText))
                 .font(.system(.body, design: .monospaced))

@@ -1,6 +1,6 @@
 import SwiftUI
 
-private enum CodexRunContentMode: String, CaseIterable, Identifiable {
+private enum AgentRunContentMode: String, CaseIterable, Identifiable {
     case feed
     case rawLog
 
@@ -16,29 +16,33 @@ private enum CodexRunContentMode: String, CaseIterable, Identifiable {
     }
 }
 
-private struct CodexFeedScrollTrigger: Equatable {
+private struct AgentFeedScrollTrigger: Equatable {
     let count: Int
     let lastSegmentID: String?
     let lastRevision: Int
 }
 
-struct CodexRunFeedView: View {
+struct AgentRunFeedView: View {
     @Environment(AppModel.self) private var appModel
 
     let run: RunRecord
 
-    @State private var selectedMode: CodexRunContentMode = .feed
+    @State private var selectedMode: AgentRunContentMode = .feed
 
-    private var segments: [CodexRunSegment] {
-        appModel.codexSegments(for: run)
+    private var segments: [AgentRunSegment] {
+        appModel.structuredSegments(for: run)
+    }
+
+    private var rows: [AgentRunFeedRow] {
+        AgentRunFeedLayout.rows(from: segments)
     }
 
     private var bottomAnchorID: String {
-        "codex-run-feed-bottom-\(run.id.uuidString)"
+        "agent-run-feed-bottom-\(run.id.uuidString)"
     }
 
-    private var scrollTrigger: CodexFeedScrollTrigger {
-        CodexFeedScrollTrigger(
+    private var scrollTrigger: AgentFeedScrollTrigger {
+        AgentFeedScrollTrigger(
             count: segments.count,
             lastSegmentID: segments.last?.id,
             lastRevision: segments.last?.revision ?? 0
@@ -48,7 +52,7 @@ struct CodexRunFeedView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Picker("Ansicht", selection: $selectedMode) {
-                ForEach(CodexRunContentMode.allCases) { mode in
+                ForEach(AgentRunContentMode.allCases) { mode in
                     Text(mode.title).tag(mode)
                 }
             }
@@ -62,25 +66,25 @@ struct CodexRunFeedView: View {
             }
         }
         .task(id: run.id) {
-            appModel.ensureCodexSegmentsLoaded(for: run)
+            appModel.ensureStructuredSegmentsLoaded(for: run)
         }
     }
 
     private var feedView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    if segments.isEmpty {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if rows.isEmpty {
                         ContentUnavailableView(
                             "Noch kein Feed",
                             systemImage: "bubble.left.and.text.bubble.right",
-                            description: Text("Sobald strukturierte Codex-Events eintreffen, erscheinen sie hier.")
+                            description: Text("Sobald strukturierte Agent-Events eintreffen, erscheinen sie hier. Rohdaten bleiben jederzeit im Raw Log sichtbar.")
                         )
                         .frame(maxWidth: .infinity, minHeight: 240)
                     } else {
-                        ForEach(segments) { segment in
-                            CodexRunSegmentRow(segment: segment)
-                                .id(segment.id)
+                        ForEach(rows) { row in
+                            AgentRunFeedRowView(row: row)
+                                .id(row.id)
                         }
                     }
 
@@ -124,177 +128,249 @@ struct CodexRunFeedView: View {
     }
 }
 
-private struct CodexRunSegmentRow: View {
-    let segment: CodexRunSegment
+enum AgentRunFeedRow: Identifiable, Equatable {
+    case segment(AgentRunSegment)
+    case changedFiles(id: String, sourceAgent: AIAgentTool, status: AgentRunSegment.Status?, files: [AgentRunSegment.ChangedFile], details: [String])
+
+    var id: String {
+        switch self {
+        case .segment(let segment):
+            segment.id
+        case .changedFiles(let id, _, _, _, _):
+            id
+        }
+    }
+}
+
+enum AgentRunFeedLayout {
+    static func rows(from segments: [AgentRunSegment]) -> [AgentRunFeedRow] {
+        var rows: [AgentRunFeedRow] = []
+        var index = 0
+
+        while index < segments.count {
+            let segment = segments[index]
+            if segment.kind == .fileChange {
+                var files = segment.fileChanges
+                var details = [segment.detailText].compactMap(\.self)
+                var status = segment.status
+                let sourceAgent = segment.sourceAgent
+                let startIndex = index
+                index += 1
+
+                while index < segments.count, segments[index].kind == .fileChange {
+                    files += segments[index].fileChanges
+                    if let detail = segments[index].detailText {
+                        details.append(detail)
+                    }
+                    status = segments[index].status ?? status
+                    index += 1
+                }
+
+                let deduplicatedFiles = uniqueFiles(from: files)
+                rows.append(
+                    .changedFiles(
+                        id: "changed-files-\(segments[startIndex].id)",
+                        sourceAgent: sourceAgent,
+                        status: status,
+                        files: deduplicatedFiles,
+                        details: details
+                    )
+                )
+                continue
+            }
+
+            rows.append(.segment(segment))
+            index += 1
+        }
+
+        return rows
+    }
+
+    private static func uniqueFiles(from files: [AgentRunSegment.ChangedFile]) -> [AgentRunSegment.ChangedFile] {
+        var seen: Set<String> = []
+        var result: [AgentRunSegment.ChangedFile] = []
+        for file in files.reversed() {
+            guard seen.insert(file.path).inserted else { continue }
+            result.append(file)
+        }
+        return result.reversed()
+    }
+}
+
+private struct AgentRunFeedRowView: View {
+    let row: AgentRunFeedRow
+
+    var body: some View {
+        switch row {
+        case .segment(let segment):
+            AgentRunSegmentRow(segment: segment)
+        case .changedFiles(_, let sourceAgent, let status, let files, let details):
+            AgentChangedFilesSection(sourceAgent: sourceAgent, status: status, files: files, details: details)
+        }
+    }
+}
+
+private struct AgentRunSegmentRow: View {
+    let segment: AgentRunSegment
 
     var body: some View {
         switch segment.kind {
         case .agentMessage:
-            CodexTextFlowCard(
-                title: segment.title,
-                subtitle: segment.subtitle,
-                bodyText: segment.bodyText ?? "",
-                iconName: "sparkles",
-                accentColor: .accentColor,
-                usesSecondaryBodyStyle: false
-            )
+            AgentChatBubble(segment: segment)
         case .reasoning:
-            CodexTextFlowCard(
-                title: segment.title,
-                subtitle: segment.subtitle,
-                bodyText: segment.bodyText ?? "",
-                iconName: "brain",
-                accentColor: .secondary,
-                usesSecondaryBodyStyle: true
-            )
-        case .commandExecution:
-            CodexStatusCard(
-                title: segment.title,
-                subtitle: segment.subtitle,
-                iconName: "terminal",
-                accentColor: .blue,
-                status: segment.status,
-                exitCode: segment.exitCode,
-                bodyText: segment.bodyText,
-                detailText: segment.aggregatedOutput,
-                detailTitle: "Output"
-            )
-        case .mcpToolCall:
-            CodexStatusCard(
-                title: segment.title,
-                subtitle: segment.subtitle,
-                iconName: "externaldrive.badge.wifi",
-                accentColor: .purple,
-                status: segment.status,
-                exitCode: segment.exitCode,
-                bodyText: segment.bodyText,
-                detailText: segment.detailText,
-                detailTitle: segment.status == .failed ? "Error details" : "Details"
-            )
-        case .collabToolCall:
-            CodexStatusCard(
-                title: segment.title,
-                subtitle: segment.subtitle,
-                iconName: "person.2.fill",
-                accentColor: .teal,
-                status: segment.status,
-                exitCode: segment.exitCode,
-                bodyText: segment.bodyText,
-                detailText: segment.detailText,
-                detailTitle: "Details"
-            )
+            AgentReasoningBubble(segment: segment)
+        case .commandExecution, .toolCall:
+            AgentTimelineRow(segment: segment)
         case .fileChange:
-            CodexFileChangeCard(segment: segment)
+            EmptyView()
         case .todoList:
-            CodexTodoCard(segment: segment)
+            AgentTodoBlock(segment: segment)
         case .error:
-            CodexStatusCard(
-                title: segment.title,
-                subtitle: segment.subtitle,
-                iconName: "exclamationmark.triangle.fill",
-                accentColor: .red,
-                status: segment.status ?? .failed,
-                exitCode: segment.exitCode,
-                bodyText: segment.bodyText,
-                detailText: segment.detailText,
-                detailTitle: "Details"
-            )
+            AgentAlertRow(segment: segment)
         case .fallbackText:
-            CodexFallbackTextCard(text: segment.bodyText ?? segment.title)
+            AgentFallbackRow(segment: segment)
         }
     }
 }
 
-private struct CodexCardContainer<Content: View>: View {
-    let accentColor: Color
-    let content: Content
-
-    init(accentColor: Color, @ViewBuilder content: () -> Content) {
-        self.accentColor = accentColor
-        self.content = content()
-    }
+private struct AgentChatBubble: View {
+    let segment: AgentRunSegment
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            content
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(accentColor.opacity(0.2))
-                .frame(width: 4)
-        }
-    }
-}
-
-private struct CodexTextFlowCard: View {
-    let title: String
-    let subtitle: String?
-    let bodyText: String
-    let iconName: String
-    let accentColor: Color
-    let usesSecondaryBodyStyle: Bool
-
-    var body: some View {
-        CodexCardContainer(accentColor: accentColor) {
-            CodexCardHeader(
-                title: title,
-                subtitle: subtitle,
-                iconName: iconName,
-                accentColor: accentColor
-            )
-
-            CodexRichTextFlow(text: bodyText, usesSecondaryStyle: usesSecondaryBodyStyle)
-        }
-    }
-}
-
-private struct CodexStatusCard: View {
-    let title: String
-    let subtitle: String?
-    let iconName: String
-    let accentColor: Color
-    let status: CodexRunSegment.Status?
-    let exitCode: Int?
-    let bodyText: String?
-    let detailText: String?
-    let detailTitle: String
-
-    var body: some View {
-        CodexCardContainer(accentColor: accentColor) {
-            HStack(alignment: .top, spacing: 12) {
-                CodexCardHeader(
-                    title: title,
-                    subtitle: subtitle,
-                    iconName: iconName,
-                    accentColor: accentColor
-                )
-                Spacer(minLength: 12)
-                HStack(spacing: 8) {
-                    if let status {
-                        CodexStatusBadge(text: status.displayText, color: badgeColor(for: status))
-                    }
-                    if let exitCode {
-                        CodexStatusBadge(text: "Exit \(exitCode)", color: exitCode == 0 ? .green : .red)
-                    }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: sourceIcon)
+                    .foregroundStyle(Color.accentColor)
+                Text(segment.sourceAgent.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let subtitle = segment.subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
-            if let bodyText {
-                Text(bodyText)
-                    .font(.subheadline)
-                    .textSelection(.enabled)
-            }
+            AgentRichTextFlow(text: segment.bodyText ?? "")
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.12), lineWidth: 1)
+        )
+    }
 
-            if let detailText {
-                CodexDisclosureTextBlock(title: detailTitle, text: detailText)
+    private var sourceIcon: String {
+        switch segment.sourceAgent {
+        case .claudeCode:
+            "sparkles.rectangle.stack"
+        case .githubCopilot:
+            "chevron.left.forwardslash.chevron.right"
+        case .codex:
+            "sparkles"
+        default:
+            "bubble.left.and.text.bubble.right"
+        }
+    }
+}
+
+private struct AgentReasoningBubble: View {
+    let segment: AgentRunSegment
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Thinking", systemImage: "brain")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            AgentRichTextFlow(text: segment.bodyText ?? "", usesSecondaryStyle: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct AgentTimelineRow: View {
+    let segment: AgentRunSegment
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Circle()
+                .fill(accentColor.opacity(0.18))
+                .frame(width: 30, height: 30)
+                .overlay {
+                    Image(systemName: iconName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(accentColor)
+                }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(segment.title)
+                        .font(.headline)
+                    if let subtitle = segment.subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 12)
+                    HStack(spacing: 8) {
+                        if let status = segment.status {
+                            AgentStatusChip(text: status.displayText, color: statusColor(status))
+                        }
+                        if let exitCode = segment.exitCode {
+                            AgentStatusChip(text: "Exit \(exitCode)", color: exitCode == 0 ? .green : .red)
+                        }
+                    }
+                }
+
+                if let bodyText = segment.bodyText {
+                    Text(bodyText)
+                        .font(.subheadline)
+                        .textSelection(.enabled)
+                }
+
+                if let output = segment.aggregatedOutput {
+                    AgentDisclosureTextBlock(title: "Output", text: output)
+                }
+
+                if let detail = segment.detailText {
+                    AgentDisclosureTextBlock(title: "Details", text: detail)
+                }
             }
+            .padding(.top, 1)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var iconName: String {
+        switch segment.kind {
+        case .commandExecution:
+            "terminal"
+        case .toolCall:
+            "hammer"
+        default:
+            "circle"
         }
     }
 
-    private func badgeColor(for status: CodexRunSegment.Status) -> Color {
+    private var accentColor: Color {
+        switch segment.kind {
+        case .commandExecution:
+            .blue
+        case .toolCall:
+            .purple
+        default:
+            .secondary
+        }
+    }
+
+    private func statusColor(_ status: AgentRunSegment.Status) -> Color {
         switch status {
         case .pending:
             .gray
@@ -312,37 +388,48 @@ private struct CodexStatusCard: View {
     }
 }
 
-private struct CodexFileChangeCard: View {
-    let segment: CodexRunSegment
+private struct AgentChangedFilesSection: View {
+    let sourceAgent: AIAgentTool
+    let status: AgentRunSegment.Status?
+    let files: [AgentRunSegment.ChangedFile]
+    let details: [String]
 
     var body: some View {
-        CodexCardContainer(accentColor: .orange) {
-            HStack(alignment: .top, spacing: 12) {
-                CodexCardHeader(
-                    title: segment.title,
-                    subtitle: segment.subtitle,
-                    iconName: "doc.on.doc",
-                    accentColor: .orange
-                )
-                Spacer(minLength: 12)
-                if let status = segment.status {
-                    CodexStatusBadge(text: status.displayText, color: .orange)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Label("Changed files", systemImage: "doc.on.doc")
+                    .font(.headline)
+                Text(sourceAgent.displayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let status {
+                    AgentStatusChip(text: status.displayText, color: .orange)
                 }
             }
 
-            ForEach(segment.fileChanges, id: \.path) { change in
-                HStack(spacing: 10) {
-                    CodexStatusBadge(text: change.kind.displayText, color: fileColor(for: change.kind))
-                    Text(change.path)
-                        .font(.system(.subheadline, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(files, id: \.path) { change in
+                    HStack(spacing: 10) {
+                        AgentStatusChip(text: change.kind.displayText, color: fileColor(change.kind))
+                        Text(change.path)
+                            .font(.system(.subheadline, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
+            }
+
+            if let detailText = details.joined(separator: "\n\n").nonEmpty {
+                AgentDisclosureTextBlock(title: "Details", text: detailText)
             }
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private func fileColor(for kind: CodexRunSegment.ChangedFile.Kind) -> Color {
+    private func fileColor(_ kind: AgentRunSegment.ChangedFile.Kind) -> Color {
         switch kind {
         case .added:
             .green
@@ -356,78 +443,89 @@ private struct CodexFileChangeCard: View {
     }
 }
 
-private struct CodexTodoCard: View {
-    let segment: CodexRunSegment
+private struct AgentTodoBlock: View {
+    let segment: AgentRunSegment
 
     var body: some View {
-        CodexCardContainer(accentColor: .mint) {
-            CodexCardHeader(
-                title: segment.title,
-                subtitle: segment.subtitle,
-                iconName: "checklist",
-                accentColor: .mint
-            )
-
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(segment.todoItems.enumerated()), id: \.offset) { entry in
-                    let item = entry.element
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(item.isCompleted ? .green : .secondary)
-                        Text(item.text)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .strikethrough(item.isCompleted, color: .secondary)
-                    }
+        VStack(alignment: .leading, spacing: 10) {
+            Label(segment.title, systemImage: "checklist")
+                .font(.headline)
+            ForEach(Array(segment.todoItems.enumerated()), id: \.offset) { entry in
+                let item = entry.element
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(item.isCompleted ? .green : .secondary)
+                    Text(item.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .strikethrough(item.isCompleted, color: .secondary)
                 }
             }
-            .textSelection(.enabled)
         }
+        .textSelection(.enabled)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.mint.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
-private struct CodexFallbackTextCard: View {
-    let text: String
+private struct AgentAlertRow: View {
+    let segment: AgentRunSegment
 
     var body: some View {
-        Text(text)
-            .font(.system(.caption, design: .monospaced))
-            .textSelection(.enabled)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
-private struct CodexCardHeader: View {
-    let title: String
-    let subtitle: String?
-    let iconName: String
-    let accentColor: Color
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: iconName)
-                .foregroundStyle(accentColor)
-                .frame(width: 18, height: 18)
-                .padding(.top, 1)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Text(segment.title)
                     .font(.headline)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                Spacer()
+                if let status = segment.status {
+                    AgentStatusChip(text: status.displayText, color: .red)
                 }
             }
+
+            if let bodyText = segment.bodyText {
+                Text(bodyText)
+                    .font(.subheadline)
+                    .textSelection(.enabled)
+            }
+
+            if let detail = segment.detailText {
+                AgentDisclosureTextBlock(title: "Details", text: detail)
+            }
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
-private struct CodexStatusBadge: View {
+private struct AgentFallbackRow: View {
+    let segment: AgentRunSegment
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(segment.subtitle ?? segment.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if let bodyText = segment.bodyText {
+                Text(bodyText)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .foregroundStyle(.secondary)
+            }
+            if let detail = segment.detailText, detail != segment.bodyText {
+                AgentDisclosureTextBlock(title: "Raw event", text: detail)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct AgentStatusChip: View {
     let text: String
     let color: Color
 
@@ -441,7 +539,7 @@ private struct CodexStatusBadge: View {
     }
 }
 
-private struct CodexDisclosureTextBlock: View {
+private struct AgentDisclosureTextBlock: View {
     let title: String
     let text: String
 
@@ -465,12 +563,17 @@ private struct CodexDisclosureTextBlock: View {
     }
 }
 
-private struct CodexRichTextFlow: View {
+private struct AgentRichTextFlow: View {
     let text: String
     let usesSecondaryStyle: Bool
 
-    private var blocks: [CodexTextBlock] {
-        CodexTextBlock.parse(text: text)
+    init(text: String, usesSecondaryStyle: Bool = false) {
+        self.text = text
+        self.usesSecondaryStyle = usesSecondaryStyle
+    }
+
+    private var blocks: [AgentTextBlock] {
+        AgentTextBlock.parse(text: text)
     }
 
     var body: some View {
@@ -479,9 +582,9 @@ private struct CodexRichTextFlow: View {
                 let block = entry.element
                 switch block {
                 case .markdown(let markdown):
-                    CodexMarkdownText(markdown: markdown, usesSecondaryStyle: usesSecondaryStyle)
+                    AgentMarkdownText(markdown: markdown, usesSecondaryStyle: usesSecondaryStyle)
                 case .code(let language, let code):
-                    CodexCodeBlockDisclosure(language: language, code: code)
+                    AgentCodeBlockDisclosure(language: language, code: code)
                 }
             }
         }
@@ -489,7 +592,7 @@ private struct CodexRichTextFlow: View {
     }
 }
 
-private struct CodexMarkdownText: View {
+private struct AgentMarkdownText: View {
     let markdown: String
     let usesSecondaryStyle: Bool
 
@@ -511,7 +614,7 @@ private struct CodexMarkdownText: View {
     }
 }
 
-private struct CodexCodeBlockDisclosure: View {
+private struct AgentCodeBlockDisclosure: View {
     let language: String?
     let code: String
 
@@ -538,14 +641,14 @@ private struct CodexCodeBlockDisclosure: View {
     }
 }
 
-private enum CodexTextBlock: Equatable {
+private enum AgentTextBlock: Equatable {
     case markdown(String)
     case code(language: String?, code: String)
 
-    static func parse(text: String) -> [CodexTextBlock] {
+    static func parse(text: String) -> [AgentTextBlock] {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
         var remaining = normalized[...]
-        var blocks: [CodexTextBlock] = []
+        var blocks: [AgentTextBlock] = []
 
         while let start = remaining.range(of: "```") {
             let before = remaining[..<start.lowerBound]

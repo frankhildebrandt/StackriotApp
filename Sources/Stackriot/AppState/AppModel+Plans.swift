@@ -320,7 +320,7 @@ extension AppModel {
 
     func syncCodexPlanSessionID(forRunID runID: UUID) {
         guard let (worktreeID, _) = codexPlanDraftEntry(forRunID: runID),
-              let parser = codexExecOutputParsers[runID],
+              let parser = structuredOutputParsersByRunID[runID] as? CodexExecJSONLParser,
               let sessionID = parser.currentThreadID?.nonEmpty else {
             return
         }
@@ -348,7 +348,7 @@ extension AppModel {
         activeRunIDs.remove(draft.runID)
         delegatedAgentRunIDs.remove(draft.runID)
         runningProcesses.removeValue(forKey: draft.runID)
-        codexExecOutputParsers.removeValue(forKey: draft.runID)
+        structuredOutputParsersByRunID.removeValue(forKey: draft.runID)
         forceClosingTerminalRunIDs.remove(draft.runID)
         terminalSessions[draft.runID] = nil
         refreshRunningAgentWorktrees()

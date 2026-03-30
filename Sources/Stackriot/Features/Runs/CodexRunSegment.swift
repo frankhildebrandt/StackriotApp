@@ -1,12 +1,11 @@
 import Foundation
 
-struct CodexRunSegment: Identifiable, Equatable, Sendable {
+struct AgentRunSegment: Identifiable, Equatable, Sendable {
     enum Kind: String, Sendable {
         case agentMessage
         case reasoning
         case commandExecution
-        case mcpToolCall
-        case collabToolCall
+        case toolCall
         case fileChange
         case todoList
         case error
@@ -27,13 +26,13 @@ struct CodexRunSegment: Identifiable, Equatable, Sendable {
                 case "pending":
                     self = .pending
                     return
-                case "in_progress", "running", "started":
+                case "in_progress", "running", "started", "start":
                     self = .running
                     return
-                case "completed", "succeeded", "success":
+                case "completed", "complete", "succeeded", "success", "done", "finished":
                     self = .completed
                     return
-                case "failed", "error":
+                case "failed", "error", "errored":
                     self = .failed
                     return
                 case "cancelled", "canceled":
@@ -44,11 +43,16 @@ struct CodexRunSegment: Identifiable, Equatable, Sendable {
                 }
             }
 
-            switch eventType {
-            case "item.started":
+            let normalizedEvent = eventType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            switch normalizedEvent {
+            case let value where value.contains("start"):
                 self = .running
-            case "item.completed":
+            case let value where value.contains("complete") || value.contains("finish") || value.contains("result") || value.contains("success") || value.contains("stop"):
                 self = .completed
+            case let value where value.contains("fail") || value.contains("error"):
+                self = .failed
+            case let value where value.contains("cancel"):
+                self = .cancelled
             default:
                 self = .unknown
             }
@@ -83,15 +87,15 @@ struct CodexRunSegment: Identifiable, Equatable, Sendable {
 
             init(rawValue: String?) {
                 switch rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-                case "add", "added":
+                case "add", "added", "create", "created", "new":
                     self = .added
-                case "delete", "deleted":
+                case "delete", "deleted", "remove", "removed":
                     self = .deleted
                 case "rename", "renamed":
                     self = .renamed
                 case "copy", "copied":
                     self = .copied
-                case "update", "updated", "modify", "modified":
+                case "update", "updated", "modify", "modified", "edit", "edited":
                     self = .updated
                 default:
                     self = .unknown
@@ -126,6 +130,7 @@ struct CodexRunSegment: Identifiable, Equatable, Sendable {
     }
 
     let id: String
+    let sourceAgent: AIAgentTool
     var revision: Int
     var kind: Kind
     var title: String
@@ -133,13 +138,15 @@ struct CodexRunSegment: Identifiable, Equatable, Sendable {
     var bodyText: String?
     var status: Status?
     var exitCode: Int?
-    var aggregatedOutput: String?
     var detailText: String?
+    var aggregatedOutput: String?
     var fileChanges: [ChangedFile]
     var todoItems: [TodoItem]
+    var groupID: String?
 
     init(
         id: String,
+        sourceAgent: AIAgentTool,
         revision: Int = 1,
         kind: Kind,
         title: String,
@@ -147,12 +154,14 @@ struct CodexRunSegment: Identifiable, Equatable, Sendable {
         bodyText: String? = nil,
         status: Status? = nil,
         exitCode: Int? = nil,
-        aggregatedOutput: String? = nil,
         detailText: String? = nil,
+        aggregatedOutput: String? = nil,
         fileChanges: [ChangedFile] = [],
-        todoItems: [TodoItem] = []
+        todoItems: [TodoItem] = [],
+        groupID: String? = nil
     ) {
         self.id = id
+        self.sourceAgent = sourceAgent
         self.revision = revision
         self.kind = kind
         self.title = title
@@ -160,9 +169,10 @@ struct CodexRunSegment: Identifiable, Equatable, Sendable {
         self.bodyText = bodyText?.nonEmpty
         self.status = status
         self.exitCode = exitCode
-        self.aggregatedOutput = aggregatedOutput?.nonEmpty
         self.detailText = detailText?.nonEmpty
+        self.aggregatedOutput = aggregatedOutput?.nonEmpty
         self.fileChanges = fileChanges
         self.todoItems = todoItems
+        self.groupID = groupID?.nonEmpty
     }
 }
