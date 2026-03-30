@@ -501,7 +501,7 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             // copilot -p executes the task and exits cleanly; --allow-all-tools enables agentic execution
             "cd \(path.shellEscaped) && copilot -p \(prompt.shellEscaped) --allow-all-tools --output-format json"
         case .cursorCLI:
-            "cd \(path.shellEscaped) && cursor-agent --print --output-format json --trust --force \(prompt.shellEscaped)"
+            "cd \(path.shellEscaped) && cursor-agent --print --output-format stream-json --stream-partial-output --trust --force \(prompt.shellEscaped)"
         }
     }
 }
