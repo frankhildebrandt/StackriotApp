@@ -269,9 +269,7 @@ struct WorktreeActionBar: View {
     }
 
     private var installedAgents: [AIAgentTool] {
-        AIAgentTool.allCases.filter { tool in
-            tool != .none && appModel.availableAgents.contains(tool)
-        }
+        appModel.installedAgentTools()
     }
 
     private var availableDevTools: [SupportedDevTool] {

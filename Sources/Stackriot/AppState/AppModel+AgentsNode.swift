@@ -2,6 +2,12 @@ import Foundation
 import SwiftData
 
 extension AppModel {
+    func installedAgentTools() -> [AIAgentTool] {
+        AIAgentTool.allCases.filter { tool in
+            tool != .none && availableAgents.contains(tool)
+        }
+    }
+
     func availableRunConfigurations(for worktree: WorktreeRecord) -> [RunConfiguration] {
         services.runConfigurationDiscovery.discoverRunConfigurations(in: URL(fileURLWithPath: worktree.path))
     }
@@ -139,13 +145,94 @@ extension AppModel {
         availableAgents = await services.agentManager.checkAvailability()
     }
 
+    func launchFixWithAI(for run: RunRecord, using tool: AIAgentTool, in modelContext: ModelContext) {
+        guard run.isFixableBuildFailure,
+              let runConfigurationID = run.runConfigurationID?.nonEmpty,
+              let worktreeID = run.worktreeID,
+              let worktree = worktreeRecord(with: worktreeID),
+              let repository = worktree.repository
+        else {
+            pendingErrorMessage = "This failed run can no longer be fixed automatically."
+            return
+        }
+
+        let prompt = Self.fixWithAIPrompt(for: run)
+        guard let agentRun = launchAgent(tool, for: worktree, in: modelContext, initialPrompt: prompt) else {
+            return
+        }
+
+        pendingRunFixesByAgentRunID[agentRun.id] = RunFixRequest(
+            tool: tool,
+            sourceRunID: run.id,
+            runConfigurationID: runConfigurationID,
+            worktreeID: worktreeID,
+            runTitle: run.title
+        )
+        selectedWorktreeIDsByRepository[repository.id] = worktreeID
+    }
+
+    func completePendingRunFixIfNeeded(afterAgentRunID agentRunID: UUID, succeeded: Bool) {
+        guard let request = pendingRunFixesByAgentRunID.removeValue(forKey: agentRunID) else { return }
+        guard succeeded else { return }
+        guard let modelContext = storedModelContext else {
+            pendingErrorMessage = "The original run could not be retried because the model context is unavailable."
+            return
+        }
+        guard let worktree = worktreeRecord(with: request.worktreeID), let repository = worktree.repository else {
+            pendingErrorMessage = StackriotError.worktreeUnavailable.localizedDescription
+            return
+        }
+
+        let configurations = availableRunConfigurations(for: worktree)
+        guard let configuration = configurations.first(where: { $0.id == request.runConfigurationID }) else {
+            pendingErrorMessage = "The original run configuration \(request.runTitle) is no longer available for retry."
+            return
+        }
+
+        let availableTools = Set(availableDevTools(for: worktree))
+        guard let descriptor = services.runConfigurationDiscovery.makeExecutionDescriptor(
+            for: configuration,
+            worktree: worktree,
+            repositoryID: repository.id,
+            availableTools: availableTools
+        ) else {
+            pendingErrorMessage = StackriotError.runConfigurationUnavailable(configuration.name).localizedDescription
+            return
+        }
+
+        _ = startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+    }
+
+    nonisolated static func fixWithAIPrompt(for run: RunRecord) -> String {
+        let commandLine = run.commandLine.nonEmpty ?? run.title
+        let errorCode = run.exitCode.map(String.init) ?? "unbekannt"
+        let shellLog = run.outputText.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+            ?? "Keine Shell-Ausgabe verfuegbar."
+
+        return """
+        # Fehler beim Build
+        - Benutztes CMD: \(commandLine)
+        - Fehlercode: \(errorCode)
+
+        <ShellLog>
+        \(shellLog)
+        </ShellLog>
+
+        # Erwartetes Verhalten
+        - Loesung finden und beheben
+        - denselben Build / dieselbe Run Configuration erneut ausfuehren
+        - wenn das Problem weiter auftritt, weiter analysieren bis der Tool-Aufruf erfolgreich ist oder eine klare Blockade benannt werden kann
+        """
+    }
+
+    @discardableResult
     func launchAgent(
         _ tool: AIAgentTool,
         for worktree: WorktreeRecord,
         in modelContext: ModelContext,
         initialPrompt: String? = nil
-    ) {
-        guard tool != .none else { return }
+    ) -> RunRecord? {
+        guard tool != .none else { return nil }
 
         do {
             worktree.assignedAgent = tool
@@ -236,9 +323,9 @@ extension AppModel {
                 }
 
                 if let descriptor {
-                    startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+                    let run = startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
                     refreshRunningAgentWorktrees()
-                    return
+                    return run
                 }
             }
 
@@ -272,10 +359,12 @@ extension AppModel {
                 runtimeRequirement: nil,
                 stdinText: stdinText
             )
-            startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+            let run = startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
             refreshRunningAgentWorktrees()
+            return run
         } catch {
             pendingErrorMessage = error.localizedDescription
+            return nil
         }
     }
 

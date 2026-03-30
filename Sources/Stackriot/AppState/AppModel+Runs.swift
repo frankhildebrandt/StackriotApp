@@ -49,12 +49,13 @@ extension AppModel {
         terminalSessions[run.id]
     }
 
+    @discardableResult
     func startRun(
         _ descriptor: CommandExecutionDescriptor,
         repository: ManagedRepository,
         worktree: WorktreeRecord?,
         modelContext: ModelContext
-    ) {
+    ) -> RunRecord? {
         let commandLine = descriptor.displayCommandLine ?? ([descriptor.executable] + descriptor.arguments).joined(separator: " ")
         let run = RunRecord(
             actionKind: descriptor.actionKind,
@@ -63,6 +64,7 @@ extension AppModel {
             outputInterpreter: descriptor.outputInterpreter,
             status: .running,
             worktreeID: worktree?.id,
+            runConfigurationID: descriptor.runConfigurationID,
             repository: repository,
             worktree: worktree
         )
@@ -95,9 +97,11 @@ extension AppModel {
             Task { [weak self] in
                 await self?.launchRun(runID: runID, descriptor: descriptor)
             }
+            return run
         } catch {
             modelContext.delete(run)
             pendingErrorMessage = error.localizedDescription
+            return nil
         }
     }
 
@@ -116,6 +120,7 @@ extension AppModel {
             outputInterpreter: descriptor.outputInterpreter,
             status: .running,
             worktreeID: worktree?.id,
+            runConfigurationID: descriptor.runConfigurationID,
             repository: repository,
             worktree: worktree
         )
@@ -210,6 +215,7 @@ extension AppModel {
         if run.actionKind == .aiAgent {
             summarizeAgentRun(runID: runID)
         }
+        completePendingRunFixIfNeeded(afterAgentRunID: runID, succeeded: !wasCancelled && exitCode == 0)
         if forceClosingTerminalRunIDs.remove(runID) != nil {
             terminalSessions[runID] = nil
         }
@@ -251,6 +257,7 @@ extension AppModel {
         if run.actionKind == .aiAgent {
             summarizeAgentRun(runID: runID)
         }
+        completePendingRunFixIfNeeded(afterAgentRunID: runID, succeeded: false)
         if forceClosingTerminalRunIDs.remove(runID) != nil {
             terminalSessions[runID] = nil
         }
@@ -259,9 +266,8 @@ extension AppModel {
     func scheduleAutoHideIfNeeded(for runID: UUID) {
         cancelAutoHide(for: runID)
         guard let run = runRecord(with: runID) else { return }
-        guard run.actionKind != .aiAgent else { return }
-
         let mode = AppPreferences.terminalTabRetentionMode
+        guard shouldAutoHideCompletedRun(run, retentionMode: mode) else { return }
         switch mode {
         case .manualClose:
             return
@@ -278,6 +284,22 @@ extension AppModel {
             }
             terminalTabAutoHideTasks[runID] = task
         }
+    }
+
+    func shouldAutoHideCompletedRun(
+        _ run: RunRecord,
+        retentionMode: TerminalTabRetentionMode = AppPreferences.terminalTabRetentionMode
+    ) -> Bool {
+        switch retentionMode {
+        case .manualClose:
+            false
+        case .runningOnly, .shortRetain:
+            !shouldKeepCompletedRunVisible(run)
+        }
+    }
+
+    func shouldKeepCompletedRunVisible(_ run: RunRecord) -> Bool {
+        run.actionKind == .aiAgent || run.isFixableBuildFailure
     }
 
     func cancelAutoHide(for runID: UUID) {

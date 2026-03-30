@@ -16,6 +16,7 @@ final class RunRecord {
     var aiSummaryText: String?
     var statusRawValue: String
     var worktreeID: UUID?
+    var runConfigurationID: String?
     var repository: ManagedRepository?
     var worktree: WorktreeRecord?
     @Transient var isTransientPlanRun = false
@@ -34,6 +35,7 @@ final class RunRecord {
         aiSummaryText: String? = nil,
         status: RunStatusKind = .pending,
         worktreeID: UUID? = nil,
+        runConfigurationID: String? = nil,
         repository: ManagedRepository? = nil,
         worktree: WorktreeRecord? = nil
     ) {
@@ -50,6 +52,7 @@ final class RunRecord {
         self.aiSummaryText = aiSummaryText
         self.statusRawValue = status.rawValue
         self.worktreeID = worktreeID ?? worktree?.id
+        self.runConfigurationID = runConfigurationID
         self.repository = repository
         self.worktree = worktree
     }
@@ -67,5 +70,9 @@ final class RunRecord {
     var outputInterpreter: RunOutputInterpreterKind? {
         get { outputInterpreterRawValue.flatMap(RunOutputInterpreterKind.init(rawValue:)) }
         set { outputInterpreterRawValue = newValue?.rawValue }
+    }
+
+    var isFixableBuildFailure: Bool {
+        status == .failed && runConfigurationID?.nonEmpty != nil && worktreeID != nil
     }
 }

@@ -109,6 +109,7 @@ final class RunConfigurationDiscoveryService {
         return CommandExecutionDescriptor(
             title: configuration.name,
             actionKind: actionKind,
+            runConfigurationID: configuration.id,
             executable: command,
             arguments: configuration.arguments,
             displayCommandLine: configuration.displayCommandLine,

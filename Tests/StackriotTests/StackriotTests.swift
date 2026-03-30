@@ -1620,13 +1620,164 @@ struct StackriotTests {
 
         let appModel = AppModel()
         appModel.storedModelContext = modelContext
-        appModel.terminalTabs.activate(runID: run.id, worktreeID: worktree.id)
-        appModel.activeRunIDs.insert(run.id)
-
         appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
 
-        let tabState = appModel.tabState(for: run)
-        #expect(tabState?.isVisible == true)
+        #expect(!appModel.shouldAutoHideCompletedRun(run, retentionMode: .runningOnly))
+    }
+
+    @MainActor
+    @Test
+    func failedFixableRunsStayVisibleEvenInRunningOnlyMode() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let repository = makeRepository(name: "FixableFailure")
+        let worktree = WorktreeRecord(branchName: "bug/keep-visible", path: "/tmp/fixable-failure", repository: repository)
+        let run = RunRecord(
+            actionKind: .runConfiguration,
+            title: "App Build",
+            commandLine: "xcodebuild -scheme App build",
+            outputText: "$ xcodebuild -scheme App build\nCompile failed\n",
+            status: .running,
+            worktreeID: worktree.id,
+            runConfigurationID: "xcode-App",
+            repository: repository,
+            worktree: worktree
+        )
+        repository.worktrees = [worktree]
+        repository.runs = [run]
+        modelContext.insert(repository)
+        modelContext.insert(worktree)
+        modelContext.insert(run)
+        try modelContext.save()
+
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+        appModel.handleRunTermination(runID: run.id, exitCode: 1, wasCancelled: false)
+
+        #expect(run.isFixableBuildFailure)
+        #expect(!appModel.shouldAutoHideCompletedRun(run, retentionMode: .runningOnly))
+    }
+
+    @MainActor
+    @Test
+    func failedNonFixableRunsStillAutoHideInRunningOnlyMode() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let repository = makeRepository(name: "NonFixableFailure")
+        let worktree = WorktreeRecord(branchName: "bug/hide-me", path: "/tmp/non-fixable-failure", repository: repository)
+        let run = RunRecord(
+            actionKind: .makeTarget,
+            title: "make test",
+            commandLine: "make test",
+            outputText: "$ make test\nfail\n",
+            status: .running,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        repository.worktrees = [worktree]
+        repository.runs = [run]
+        modelContext.insert(repository)
+        modelContext.insert(worktree)
+        modelContext.insert(run)
+        try modelContext.save()
+
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+        appModel.handleRunTermination(runID: run.id, exitCode: 2, wasCancelled: false)
+
+        #expect(appModel.shouldAutoHideCompletedRun(run, retentionMode: .runningOnly))
+    }
+
+    @Test
+    func fixWithAIPromptIncludesErrorContext() {
+        let run = RunRecord(
+            actionKind: .runConfiguration,
+            title: "App Build",
+            commandLine: "xcodebuild -scheme App build",
+            exitCode: 65,
+            outputText: "$ xcodebuild -scheme App build\nCompile failed\n",
+            status: .failed,
+            worktreeID: UUID(),
+            runConfigurationID: "xcode-App"
+        )
+
+        let prompt = AppModel.fixWithAIPrompt(for: run)
+
+        #expect(prompt.contains("# Fehler beim Build"))
+        #expect(prompt.contains("Benutztes CMD: xcodebuild -scheme App build"))
+        #expect(prompt.contains("Fehlercode: 65"))
+        #expect(prompt.contains("<ShellLog>"))
+        #expect(prompt.contains("Compile failed"))
+    }
+
+    @Test
+    func fixWithAIPromptFallsBackWhenExitCodeAndLogAreMissing() {
+        let run = RunRecord(
+            actionKind: .runConfiguration,
+            title: "App Build",
+            commandLine: "",
+            outputText: "",
+            status: .failed,
+            worktreeID: UUID(),
+            runConfigurationID: "xcode-App"
+        )
+
+        let prompt = AppModel.fixWithAIPrompt(for: run)
+
+        #expect(prompt.contains("Benutztes CMD: App Build"))
+        #expect(prompt.contains("Fehlercode: unbekannt"))
+        #expect(prompt.contains("Keine Shell-Ausgabe verfuegbar."))
+    }
+
+    @MainActor
+    @Test
+    func successfulFixAgentRetriesOriginalRunConfiguration() async throws {
+        let root = try temporaryDirectory(named: "run-fix-retry")
+        try """
+        build:
+        \t@true
+        """.write(to: root.appendingPathComponent("Makefile"), atomically: true, encoding: .utf8)
+
+        let modelContext = try makeInMemoryModelContext()
+        let repository = makeRepository(name: "RetryBuild")
+        let worktree = WorktreeRecord(branchName: "bug/retry-build", path: root.path, repository: repository)
+        let failedRun = RunRecord(
+            actionKind: .makeTarget,
+            title: "build",
+            commandLine: "make build",
+            exitCode: 2,
+            outputText: "$ make build\nfail\n",
+            status: .failed,
+            worktreeID: worktree.id,
+            runConfigurationID: "native-make-build",
+            repository: repository,
+            worktree: worktree
+        )
+        repository.worktrees = [worktree]
+        repository.runs = [failedRun]
+        modelContext.insert(repository)
+        modelContext.insert(worktree)
+        modelContext.insert(failedRun)
+        try modelContext.save()
+
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+        appModel.pendingRunFixesByAgentRunID[UUID()] = RunFixRequest(
+            tool: .codex,
+            sourceRunID: failedRun.id,
+            runConfigurationID: "native-make-build",
+            worktreeID: worktree.id,
+            runTitle: failedRun.title
+        )
+
+        let agentRunID = try #require(appModel.pendingRunFixesByAgentRunID.keys.first)
+        appModel.completePendingRunFixIfNeeded(afterAgentRunID: agentRunID, succeeded: true)
+
+        #expect(repository.runs.count == 2)
+        let retriedRun = try #require(repository.runs.first(where: { $0.id != failedRun.id }))
+        #expect(retriedRun.runConfigurationID == "native-make-build")
+        #expect(retriedRun.commandLine == "make build")
+
+        #expect(appModel.activeRunIDs.contains(retriedRun.id) || retriedRun.status == .succeeded)
     }
 
     @MainActor
