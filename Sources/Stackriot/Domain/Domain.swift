@@ -617,6 +617,7 @@ struct CommandExecutionDescriptor: Sendable {
     let title: String
     let actionKind: ActionKind
     let showsAgentIndicator: Bool
+    let runConfigurationID: String?
     let executable: String
     let arguments: [String]
     let displayCommandLine: String?
@@ -633,6 +634,7 @@ struct CommandExecutionDescriptor: Sendable {
         title: String,
         actionKind: ActionKind,
         showsAgentIndicator: Bool = false,
+        runConfigurationID: String? = nil,
         executable: String,
         arguments: [String],
         displayCommandLine: String? = nil,
@@ -648,6 +650,7 @@ struct CommandExecutionDescriptor: Sendable {
         self.title = title
         self.actionKind = actionKind
         self.showsAgentIndicator = showsAgentIndicator
+        self.runConfigurationID = runConfigurationID
         self.executable = executable
         self.arguments = arguments
         self.displayCommandLine = displayCommandLine

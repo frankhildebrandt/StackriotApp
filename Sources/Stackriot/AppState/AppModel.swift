@@ -48,6 +48,7 @@ final class AppModel: @unchecked Sendable {
     var summarizingRunIDs: Set<UUID> = []
     var dismissedAISummaryRunIDs: Set<UUID> = []
     var agentPlanDraftsByWorktreeID: [UUID: AgentPlanDraft] = [:]
+    var pendingRunFixesByAgentRunID: [UUID: RunFixRequest] = [:]
     var activeAgentPlanDraftWorktreeID: UUID?
     var planContentVersionsByWorktreeID: [UUID: Int] = [:]
 

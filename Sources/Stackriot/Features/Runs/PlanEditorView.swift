@@ -115,7 +115,7 @@ struct PlanEditorView: View {
     }
 
     private var availableAgents: [AIAgentTool] {
-        AIAgentTool.allCases.filter { $0 != .none && appModel.availableAgents.contains($0) }
+        appModel.installedAgentTools()
     }
 
     private var availablePlanningAgents: [AIAgentTool] {

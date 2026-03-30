@@ -112,6 +112,14 @@ struct AgentPlanDraft: Identifiable {
     var runID: UUID { run.id }
 }
 
+struct RunFixRequest {
+    let tool: AIAgentTool
+    let sourceRunID: UUID
+    let runConfigurationID: String
+    let worktreeID: UUID
+    let runTitle: String
+}
+
 extension String {
     var nilIfBlank: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)

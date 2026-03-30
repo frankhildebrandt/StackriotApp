@@ -15,13 +15,19 @@ struct RunConsoleView: View {
                     VStack(alignment: .leading, spacing: 6) {
                     }
                     Spacer()
-                    if activeRunIDs.contains(run.id), appModel.terminalSession(for: run) == nil {
-                        Button("Cancel", role: .destructive) {
-                            appModel.cancelRun(run, in: modelContext)
+                    HStack(spacing: 8) {
+                        if run.isFixableBuildFailure {
+                            fixWithAIMenu(for: run)
                         }
-                    } else {
-                        Button("Close", role: activeRunIDs.contains(run.id) ? .destructive : nil) {
-                            appModel.requestCloseTab(run, in: modelContext)
+
+                        if activeRunIDs.contains(run.id), appModel.terminalSession(for: run) == nil {
+                            Button("Cancel", role: .destructive) {
+                                appModel.cancelRun(run, in: modelContext)
+                            }
+                        } else {
+                            Button("Close", role: activeRunIDs.contains(run.id) ? .destructive : nil) {
+                                appModel.requestCloseTab(run, in: modelContext)
+                            }
                         }
                     }
                 }
@@ -68,5 +74,23 @@ struct RunConsoleView: View {
         .padding(.horizontal, 12)
         .padding(.top, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func fixWithAIMenu(for run: RunRecord) -> some View {
+        let installedAgents = appModel.installedAgentTools()
+        return Menu {
+            if installedAgents.isEmpty {
+                Text("No agents installed")
+            } else {
+                ForEach(installedAgents) { tool in
+                    Button("Fix with \(tool.displayName)") {
+                        appModel.launchFixWithAI(for: run, using: tool, in: modelContext)
+                    }
+                }
+            }
+        } label: {
+            Label("Fix with AI", systemImage: "sparkles")
+        }
+        .disabled(installedAgents.isEmpty)
     }
 }
