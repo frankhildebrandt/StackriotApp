@@ -56,34 +56,43 @@ cleanup() {
 }
 trap cleanup EXIT
 
-osascript - "$APP_NAME" "$BACKGROUND_NAME" <<'APPLESCRIPT'
+osascript - "$APP_NAME" "$BACKGROUND_NAME" <<'APPLESCRIPT' || true
 on run argv
   set appName to item 1 of argv
   set backgroundName to item 2 of argv
 
   tell application "Finder"
     tell disk appName
-    open
-    set current view of container window to icon view
-    set toolbar visible of container window to false
-    set statusbar visible of container window to false
-    set bounds of container window to {120, 120, 1020, 660}
+      open
+      delay 1
+      set current view of container window to icon view
+      set toolbar visible of container window to false
+      set statusbar visible of container window to false
+      set bounds of container window to {120, 120, 1020, 660}
 
-    set icon view options of container window to the icon view options of container window
-    set arrangement of the icon view options of container window to not arranged
-    set icon size of the icon view options of container window to 128
-    set text size of the icon view options of container window to 14
-    set background picture of the icon view options of container window to file ".background:" & backgroundName
+      set theIconViewOptions to the icon view options of container window
+      set arrangement of theIconViewOptions to not arranged
+      set icon size of theIconViewOptions to 128
+      set text size of theIconViewOptions to 14
+      try
+        set background picture of theIconViewOptions to file ".background:" & backgroundName
+      end try
 
-    set position of item appName & ".app" of container window to {190, 250}
-    set position of item "Applications" of container window to {560, 250}
-    set position of item "README.md" of container window to {190, 430}
+      try
+        set position of item (appName & ".app") of container window to {190, 250}
+      end try
+      try
+        set position of item "Applications" of container window to {560, 250}
+      end try
+      try
+        set position of item "README.md" of container window to {190, 430}
+      end try
 
-    close
-    open
-    update without registering applications
-    delay 2
-  end tell
+      close
+      open
+      update without registering applications
+      delay 2
+    end tell
   end tell
 end run
 APPLESCRIPT
