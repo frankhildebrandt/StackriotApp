@@ -151,6 +151,9 @@ extension AppModel {
         if let parser = codexExecOutputParsers[runID] {
             run.outputText += chunk
             applyCodexParsedChunk(parser.consume(chunk), to: runID)
+            if run.isTransientPlanRun {
+                syncCodexPlanSessionID(forRunID: runID)
+            }
         } else {
             run.outputText += chunk
         }
@@ -174,6 +177,9 @@ extension AppModel {
     func handleRunTermination(runID: UUID, exitCode: Int32, wasCancelled: Bool) {
         guard let run = runRecord(with: runID), let modelContext = storedModelContext else { return }
         flushBufferedRunOutputIfNeeded(runID: runID)
+        if run.isTransientPlanRun {
+            syncCodexPlanSessionID(forRunID: runID)
+        }
         run.endedAt = .now
         run.exitCode = Int(exitCode)
         run.status = wasCancelled ? .cancelled : (exitCode == 0 ? .succeeded : .failed)
@@ -216,6 +222,9 @@ extension AppModel {
         if let parser = codexExecOutputParsers[runID] {
             run.outputText += renderedMessage
             applyCodexParsedChunk(parser.consume(renderedMessage), to: runID)
+            if run.isTransientPlanRun {
+                syncCodexPlanSessionID(forRunID: runID)
+            }
         } else {
             run.outputText += renderedMessage
         }

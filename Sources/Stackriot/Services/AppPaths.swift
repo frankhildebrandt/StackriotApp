@@ -49,8 +49,16 @@ enum AppPaths {
         applicationSupportDirectory.appendingPathComponent("Plans", isDirectory: true)
     }
 
+    static var codexPlanArtifactsDirectory: URL {
+        plansDirectory.appendingPathComponent("Codex", isDirectory: true)
+    }
+
     static func planFile(for worktreeID: UUID) -> URL {
         plansDirectory.appendingPathComponent("\(worktreeID.uuidString).md", isDirectory: false)
+    }
+
+    static func codexPlanArtifactsDirectory(for worktreeID: UUID) -> URL {
+        codexPlanArtifactsDirectory.appendingPathComponent(worktreeID.uuidString, isDirectory: true)
     }
 
     static func ensureBaseDirectories() throws {
@@ -66,6 +74,7 @@ enum AppPaths {
         try fileManager.createDirectory(at: bareRepositoriesRoot, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: worktreesRoot, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: plansDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: codexPlanArtifactsDirectory, withIntermediateDirectories: true)
     }
 
     static func suggestedRepositoryName(from remoteURL: URL) -> String {

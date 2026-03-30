@@ -1970,6 +1970,28 @@ struct StackriotTests {
         """)
     }
 
+    @Test
+    func codexPlanResponseParserDecodesStructuredQuestions() {
+        let response = AppModel.parseCodexPlanResponse(from: """
+        {
+          "status": "needs_user_input",
+          "summary": "Need product clarification before planning.",
+          "questions": [
+            "Should the generated plan replace the current draft immediately?",
+            "Do you want implementation details or only milestones?"
+          ]
+        }
+        """)
+
+        #expect(response?.status == .needsUserInput)
+        #expect(response?.summary == "Need product clarification before planning.")
+        #expect(response?.questions == [
+            "Should the generated plan replace the current draft immediately?",
+            "Do you want implementation details or only milestones?",
+        ])
+        #expect(response?.planMarkdown == nil)
+    }
+
     @MainActor
     @Test
     func codexPlanImportReplacesPersistedPlanWithExtractedMarkdown() throws {
@@ -2026,6 +2048,65 @@ struct StackriotTests {
         #expect(appModel.planContentVersion(for: worktree.id) == 1)
         #expect(appModel.codexPlanDraft(for: worktree.id) == nil)
         #expect(appModel.activeCodexPlanDraftWorktreeID == nil)
+    }
+
+    @MainActor
+    @Test
+    func codexPlanImportPrefersStructuredResponseFile() throws {
+        let defaults = try makeUserDefaultsSuite()
+        let appModel = AppModel(userDefaults: defaults)
+        let repository = makeRepository(name: "CodexPlanStructuredImport")
+        let worktree = WorktreeRecord(
+            branchName: "feature/structured-plan",
+            issueContext: "Create the feature plan",
+            path: "/tmp/codex-plan-structured-import",
+            repository: repository
+        )
+        repository.worktrees = [worktree]
+        try appModel.writePlan("Original plan", for: worktree.id)
+        let responseURL = URL(fileURLWithPath: "/tmp/codex-plan-response-\(UUID().uuidString).json")
+        try """
+        {
+          "status": "ready",
+          "summary": "Plan is ready.",
+          "plan_markdown": "# Structured Plan\\n- Inspect flow\\n- Replace plan page"
+        }
+        """.write(to: responseURL, atomically: true, encoding: .utf8)
+        defer {
+            try? FileManager.default.removeItem(at: AppPaths.planFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: responseURL)
+        }
+
+        let run = RunRecord(
+            actionKind: .aiAgent,
+            title: "Codex Plan",
+            commandLine: "codex exec --json",
+            outputText: "Noise only\n",
+            status: .succeeded,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        run.isTransientPlanRun = true
+        appModel.codexPlanDraftsByWorktreeID[worktree.id] = CodexPlanDraft(
+            worktreeID: worktree.id,
+            repositoryID: repository.id,
+            branchName: worktree.branchName,
+            issueContext: worktree.issueContext ?? "",
+            run: run,
+            responseFilePath: responseURL.path
+        )
+        appModel.activeCodexPlanDraftWorktreeID = worktree.id
+
+        appModel.importCompletedCodexPlanIfAvailable(forRunID: run.id)
+
+        let importedPlan = try String(contentsOf: AppPaths.planFile(for: worktree.id), encoding: .utf8)
+        #expect(importedPlan == """
+        # Structured Plan
+        - Inspect flow
+        - Replace plan page
+        """)
+        #expect(appModel.codexPlanDraft(for: worktree.id) == nil)
     }
 
     @MainActor

@@ -12,6 +12,10 @@ final class CodexExecJSONLParser {
     private var nextTransientSegmentIndex = 0
     private var segmentRevisions: [String: Int] = [:]
 
+    var currentThreadID: String? {
+        threadID
+    }
+
     func consume(_ chunk: String) -> CodexExecParsedChunk {
         bufferedLine += chunk
 
