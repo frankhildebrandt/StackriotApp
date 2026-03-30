@@ -52,10 +52,8 @@ struct CodexPlanDraftSheet: View {
 
     @ViewBuilder
     private func transcript(for draft: CodexPlanDraft) -> some View {
-        if let session = appModel.terminalSession(for: draft.run) {
-            TerminalSessionView(session: session)
-                .id(session.runID)
-                .background(.black.opacity(0.92))
+        if draft.run.outputInterpreter == .codexExecJSONL {
+            CodexRunFeedView(run: draft.run)
         } else {
             TextEditor(text: .constant(draft.run.outputText))
                 .font(.system(.body, design: .monospaced))
@@ -71,6 +69,22 @@ struct CodexPlanDraftSheet: View {
             Text(statusMessage(for: draft))
                 .font(.caption)
                 .foregroundStyle(statusColor(for: draft))
+
+            if let summary = draft.latestSummary?.nonEmpty {
+                Text(summary)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+            }
+
+            if !draft.latestQuestions.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(draft.latestQuestions.enumerated()), id: \.offset) { index, question in
+                        Text("\(index + 1). \(question)")
+                            .font(.subheadline)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
 
             HStack(alignment: .bottom, spacing: 12) {
                 TextField("Reply to Codex…", text: $replyText, axis: .vertical)
@@ -92,15 +106,17 @@ struct CodexPlanDraftSheet: View {
     }
 
     private func canSendReply(for draft: CodexPlanDraft) -> Bool {
-        appModel.activeRunIDs.contains(draft.runID) && appModel.terminalSession(for: draft.run) != nil
+        !appModel.activeRunIDs.contains(draft.runID)
+            && draft.sessionID?.isEmpty == false
+            && !draft.latestQuestions.isEmpty
     }
 
     private func activeButtonTitle(for draft: CodexPlanDraft) -> String {
-        canSendReply(for: draft) ? "Cancel" : "Close"
+        appModel.activeRunIDs.contains(draft.runID) ? "Cancel" : "Close"
     }
 
     private func activeButtonRole(for draft: CodexPlanDraft) -> ButtonRole? {
-        canSendReply(for: draft) ? .destructive : nil
+        appModel.activeRunIDs.contains(draft.runID) ? .destructive : nil
     }
 
     private func statusMessage(for draft: CodexPlanDraft) -> String {
@@ -110,10 +126,13 @@ struct CodexPlanDraftSheet: View {
         if draft.didImportPlan {
             return "The proposed plan was imported. The sheet will close automatically."
         }
-        if canSendReply(for: draft) {
-            return "Answer follow-up questions here. Once Codex emits a complete <proposed_plan> block, the worktree plan file is replaced automatically."
+        if appModel.activeRunIDs.contains(draft.runID) {
+            return "Codex is inspecting the worktree and preparing the next planning response."
         }
-        return "No complete <proposed_plan> block was imported. You can close this draft and start a new Codex planning run."
+        if canSendReply(for: draft) {
+            return "Answer the follow-up questions here. After your reply, Stackriot resumes the same Codex session and replaces the worktree plan as soon as Codex returns a final plan."
+        }
+        return "No final plan was imported. You can close this draft and start a new Codex planning run."
     }
 
     private func statusColor(for draft: CodexPlanDraft) -> Color {
