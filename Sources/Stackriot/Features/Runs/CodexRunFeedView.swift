@@ -30,27 +30,32 @@ struct AgentRunFeedView: View {
 
     @State private var selectedMode: AgentRunContentMode = .feed
 
-    private var isCursorStreamInterpreter: Bool {
-        run.outputInterpreter == .cursorAgentPrintJSON
+    private var usesAssistantDrawer: Bool {
+        switch run.outputInterpreter {
+        case .cursorAgentPrintJSON, .copilotPromptJSONL:
+            true
+        default:
+            false
+        }
     }
 
     private var segments: [AgentRunSegment] {
         appModel.structuredSegments(for: run)
     }
 
-    /// Cursor `stream-json` assistant output is only shown in `cursorAssistantDrawer`, not in the main feed.
+    /// Cursor and Copilot streaming JSONL keep the final assistant reply in a dedicated drawer.
     private var feedSegments: [AgentRunSegment] {
-        guard isCursorStreamInterpreter else { return segments }
+        guard usesAssistantDrawer else { return segments }
         return segments.filter { $0.kind != .agentMessage }
     }
 
-    private var cursorAssistantSegments: [AgentRunSegment] {
-        guard isCursorStreamInterpreter else { return [] }
+    private var assistantSegments: [AgentRunSegment] {
+        guard usesAssistantDrawer else { return [] }
         return segments.filter { $0.kind == .agentMessage }
     }
 
-    private var cursorAssistantText: String {
-        cursorAssistantSegments
+    private var assistantDrawerText: String {
+        assistantSegments
             .map { $0.bodyText ?? "" }
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .joined(separator: "\n\n")
@@ -64,8 +69,8 @@ struct AgentRunFeedView: View {
         "agent-run-feed-bottom-\(run.id.uuidString)"
     }
 
-    private var cursorAssistantBottomID: String {
-        "agent-run-cursor-assistant-bottom-\(run.id.uuidString)"
+    private var assistantDrawerBottomID: String {
+        "agent-run-assistant-bottom-\(run.id.uuidString)"
     }
 
     private var scrollTrigger: AgentFeedScrollTrigger {
@@ -77,7 +82,18 @@ struct AgentRunFeedView: View {
     }
 
     private var showFeedEmptyPlaceholder: Bool {
-        rows.isEmpty && (!isCursorStreamInterpreter || cursorAssistantText.isEmpty)
+        rows.isEmpty && (!usesAssistantDrawer || assistantDrawerText.isEmpty)
+    }
+
+    private var rawLogRemovedEventTypes: Set<String> {
+        switch run.outputInterpreter {
+        case .cursorAgentPrintJSON:
+            ["assistant"]
+        case .copilotPromptJSONL:
+            ["assistant.message", "assistant.message_delta"]
+        default:
+            []
+        }
     }
 
     var body: some View {
@@ -112,10 +128,10 @@ struct AgentRunFeedView: View {
 
     private var feedView: some View {
         Group {
-            if isCursorStreamInterpreter {
+            if usesAssistantDrawer {
                 VSplitView {
                     feedScrollCard
-                    cursorAssistantDrawer
+                    assistantOutputDrawer
                 }
                 .frame(maxHeight: .infinity)
             } else {
@@ -173,10 +189,10 @@ struct AgentRunFeedView: View {
             .foregroundStyle(.white)
     }
 
-    /// Full JSONL is stored on the run; for Cursor we hide `assistant` lines here so the reply stays only in the drawer.
+    /// Full JSONL is stored on the run; streaming assistant message events stay in the drawer instead of duplicating in raw-log view.
     private var rawLogDisplayText: String {
-        guard isCursorStreamInterpreter else { return run.outputText }
-        return Self.jsonLRemovingEventTypes(run.outputText, removedTypes: ["assistant"])
+        guard !rawLogRemovedEventTypes.isEmpty else { return run.outputText }
+        return Self.jsonLRemovingEventTypes(run.outputText, removedTypes: rawLogRemovedEventTypes)
     }
 
     private static func jsonLRemovingEventTypes(_ text: String, removedTypes: Set<String>) -> String {
@@ -203,7 +219,7 @@ struct AgentRunFeedView: View {
         }
     }
 
-    private var cursorAssistantDrawer: some View {
+    private var assistantOutputDrawer: some View {
         ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 8) {
                 Label("Antwort", systemImage: "bubble.left.and.bubble.right")
@@ -211,20 +227,20 @@ struct AgentRunFeedView: View {
                     .foregroundStyle(.secondary)
                 ScrollView {
                     Group {
-                        if cursorAssistantText.isEmpty {
+                        if assistantDrawerText.isEmpty {
                             Text("Warte auf Antwort…")
                                 .font(.subheadline)
                                 .foregroundStyle(.tertiary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else {
-                            AgentRichTextFlow(text: cursorAssistantText)
+                            AgentRichTextFlow(text: assistantDrawerText)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     Color.clear
                         .frame(height: 1)
-                        .id(cursorAssistantBottomID)
+                        .id(assistantDrawerBottomID)
                 }
                 .frame(minHeight: 120)
             }
@@ -235,7 +251,7 @@ struct AgentRunFeedView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(Color.accentColor.opacity(0.12), lineWidth: 1)
             )
-            .onChange(of: cursorAssistantText.count) { _, _ in
+            .onChange(of: assistantDrawerText.count) { _, _ in
                 scrollAssistantDrawerToBottom(using: proxy)
             }
             .onAppear {
@@ -247,7 +263,7 @@ struct AgentRunFeedView: View {
     private func scrollAssistantDrawerToBottom(using proxy: ScrollViewProxy) {
         DispatchQueue.main.async {
             withAnimation(.easeOut(duration: 0.12)) {
-                proxy.scrollTo(cursorAssistantBottomID, anchor: .bottom)
+                proxy.scrollTo(assistantDrawerBottomID, anchor: .bottom)
             }
         }
     }
@@ -255,12 +271,23 @@ struct AgentRunFeedView: View {
 
 enum AgentRunFeedRow: Identifiable, Equatable {
     case segment(AgentRunSegment)
+    case turnGroup(
+        id: String,
+        sourceAgent: AIAgentTool,
+        title: String,
+        subtitle: String?,
+        status: AgentRunSegment.Status?,
+        summary: String?,
+        segments: [AgentRunSegment]
+    )
     case changedFiles(id: String, sourceAgent: AIAgentTool, status: AgentRunSegment.Status?, files: [AgentRunSegment.ChangedFile], details: [String])
 
     var id: String {
         switch self {
         case .segment(let segment):
             segment.id
+        case .turnGroup(let id, _, _, _, _, _, _):
+            id
         case .changedFiles(let id, _, _, _, _):
             id
         }
@@ -274,6 +301,38 @@ enum AgentRunFeedLayout {
 
         while index < segments.count {
             let segment = segments[index]
+            if let groupID = groupableTurnGroupID(for: segment) {
+                let sourceAgent = segment.sourceAgent
+                var groupedSegments = [segment]
+                index += 1
+
+                while index < segments.count {
+                    let candidate = segments[index]
+                    guard candidate.sourceAgent == sourceAgent, candidate.groupID == groupID, candidate.kind != .fileChange else {
+                        break
+                    }
+                    groupedSegments.append(candidate)
+                    index += 1
+                }
+
+                if groupedSegments.count == 1 {
+                    rows.append(.segment(groupedSegments[0]))
+                } else {
+                    rows.append(
+                        .turnGroup(
+                            id: "turn-group-\(groupID)",
+                            sourceAgent: sourceAgent,
+                            title: turnGroupTitle(from: groupedSegments),
+                            subtitle: turnGroupSubtitle(from: groupedSegments),
+                            status: turnGroupStatus(from: groupedSegments),
+                            summary: turnGroupSummary(from: groupedSegments),
+                            segments: groupedSegments
+                        )
+                    )
+                }
+                continue
+            }
+
             if segment.kind == .fileChange {
                 var files = segment.fileChanges
                 var details = [segment.detailText].compactMap(\.self)
@@ -320,6 +379,58 @@ enum AgentRunFeedLayout {
         }
         return result.reversed()
     }
+
+    private static func groupableTurnGroupID(for segment: AgentRunSegment) -> String? {
+        guard
+            segment.sourceAgent == .githubCopilot,
+            segment.kind != .fileChange,
+            let groupID = segment.groupID
+        else {
+            return nil
+        }
+        return groupID
+    }
+
+    private static func turnGroupTitle(from segments: [AgentRunSegment]) -> String {
+        if let intentTitle = segments.reversed().first(where: \.isIntentSegment)?.title {
+            return intentTitle
+        }
+        if let turnTitle = segments.first(where: \.isTurnLifecycleSegment)?.title {
+            return turnTitle
+        }
+        return segments.last?.title ?? "Turn"
+    }
+
+    private static func turnGroupSubtitle(from segments: [AgentRunSegment]) -> String? {
+        segments.reversed().compactMap(\.subtitle).first
+    }
+
+    private static func turnGroupStatus(from segments: [AgentRunSegment]) -> AgentRunSegment.Status? {
+        if segments.contains(where: { $0.status == .failed }) {
+            return .failed
+        }
+        if segments.contains(where: { $0.status == .running }) {
+            return .running
+        }
+        if segments.contains(where: { $0.status == .pending }) {
+            return .pending
+        }
+        return segments.reversed().compactMap(\.status).first
+    }
+
+    private static func turnGroupSummary(from segments: [AgentRunSegment]) -> String? {
+        let actionableSegments = segments.filter { !$0.isTurnLifecycleSegment }
+        let toolSegments = actionableSegments.filter { $0.kind == .commandExecution || $0.kind == .toolCall }
+        guard !toolSegments.isEmpty else {
+            return actionableSegments.first?.title
+        }
+
+        let firstTool = toolSegments.first?.title ?? "Action"
+        if toolSegments.count == 1 {
+            return firstTool
+        }
+        return "\(toolSegments.count) actions · \(firstTool) + \(toolSegments.count - 1) more"
+    }
 }
 
 private struct AgentRunFeedRowView: View {
@@ -329,6 +440,15 @@ private struct AgentRunFeedRowView: View {
         switch row {
         case .segment(let segment):
             AgentRunSegmentRow(segment: segment)
+        case .turnGroup(_, let sourceAgent, let title, let subtitle, let status, let summary, let segments):
+            AgentTurnGroupRow(
+                sourceAgent: sourceAgent,
+                title: title,
+                subtitle: subtitle,
+                status: status,
+                summary: summary,
+                segments: segments
+            )
         case .changedFiles(_, let sourceAgent, let status, let files, let details):
             AgentChangedFilesSection(sourceAgent: sourceAgent, status: status, files: files, details: details)
         }
@@ -354,6 +474,133 @@ private struct AgentRunSegmentRow: View {
             AgentAlertRow(segment: segment)
         case .fallbackText:
             AgentFallbackRow(segment: segment)
+        }
+    }
+}
+
+private struct AgentTurnGroupRow: View {
+    let sourceAgent: AIAgentTool
+    let title: String
+    let subtitle: String?
+    let status: AgentRunSegment.Status?
+    let summary: String?
+    let segments: [AgentRunSegment]
+
+    @State private var isExpanded: Bool
+
+    init(
+        sourceAgent: AIAgentTool,
+        title: String,
+        subtitle: String?,
+        status: AgentRunSegment.Status?,
+        summary: String?,
+        segments: [AgentRunSegment]
+    ) {
+        self.sourceAgent = sourceAgent
+        self.title = title
+        self.subtitle = subtitle
+        self.status = status
+        self.summary = summary
+        self.segments = segments
+        _isExpanded = State(initialValue: !Self.isCollapsedByDefault(for: status))
+    }
+
+    private var visibleSegments: [AgentRunSegment] {
+        let filtered = segments.filter { !$0.isTurnLifecycleSegment }
+        return filtered.isEmpty ? segments : filtered
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(title)
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            if let subtitle {
+                                Text(subtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        HStack(spacing: 8) {
+                            Text(sourceAgent.displayName)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            if !isExpanded, let summary {
+                                Text(summary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+
+                    Spacer(minLength: 12)
+
+                    if let status {
+                        AgentStatusChip(text: status.displayText, color: statusColor(status))
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(visibleSegments) { segment in
+                        AgentRunSegmentRow(segment: segment)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+        .onChange(of: status) { _, newValue in
+            guard Self.isCollapsedByDefault(for: newValue) else { return }
+            isExpanded = false
+        }
+    }
+
+    private static func isCollapsedByDefault(for status: AgentRunSegment.Status?) -> Bool {
+        switch status {
+        case .completed, .failed, .cancelled:
+            true
+        default:
+            false
+        }
+    }
+
+    private func statusColor(_ status: AgentRunSegment.Status) -> Color {
+        switch status {
+        case .pending:
+            .gray
+        case .running:
+            .blue
+        case .completed:
+            .green
+        case .failed:
+            .red
+        case .cancelled:
+            .orange
+        case .unknown:
+            .secondary
         }
     }
 }
@@ -809,5 +1056,19 @@ private enum AgentTextBlock: Equatable {
         }
 
         return blocks.isEmpty ? [.markdown(normalized)] : blocks
+    }
+}
+
+private extension AgentRunSegment {
+    var isIntentSegment: Bool {
+        sourceAgent == .githubCopilot
+            && kind == .toolCall
+            && subtitle?.lowercased() == "report_intent"
+    }
+
+    var isTurnLifecycleSegment: Bool {
+        sourceAgent == .githubCopilot
+            && kind == .toolCall
+            && id.hasPrefix("turn-")
     }
 }

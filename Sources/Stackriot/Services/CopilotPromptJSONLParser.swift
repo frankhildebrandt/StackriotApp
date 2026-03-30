@@ -1,6 +1,13 @@
 import Foundation
 
 final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
+    private static let ignoredEventTypes: Set<String> = [
+        "session.background_tasks_changed",
+        "session.mcp_servers_loaded",
+        "session.mcp_server_status_changed",
+        "session.tools_updated",
+    ]
+
     private var bufferedLine = ""
     private var nextTransientSegmentIndex = 0
     private var segmentRevisions: [String: Int] = [:]
@@ -8,7 +15,9 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
     private var aggregatedOutputByID: [String: String] = [:]
     private var detailTextByID: [String: String] = [:]
     private var toolNameByID: [String: String] = [:]
+    private var toolSubtitleByID: [String: String] = [:]
     private var commandByID: [String: String] = [:]
+    private var latestIntentByGroupID: [String: String] = [:]
     private var lastTodoFingerprint: String?
 
     func consume(_ chunk: String) -> StructuredAgentOutputChunk {
@@ -41,6 +50,11 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         }
 
         let type = StructuredAgentOutputParserSupport.firstString(in: object, keys: ["type", "event", "kind"]) ?? "event"
+        let normalizedType = type.lowercased()
+
+        if Self.ignoredEventTypes.contains(normalizedType) {
+            return StructuredAgentOutputChunk()
+        }
 
         if let errorChunk = renderErrorIfNeeded(type: type, object: object) {
             return errorChunk
@@ -83,12 +97,15 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         guard isRealAssistantMessage || isLegacyAssistantMessage else { return nil }
 
         let phase = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["phase"])?.lowercased()
+        let groupID = segmentGroupID(for: payload, object: object)
+
         if phase == "thinking", let thinkingText = extractMessageText(from: payload, eventType: normalizedType) {
             return reasoningChunk(
                 text: thinkingText,
                 id: reasoningSegmentID(for: payload, object: object),
-                groupID: messageGroupID(for: payload, object: object),
-                renderedPrefix: normalizedType.contains("delta") ? "" : "[copilot] Thinking: "
+                groupID: groupID,
+                renderedPrefix: normalizedType.contains("delta") ? "" : "[copilot] Thinking: ",
+                isDelta: normalizedType.contains("delta")
             )
         }
 
@@ -105,7 +122,7 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
                     kind: .reasoning,
                     title: "Thinking",
                     bodyText: bodyText,
-                    groupID: messageGroupID(for: payload, object: object)
+                    groupID: groupID
                 )
             )
         }
@@ -115,14 +132,19 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         }
 
         let segmentID = messageSegmentID(for: payload, object: object)
-        let bodyText = mergedText(text, for: segmentID, store: &bodyTextByID)
+        let bodyText = mergedText(
+            text,
+            for: segmentID,
+            store: &bodyTextByID,
+            isDelta: normalizedType.contains("delta")
+        )
         chunk.segments.append(
             makeSegment(
                 id: segmentID,
                 kind: .agentMessage,
-                title: "Antwort",
+                title: assistantMessageTitle(for: phase),
                 bodyText: bodyText,
-                groupID: messageGroupID(for: payload, object: object)
+                groupID: groupID
             )
         )
         let renderedPrefix = normalizedType.contains("delta") || normalizedType.contains("partial") ? "" : "[copilot] "
@@ -137,10 +159,11 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         if normalizedType == "assistant.reasoning" || normalizedType == "assistant.reasoning_delta" {
             guard let text = extractReasoningText(from: payload) else { return nil }
             return reasoningChunk(
-                text: text + normalizedType == "assistant.reasoning_delta" ? " " : "",
+                text: text,
                 id: reasoningSegmentID(for: payload, object: object),
-                groupID: messageGroupID(for: payload, object: object),
-                renderedPrefix: normalizedType.contains("delta") ? "" : "[copilot] Thinking: "
+                groupID: segmentGroupID(for: payload, object: object),
+                renderedPrefix: normalizedType.contains("delta") ? "" : "[copilot] Thinking: ",
+                isDelta: normalizedType == "assistant.reasoning_delta"
             )
         }
 
@@ -151,8 +174,9 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
             return reasoningChunk(
                 text: text,
                 id: reasoningSegmentID(for: payload, object: object),
-                groupID: messageGroupID(for: payload, object: object),
-                renderedPrefix: "[copilot] Thinking: "
+                groupID: segmentGroupID(for: payload, object: object),
+                renderedPrefix: "[copilot] Thinking: ",
+                isDelta: normalizedType.contains("delta")
             )
         }
 
@@ -177,7 +201,7 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
                 ),
                 bodyText: text,
                 status: .completed,
-                groupID: messageGroupID(for: payload, object: object)
+                groupID: segmentGroupID(for: payload, object: object)
             )
             return StructuredAgentOutputChunk(
                 renderedText: "[user] \(text)\n",
@@ -193,24 +217,31 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
             ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["turnId"])
         let interactionID = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["interactionId"])
             ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["interactionId"])
-        let title = turnID.map { "Turn \($0)" } ?? "Turn"
+        let groupID = segmentGroupID(for: payload, object: object) ?? interactionID
+        let fallbackTitle = turnID.map { "Turn \($0)" } ?? "Turn"
         let status: AgentRunSegment.Status = normalizedType.hasSuffix("start") ? .running : .completed
         let segment = makeSegment(
             id: turnSegmentID(for: payload, object: object),
             kind: .toolCall,
-            title: title,
+            title: turnHeaderTitle(for: groupID, fallback: fallbackTitle),
             subtitle: interactionID,
             status: status,
-            groupID: interactionID
+            groupID: groupID
         )
         let rendered = normalizedType.hasSuffix("start")
-            ? "[copilot] \(title) started\n"
-            : "[copilot] \(title) finished\n"
+            ? "[copilot] \(fallbackTitle) started\n"
+            : "[copilot] \(fallbackTitle) finished\n"
         return StructuredAgentOutputChunk(renderedText: rendered, segments: [segment])
     }
 
-    private func reasoningChunk(text: String, id: String, groupID: String?, renderedPrefix: String) -> StructuredAgentOutputChunk {
-        let bodyText = mergedText(text, for: id, store: &bodyTextByID)
+    private func reasoningChunk(
+        text: String,
+        id: String,
+        groupID: String?,
+        renderedPrefix: String,
+        isDelta: Bool = false
+    ) -> StructuredAgentOutputChunk {
+        let bodyText = mergedText(text, for: id, store: &bodyTextByID, isDelta: isDelta)
         let segment = makeSegment(
             id: id,
             kind: .reasoning,
@@ -231,6 +262,7 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         let rawToolName = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["toolName", "tool_name", "tool", "name"])
             ?? StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["mcpToolName"])
         let rawCommand = extractCommand(from: arguments ?? payload)
+        let groupID = segmentGroupID(for: payload, object: object)
         let isRealToolEvent = [
             "tool.user_requested",
             "tool.execution_start",
@@ -252,15 +284,18 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         }
         let toolName = rawToolName ?? toolNameByID[segmentID]
         let command = rawCommand ?? commandByID[segmentID]
+        let reportIntent = reportIntentValue(toolName: toolName, arguments: arguments)
+        if let reportIntent, let groupID {
+            latestIntentByGroupID[groupID] = reportIntent
+        }
         let status = toolStatus(for: normalizedType, payload: payload)
         let isCommand = isCommandLike(toolName: toolName, command: command)
-        let title = command ?? toolName ?? "Tool"
-        let subtitle: String?
-        if isCommand {
-            subtitle = toolName
-        } else {
-            subtitle = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["mcpServerName", "server", "intentionSummary"])
+        let title = toolRowTitle(toolName: toolName, command: command, reportIntent: reportIntent)
+        let preferredSubtitle = preferredToolSubtitle(from: payload)
+        if let preferredSubtitle {
+            toolSubtitleByID[segmentID] = preferredSubtitle
         }
+        let subtitle = toolSubtitleByID[segmentID] ?? toolName
 
         let result = StructuredAgentOutputParserSupport.nestedDictionary(in: payload, keys: ["result"])
         let error = StructuredAgentOutputParserSupport.nestedDictionary(in: payload, keys: ["error"])
@@ -277,16 +312,18 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
             ?? (isCommand ? nil : outputCandidate)
         let aggregatedOutput = isCommand ? outputCandidate.flatMap { mergedText($0, for: segmentID, store: &aggregatedOutputByID) } : nil
         let detailText = detailCandidate.flatMap { mergedText($0, for: segmentID, store: &detailTextByID) }
+        let bodyText = reportIntent
 
         let segment = makeSegment(
             id: segmentID,
             kind: isCommand ? .commandExecution : .toolCall,
             title: title,
             subtitle: subtitle,
+            bodyText: bodyText,
             status: status,
             detailText: isCommand ? nil : detailText,
             aggregatedOutput: aggregatedOutput,
-            groupID: toolName
+            groupID: groupID
         )
 
         let renderedTitle = isCommand ? "$ \(title)" : "Tool \(title)"
@@ -475,16 +512,16 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
     }
 
     private func extractReasoningText(from object: [String: Any]) -> String? {
-        StructuredAgentOutputParserSupport.firstString(in: object, keys: ["content", "deltaContent", "reasoningText", "text"])
+        rawString(in: object, keys: ["content", "deltaContent", "reasoningText", "text"])
             ?? StructuredAgentOutputParserSupport.joinedText(from: object["content"])
     }
 
     private func extractMessageText(from object: [String: Any], eventType: String) -> String? {
         if eventType.contains("delta") {
-            return StructuredAgentOutputParserSupport.firstString(in: object, keys: ["deltaContent", "content", "text", "transformedContent"])
+            return rawString(in: object, keys: ["deltaContent", "content", "text", "transformedContent"])
                 ?? StructuredAgentOutputParserSupport.joinedText(from: object["delta"])
         }
-        return StructuredAgentOutputParserSupport.firstString(in: object, keys: ["content", "text", "message", "response", "transformedContent"])
+        return rawString(in: object, keys: ["content", "text", "message", "response", "transformedContent"])
             ?? StructuredAgentOutputParserSupport.joinedText(from: object["parts"])
             ?? StructuredAgentOutputParserSupport.joinedText(from: object["message"])
     }
@@ -629,9 +666,12 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
             ?? stableSegmentID(for: object, fallbackPrefix: "copilot-user-message")
     }
 
-    private func messageGroupID(for payload: [String: Any], object: [String: Any]) -> String? {
-        StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["interactionId", "parentToolCallId", "conversation_id", "session_id"])
+    private func segmentGroupID(for payload: [String: Any], object: [String: Any]) -> String? {
+        StructuredAgentOutputParserSupport.firstString(in: object, keys: ["parentId", "parent_id"])
+            ?? StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["parentId", "parent_id", "interactionId", "parentToolCallId", "conversation_id", "session_id"])
             ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["interactionId", "conversation_id", "session_id"])
+            ?? StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["turnId"]).map { "turn-\($0)" }
+            ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["turnId"]).map { "turn-\($0)" }
     }
 
     private func stableSegmentID(for object: [String: Any], fallbackPrefix: String) -> String {
@@ -649,9 +689,23 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         return "\(prefix)-\(nextTransientSegmentIndex)"
     }
 
-    private func mergedText(_ incoming: String, for id: String, store: inout [String: String]) -> String {
+    private func mergedText(
+        _ incoming: String,
+        for id: String,
+        store: inout [String: String],
+        isDelta: Bool = false
+    ) -> String {
+        if incoming.isEmpty {
+            return store[id] ?? ""
+        }
         let trimmed = incoming.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return store[id] ?? "" }
+        if trimmed.isEmpty {
+            guard isDelta else { return store[id] ?? "" }
+            let existing = store[id] ?? ""
+            let merged = existing + incoming
+            store[id] = merged
+            return merged
+        }
         let existing = store[id] ?? ""
         let merged: String
         if existing.isEmpty || trimmed.hasPrefix(existing) {
@@ -659,10 +713,79 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         } else if existing == trimmed || existing.hasSuffix(trimmed) {
             merged = existing
         } else {
-            merged = existing + trimmed
+            let separator = isDelta && shouldInsertSpace(between: existing, and: trimmed) ? " " : ""
+            merged = existing + separator + trimmed
         }
         store[id] = merged
         return merged
+    }
+
+    private func rawString(in object: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let string = object[key] as? String {
+                return string
+            }
+        }
+        return nil
+    }
+
+    private func shouldInsertSpace(between existing: String, and incoming: String) -> Bool {
+        guard
+            let existingScalar = existing.unicodeScalars.last,
+            let incomingScalar = incoming.unicodeScalars.first
+        else {
+            return false
+        }
+
+        if CharacterSet.whitespacesAndNewlines.contains(existingScalar)
+            || CharacterSet.whitespacesAndNewlines.contains(incomingScalar) {
+            return false
+        }
+
+        let wordCharacters = CharacterSet.alphanumerics
+        guard wordCharacters.contains(existingScalar), wordCharacters.contains(incomingScalar) else {
+            return false
+        }
+
+        return true
+    }
+
+    private func assistantMessageTitle(for phase: String?) -> String {
+        switch phase {
+        case "final_answer":
+            "Final answer"
+        case "analysis":
+            "Analysis"
+        case "plan":
+            "Plan"
+        case "thinking":
+            "Thinking"
+        default:
+            "Antwort"
+        }
+    }
+
+    private func toolRowTitle(toolName: String?, command: String?, reportIntent: String?) -> String {
+        if let reportIntent {
+            return reportIntent
+        }
+        return command ?? toolName ?? "Tool"
+    }
+
+    private func preferredToolSubtitle(from payload: [String: Any]) -> String? {
+        StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["intentionSummary", "mcpServerName", "server"])
+    }
+
+    private func reportIntentValue(toolName: String?, arguments: [String: Any]?) -> String? {
+        guard toolName?.lowercased() == "report_intent" else { return nil }
+        return StructuredAgentOutputParserSupport.firstString(in: arguments ?? [:], keys: ["intent"])
+    }
+
+    private func turnHeaderTitle(for groupID: String?, fallback: String) -> String {
+        guard let groupID, let intent = latestIntentByGroupID[groupID]?.nonEmpty else {
+            return fallback
+        }
+        return intent
     }
 
     private func makeSegment(
