@@ -30,6 +30,7 @@
 		E00000000000000000000012 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000012 /* RootView.swift */; };
 		E00000000000000000000013 /* RunConsoleColumn.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000013 /* RunConsoleColumn.swift */; };
 		E00000000000000000000014 /* RunConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000014 /* RunConsoleView.swift */; };
+		E00000000000000000000050 /* CodexRunFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000050 /* CodexRunFeedView.swift */; };
 		E00000000000000000000015 /* TerminalTabChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000015 /* TerminalTabChip.swift */; };
 		E00000000000000000000016 /* TerminalTabStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000016 /* TerminalTabStrip.swift */; };
 		E00000000000000000000017 /* ActionPillGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000017 /* ActionPillGroup.swift */; };
@@ -81,6 +82,7 @@
 			E00000000000000000000045 /* RunConfigurationDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000045 /* RunConfigurationDiscoveryService.swift */; };
 			E00000000000000000000047 /* WorkspaceDiffFileList.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000047 /* WorkspaceDiffFileList.swift */; };
 			E00000000000000000000049 /* CodexExecJSONLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000049 /* CodexExecJSONLParser.swift */; };
+		E00000000000000000000051 /* CodexRunSegment.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000051 /* CodexRunSegment.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -107,6 +109,7 @@
 		D00000000000000000000012 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		D00000000000000000000013 /* RunConsoleColumn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConsoleColumn.swift; sourceTree = "<group>"; };
 		D00000000000000000000014 /* RunConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConsoleView.swift; sourceTree = "<group>"; };
+		D00000000000000000000050 /* CodexRunFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexRunFeedView.swift; sourceTree = "<group>"; };
 		D00000000000000000000015 /* TerminalTabChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTabChip.swift; sourceTree = "<group>"; };
 		D00000000000000000000016 /* TerminalTabStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTabStrip.swift; sourceTree = "<group>"; };
 		D00000000000000000000017 /* ActionPillGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionPillGroup.swift; sourceTree = "<group>"; };
@@ -158,6 +161,7 @@
 			D00000000000000000000045 /* RunConfigurationDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConfigurationDiscoveryService.swift; sourceTree = "<group>"; };
 			D00000000000000000000047 /* WorkspaceDiffFileList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDiffFileList.swift; sourceTree = "<group>"; };
 			D00000000000000000000049 /* CodexExecJSONLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexExecJSONLParser.swift; sourceTree = "<group>"; };
+		D00000000000000000000051 /* CodexRunSegment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexRunSegment.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -346,6 +350,8 @@
 				D00000000000000000000043 /* AgentRunSummaryWindow.swift */,
 				D00000000000000000000013 /* RunConsoleColumn.swift */,
 				D00000000000000000000014 /* RunConsoleView.swift */,
+				D00000000000000000000050 /* CodexRunFeedView.swift */,
+				D00000000000000000000051 /* CodexRunSegment.swift */,
 				D00000000000000000000040 /* PlanEditorView.swift */,
 				D00000000000000000000041 /* ReadmeView.swift */,
 				D00000000000000000000015 /* TerminalTabChip.swift */,
@@ -490,6 +496,8 @@
 					E00000000000000000000012 /* RootView.swift in Sources */,
 				E00000000000000000000013 /* RunConsoleColumn.swift in Sources */,
 				E00000000000000000000014 /* RunConsoleView.swift in Sources */,
+				E00000000000000000000050 /* CodexRunFeedView.swift in Sources */,
+				E00000000000000000000051 /* CodexRunSegment.swift in Sources */,
 				E00000000000000000000040 /* PlanEditorView.swift in Sources */,
 				E00000000000000000000041 /* ReadmeView.swift in Sources */,
 				E00000000000000000000015 /* TerminalTabChip.swift in Sources */,
