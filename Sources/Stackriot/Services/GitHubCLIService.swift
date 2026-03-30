@@ -1,6 +1,6 @@
 import Foundation
 
-/// Service fuer GitHub CLI (`gh`) Operationen — Issue-Lesen, PR erstellen und Status abrufen.
+/// Service fuer GitHub CLI (`gh`)  Issue-Lesen, PR erstellen und Status abrufen.Operationen 
 struct GitHubCLIService: TicketProviderService {
     typealias CommandExecutor = @Sendable (_ executable: String, _ arguments: [String], _ currentDirectoryURL: URL?, _ environment: [String: String]) async throws -> CommandResult
     typealias EnvironmentProvider = @Sendable () async -> [String: String]
@@ -204,7 +204,100 @@ struct GitHubCLIService: TicketProviderService {
         )
     }
 
-    // MARK: - PR Operations
+    // MARK: - Pull Request Operations
+
+    @MainActor
+    func searchPullRequests(query: String, in repository: ManagedRepository) async throws -> [PullRequestSearchResult] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return [] }
+
+        let target = try repositoryTargetOrThrow(for: repository)
+        let environment = await commandEnvironment()
+        var results: [PullRequestSearchResult] = []
+
+        if let prNumber = Self.issueNumber(from: trimmedQuery),
+           let exactMatch = try await loadPullRequestSearchResult(number: prNumber, repositoryTarget: target, environment: environment)
+        {
+            results.append(exactMatch)
+        }
+
+        let listResult = try await runCommand(
+            "gh",
+            [
+                "pr", "list",
+                "--repo", target,
+                "--limit", "20",
+                "--state", "all",
+                "--search", trimmedQuery,
+                "--json", "number,title,url,headRefName,headRefOid,baseRefName,state,isDraft,isCrossRepository,headRepositoryOwner",
+            ],
+            nil,
+            environment
+        )
+        guard listResult.exitCode == 0 else {
+            throw commandFailure(from: listResult)
+        }
+
+        let decodedResults = try decodePullRequestSearchResults(from: Data(listResult.stdout.utf8))
+        for result in decodedResults where !results.contains(where: { $0.number == result.number }) {
+            results.append(result)
+        }
+        return results
+    }
+
+    @MainActor
+    func loadPullRequest(number: Int, in repository: ManagedRepository) async throws -> PullRequestDetails {
+        let target = try repositoryTargetOrThrow(for: repository)
+        let environment = await commandEnvironment()
+        let result = try await runCommand(
+            "gh",
+            [
+                "pr", "view", "\(number)",
+                "--repo", target,
+                "--json", "number,title,url,headRefName,headRefOid,baseRefName,state,isDraft,isCrossRepository,headRepositoryOwner",
+            ],
+            nil,
+            environment
+        )
+        guard result.exitCode == 0 else {
+            throw commandFailure(from: result)
+        }
+        return try decodePullRequestDetails(from: Data(result.stdout.utf8))
+    }
+
+    func decodePullRequestSearchResults(from data: Data) throws -> [PullRequestSearchResult] {
+        let decoded = try Self.jsonDecoder.decode([PullRequestPayload].self, from: data)
+        return decoded.map {
+            PullRequestSearchResult(
+                number: $0.number,
+                title: $0.title,
+                url: $0.url,
+                headRefName: $0.headRefName,
+                headRefOID: $0.headRefOid,
+                baseRefName: $0.baseRefName,
+                status: $0.state,
+                isDraft: $0.isDraft ?? false,
+                isCrossRepository: $0.isCrossRepository ?? false,
+                headRepositoryOwner: $0.headRepositoryOwner?.login?.nilIfBlank
+            )
+        }
+    }
+
+    func decodePullRequestDetails(from data: Data) throws -> PullRequestDetails {
+        let decoded = try Self.jsonDecoder.decode(PullRequestPayload.self, from: data)
+        return PullRequestDetails(
+            number: decoded.number,
+            title: decoded.title,
+            url: decoded.url,
+            headRefName: decoded.headRefName,
+            headRefOID: decoded.headRefOid,
+            baseRefName: decoded.baseRefName,
+            status: Self.prStatus(from: decoded.state),
+            isDraft: decoded.isDraft ?? false,
+            isCrossRepository: decoded.isCrossRepository ?? false,
+            headRepositoryOwner: decoded.headRepositoryOwner?.login?.nilIfBlank
+        )
+    }
 
     /// Erstellt einen GitHub Pull Request vom aktuellen Branch des Worktrees.
     func createPR(
@@ -261,12 +354,7 @@ struct GitHubCLIService: TicketProviderService {
 
         let data = Data(result.stdout.utf8)
         let decoded = try Self.jsonDecoder.decode(PRStateResponse.self, from: data)
-
-        switch decoded.state.uppercased() {
-        case "MERGED": return .merged
-        case "CLOSED": return .closed
-        default: return .open
-        }
+        return Self.prStatus(from: decoded.state)
     }
 
     // MARK: - Helpers
@@ -320,6 +408,32 @@ struct GitHubCLIService: TicketProviderService {
 
         let matches = try decodeIssueSearchResults(from: Data("[\(result.stdout)]".utf8))
         return matches.first
+    }
+
+    private func loadPullRequestSearchResult(
+        number: Int,
+        repositoryTarget: String,
+        environment: [String: String]
+    ) async throws -> PullRequestSearchResult? {
+        let result = try await runCommand(
+            "gh",
+            [
+                "pr", "view", "\(number)",
+                "--repo", repositoryTarget,
+                "--json", "number,title,url,headRefName,headRefOid,baseRefName,state,isDraft,isCrossRepository,headRepositoryOwner",
+            ],
+            nil,
+            environment
+        )
+
+        guard result.exitCode == 0 else {
+            if Self.looksLikeMissingPullRequest(message: result.stderr.isEmpty ? result.stdout : result.stderr) {
+                return nil
+            }
+            throw commandFailure(from: result)
+        }
+
+        return try decodePullRequestSearchResults(from: Data("[\(result.stdout)]".utf8)).first
     }
 
     @MainActor
@@ -378,10 +492,25 @@ struct GitHubCLIService: TicketProviderService {
             || normalized.contains("no issue")
     }
 
+    private static func looksLikeMissingPullRequest(message: String) -> Bool {
+        let normalized = message.lowercased()
+        return normalized.contains("could not resolve to a pull request")
+            || normalized.contains("not found")
+            || normalized.contains("no pull request")
+    }
+
     private static func issueNumber(from query: String) -> Int? {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let digits = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed
         return Int(digits)
+    }
+
+    private static func prStatus(from value: String) -> PRStatus {
+        switch value.uppercased() {
+        case "MERGED": return .merged
+        case "CLOSED": return .closed
+        default: return .open
+        }
     }
 
     private func commandEnvironment() async -> [String: String] {
@@ -418,4 +547,21 @@ private struct IssueDetailsPayload: Decodable {
     let url: String
     let labels: [LabelPayload]?
     let comments: [CommentPayload]?
+}
+
+private struct PullRequestPayload: Decodable {
+    struct OwnerPayload: Decodable {
+        let login: String?
+    }
+
+    let number: Int
+    let title: String
+    let url: String
+    let headRefName: String
+    let headRefOid: String
+    let baseRefName: String
+    let state: String
+    let isDraft: Bool?
+    let isCrossRepository: Bool?
+    let headRepositoryOwner: OwnerPayload?
 }

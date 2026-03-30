@@ -21,6 +21,8 @@ struct SettingsRootView: View {
                 NodeSettingsView()
             case .aiProvider:
                 AIProviderSettingsView()
+            case .browserSessions:
+                BrowserSessionsSettingsView()
             case .jira:
                 JiraSettingsView()
             case .sshKeys:

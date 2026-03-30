@@ -221,7 +221,20 @@ extension AppModel {
             ticketIdentifier: ticketDetails?.reference.id,
             ticketURL: ticketDetails?.url,
             path: info.path.path,
-            repository: repository
+            repository: repository,
+            primaryContext: ticketDetails.map {
+                WorktreePrimaryContext(
+                    kind: .ticket,
+                    canonicalURL: $0.url,
+                    title: $0.title,
+                    label: $0.provider.ticketLabel,
+                    provider: $0.provider,
+                    prNumber: nil,
+                    ticketID: $0.reference.id,
+                    upstreamReference: nil,
+                    upstreamSHA: nil
+                )
+            }
         )
 
         repository.worktrees.append(worktree)
@@ -236,7 +249,7 @@ extension AppModel {
         return worktree
     }
 
-    private func finishCreatedWorktree(_ worktree: WorktreeRecord, in repository: ManagedRepository) {
+    func finishCreatedWorktree(_ worktree: WorktreeRecord, in repository: ManagedRepository) {
         selectedWorktreeIDsByRepository[repository.id] = worktree.id
         terminalTabs.selectPlanTab(for: worktree.id)
         isWorktreeSheetPresented = false
@@ -337,10 +350,12 @@ extension AppModel {
                 worktreePath: URL(fileURLWithPath: worktreePath)
             )
 
+            stopPRMonitoring(for: worktreeID)
             modelContext.delete(worktree)
             repository.updatedAt = .now
             try modelContext.save()
             worktreeStatuses.removeValue(forKey: worktreeID)
+            pullRequestUpstreamStatuses.removeValue(forKey: worktreeID)
             for runID in runIDsForWorktree {
                 cancelAutoHide(for: runID)
             }
@@ -386,6 +401,7 @@ extension AppModel {
         for (worktreeID, status) in statuses {
             worktreeStatuses[worktreeID] = status
         }
+        await refreshPullRequestUpstreamStatuses(for: repository)
     }
 
     func integrateIntoDefaultBranch(
@@ -437,6 +453,17 @@ extension AppModel {
                 worktree.prURL = prInfo.url
                 worktree.lifecycleState = .integrating
                 worktree.shouldDeleteOnMerge = deleteAfterIntegration
+                worktree.primaryContext = WorktreePrimaryContext(
+                    kind: .pullRequest,
+                    canonicalURL: prInfo.url,
+                    title: draft.prTitle,
+                    label: "PR",
+                    provider: .github,
+                    prNumber: prInfo.number,
+                    ticketID: nil,
+                    upstreamReference: worktree.primaryContext?.upstreamReference,
+                    upstreamSHA: worktree.primaryContext?.upstreamSHA
+                )
                 save(modelContext)
                 startPRMonitoring(for: worktree, repository: repository, in: modelContext)
             } catch {
@@ -507,17 +534,14 @@ extension AppModel {
                     break
                 }
                 guard !Task.isCancelled else { break }
-                guard
-                    let record = self.worktreeRecord(with: worktreeID),
-                    let prNumber = record.prNumber
+                guard let record = self.worktreeRecord(with: worktreeID),
+                      let repository = record.repository,
+                      let prNumber = record.resolvedPrimaryContext?.prNumber ?? record.prNumber
                 else { break }
 
                 do {
-                    let status = try await services.gitHubCLIService.getPRStatus(
-                        worktreePath: URL(fileURLWithPath: record.path),
-                        prNumber: prNumber
-                    )
-                    if status == .merged {
+                    let pr = try await services.gitHubCLIService.loadPullRequest(number: prNumber, in: repository)
+                    if pr.status == .merged {
                         record.lifecycleState = .merged
                         self.save(modelContext)
                         if record.shouldDeleteOnMerge {
@@ -544,9 +568,9 @@ extension AppModel {
         let descriptor = FetchDescriptor<WorktreeRecord>()
         let allWorktrees = (try? modelContext.fetch(descriptor)) ?? []
         for worktree in allWorktrees {
-            if worktree.lifecycleState == .integrating,
+            if let repository = worktree.repository,
                worktree.prNumber != nil,
-               let repository = worktree.repository
+               worktree.lifecycleState != .merged
             {
                 startPRMonitoring(for: worktree, repository: repository, in: modelContext)
             }

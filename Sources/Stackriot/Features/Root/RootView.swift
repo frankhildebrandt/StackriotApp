@@ -110,6 +110,15 @@ struct RootView: View {
                 CreateWorktreeSheet(repository: repository)
             }
         }
+        .sheet(isPresented: $appModel.isPullRequestCheckoutSheetPresented) {
+            if let repositoryID = appModel.pullRequestCheckoutDraft.repositoryID,
+               let repository = appModel.repositoryRecord(with: repositoryID)
+            {
+                CheckoutPullRequestSheet(repository: repository)
+            } else if let repository = appModel.repository(for: visibleRepositories) {
+                CheckoutPullRequestSheet(repository: repository)
+            }
+        }
         .sheet(isPresented: Binding(
             get: { appModel.remoteManagementRepositoryID != nil },
             set: { newValue in

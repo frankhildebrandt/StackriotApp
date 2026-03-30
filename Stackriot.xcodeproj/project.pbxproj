@@ -100,6 +100,12 @@
 		E00000000000000000000061 /* JiraCloudService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000061 /* JiraCloudService.swift */; };
 		E00000000000000000000062 /* KeychainSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000062 /* KeychainSecretStore.swift */; };
 		E00000000000000000000063 /* TicketProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000063 /* TicketProviderService.swift */; };
+		E00000000000000000000064 /* WorktreeContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000064 /* WorktreeContext.swift */; };
+		E00000000000000000000065 /* AppModel+PullRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000065 /* AppModel+PullRequests.swift */; };
+		E00000000000000000000066 /* WorktreePrimaryContextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000066 /* WorktreePrimaryContextView.swift */; };
+		E00000000000000000000067 /* CheckoutPullRequestSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000067 /* CheckoutPullRequestSheet.swift */; };
+		E00000000000000000000068 /* BrowserSessionsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000068 /* BrowserSessionsSettingsView.swift */; };
+		E00000000000000000000069 /* EmbeddedBrowserSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000069 /* EmbeddedBrowserSessionStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -196,6 +202,12 @@
 		D00000000000000000000061 /* JiraCloudService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraCloudService.swift; sourceTree = "<group>"; };
 		D00000000000000000000062 /* KeychainSecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecretStore.swift; sourceTree = "<group>"; };
 		D00000000000000000000063 /* TicketProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketProviderService.swift; sourceTree = "<group>"; };
+		D00000000000000000000064 /* WorktreeContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeContext.swift; sourceTree = "<group>"; };
+		D00000000000000000000065 /* AppModel+PullRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+PullRequests.swift"; sourceTree = "<group>"; };
+		D00000000000000000000066 /* WorktreePrimaryContextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreePrimaryContextView.swift; sourceTree = "<group>"; };
+		D00000000000000000000067 /* CheckoutPullRequestSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckoutPullRequestSheet.swift; sourceTree = "<group>"; };
+		D00000000000000000000068 /* BrowserSessionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserSessionsSettingsView.swift; sourceTree = "<group>"; };
+		D00000000000000000000069 /* EmbeddedBrowserSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedBrowserSessionStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -259,6 +271,7 @@
 				D00000000000000000000038 /* AppModel+Namespaces.swift */,
 				D00000000000000000000005 /* AppModel+Persistence.swift */,
 				D0000000000000000000003F /* AppModel+Plans.swift */,
+				D00000000000000000000065 /* AppModel+PullRequests.swift */,
 				D00000000000000000000006 /* AppModel+RemotesSSH.swift */,
 				D00000000000000000000007 /* AppModel+Repositories.swift */,
 				D00000000000000000000008 /* AppModel+Runs.swift */,
@@ -275,6 +288,7 @@
 			children = (
 				D0000000000000000000000E /* Domain.swift */,
 				D00000000000000000000048 /* GeneratedCommitMessage.swift */,
+				D00000000000000000000064 /* WorktreeContext.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -326,6 +340,7 @@
 				D00000000000000000000053 /* CopilotPromptJSONLParser.swift */,
 				D0000000000000000000005F /* CursorAgentPrintJSONParser.swift */,
 				D00000000000000000000044 /* DevToolDiscoveryService.swift */,
+				D00000000000000000000069 /* EmbeddedBrowserSessionStore.swift */,
 				D0000000000000000000003D /* GitHubCLIService.swift */,
 				D00000000000000000000061 /* JiraCloudService.swift */,
 				D00000000000000000000028 /* AppPaths.swift */,
@@ -390,6 +405,7 @@
 				D00000000000000000000041 /* ReadmeView.swift */,
 				D00000000000000000000015 /* TerminalTabChip.swift */,
 				D00000000000000000000016 /* TerminalTabStrip.swift */,
+				D00000000000000000000066 /* WorktreePrimaryContextView.swift */,
 			);
 			path = Runs;
 			sourceTree = "<group>";
@@ -409,6 +425,7 @@
 			children = (
 				D0000000000000000000001A /* CloneRepositorySheet.swift */,
 				D0000000000000000000001B /* CreateWorktreeSheet.swift */,
+				D00000000000000000000067 /* CheckoutPullRequestSheet.swift */,
 				D00000000000000000000037 /* GitCommitSheet.swift */,
 				D0000000000000000000003E /* IntegrateWorktreeSheet.swift */,
 				D00000000000000000000039 /* NamespaceEditorSheet.swift */,
@@ -433,6 +450,7 @@
 			children = (
 				D00000000000000000000056 /* AboutSettingsView.swift */,
 				D00000000000000000000057 /* AIProviderSettingsView.swift */,
+				D00000000000000000000068 /* BrowserSessionsSettingsView.swift */,
 				D00000000000000000000060 /* JiraSettingsView.swift */,
 				D00000000000000000000058 /* NodeSettingsView.swift */,
 				D00000000000000000000059 /* RepositoriesSettingsView.swift */,
@@ -533,12 +551,15 @@
 				E00000000000000000000008 /* AppModel+Runs.swift in Sources */,
 				E00000000000000000000009 /* AppModel+Worktrees.swift in Sources */,
 				E0000000000000000000003F /* AppModel+Plans.swift in Sources */,
+				E00000000000000000000065 /* AppModel+PullRequests.swift in Sources */,
 				E0000000000000000000000A /* AppModel.swift in Sources */,
 				E0000000000000000000000B /* AppServices.swift in Sources */,
 				E0000000000000000000000C /* Drafts.swift in Sources */,
 				E0000000000000000000000E /* Domain.swift in Sources */,
+				E00000000000000000000064 /* WorktreeContext.swift in Sources */,
 				E00000000000000000000056 /* AboutSettingsView.swift in Sources */,
 				E00000000000000000000057 /* AIProviderSettingsView.swift in Sources */,
+				E00000000000000000000068 /* BrowserSessionsSettingsView.swift in Sources */,
 				E00000000000000000000060 /* JiraSettingsView.swift in Sources */,
 				E00000000000000000000058 /* NodeSettingsView.swift in Sources */,
 				E00000000000000000000059 /* RepositoriesSettingsView.swift in Sources */,
@@ -563,11 +584,13 @@
 				E00000000000000000000041 /* ReadmeView.swift in Sources */,
 				E00000000000000000000015 /* TerminalTabChip.swift in Sources */,
 				E00000000000000000000016 /* TerminalTabStrip.swift in Sources */,
+				E00000000000000000000066 /* WorktreePrimaryContextView.swift in Sources */,
 				E00000000000000000000017 /* ActionPillGroup.swift in Sources */,
 				E00000000000000000000018 /* FlowLayout.swift in Sources */,
 				E00000000000000000000019 /* StatChip.swift in Sources */,
 				E0000000000000000000001A /* CloneRepositorySheet.swift in Sources */,
 				E0000000000000000000001B /* CreateWorktreeSheet.swift in Sources */,
+				E00000000000000000000067 /* CheckoutPullRequestSheet.swift in Sources */,
 				E00000000000000000000037 /* GitCommitSheet.swift in Sources */,
 				E0000000000000000000003E /* IntegrateWorktreeSheet.swift in Sources */,
 				E00000000000000000000039 /* NamespaceEditorSheet.swift in Sources */,
@@ -610,6 +633,7 @@
 				E00000000000000000000053 /* CopilotPromptJSONLParser.swift in Sources */,
 				E0000000000000000000005F /* CursorAgentPrintJSONParser.swift in Sources */,
 				E00000000000000000000044 /* DevToolDiscoveryService.swift in Sources */,
+				E00000000000000000000069 /* EmbeddedBrowserSessionStore.swift in Sources */,
 				E00000000000000000000045 /* RunConfigurationDiscoveryService.swift in Sources */,
 				E00000000000000000000049 /* CodexExecJSONLParser.swift in Sources */,
 				E00000000000000000000054 /* StructuredAgentOutputParser.swift in Sources */,

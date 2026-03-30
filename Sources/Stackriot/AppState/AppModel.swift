@@ -19,10 +19,12 @@ final class AppModel: @unchecked Sendable {
     var selectedWorktreeIDsByRepository: [UUID: UUID] = [:]
     var cloneDraft = CloneRepositoryDraft()
     var worktreeDraft = WorktreeDraft()
+    var pullRequestCheckoutDraft = PullRequestCheckoutDraft()
     var namespaceEditorDraft: NamespaceEditorDraft?
     var projectEditorDraft: ProjectEditorDraft?
     var pendingErrorMessage: String?
     var worktreeStatuses: [UUID: WorktreeStatus] = [:]
+    var pullRequestUpstreamStatuses: [UUID: PullRequestUpstreamStatus] = [:]
     var worktreePendingMergeOfferID: UUID?
     var pendingIntegrationConflict: IntegrationConflictDraft?
     var syncLogs: [UUID: String] = [:]
@@ -30,6 +32,7 @@ final class AppModel: @unchecked Sendable {
     var refreshingRepositoryIDs: Set<UUID> = []
     var isCloneSheetPresented = false
     var isWorktreeSheetPresented = false
+    var isPullRequestCheckoutSheetPresented = false
     var isDiffInspectorPresented = false
     var remoteManagementRepositoryID: UUID?
     var pendingRepositoryDeletionID: UUID?
@@ -85,6 +88,7 @@ final class AppModel: @unchecked Sendable {
         if storedModelContext == nil {
             storedModelContext = modelContext
             migrateLegacyRepositoriesIfNeeded(in: modelContext)
+            migrateWorktreePrimaryContextsIfNeeded(in: modelContext)
             startAutoRefreshLoopIfNeeded()
             startNodeRuntimeRefreshLoopIfNeeded()
             Task {

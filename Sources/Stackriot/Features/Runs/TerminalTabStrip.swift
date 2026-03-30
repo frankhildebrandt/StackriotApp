@@ -10,17 +10,17 @@ struct TerminalTabStrip: View {
     let tabs: [RunRecord]
 
     var body: some View {
-        let isPlanSelected = appModel.isPlanTabSelected(for: worktree)
+        let isPrimaryContextSelected = appModel.isPrimaryContextTabSelected(for: worktree)
             || (worktree.isDefaultBranchWorkspace && tabs.isEmpty)
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 // Plan chip — always first, never closable
-                planChip(isPlanSelected: isPlanSelected)
+                primaryContextChip(isPrimaryContextSelected: isPrimaryContextSelected)
 
                 ForEach(tabs) { run in
                     TerminalTabChip(
                         run: run,
-                        isSelected: !isPlanSelected && appModel.selectedTab(for: worktree, in: repository)?.id == run.id,
+                        isSelected: !isPrimaryContextSelected && appModel.selectedTab(for: worktree, in: repository)?.id == run.id,
                         isRunning: appModel.activeRunIDs.contains(run.id),
                         usesCloseActionWhileRunning: appModel.terminalSession(for: run) != nil,
                         onSelect: {
@@ -44,22 +44,22 @@ struct TerminalTabStrip: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    // MARK: - Plan Chip
+    // MARK: - Primary Context Chip
 
-    private func planChip(isPlanSelected: Bool) -> some View {
+    private func primaryContextChip(isPrimaryContextSelected: Bool) -> some View {
         HStack(spacing: 5) {
-            Image(systemName: worktree.isDefaultBranchWorkspace ? "book.closed" : "doc.text")
+            Image(systemName: worktree.primaryContextTabSystemImage)
                 .font(.caption.weight(.semibold))
-            Text(worktree.isDefaultBranchWorkspace ? "README" : "Plan")
+            Text(worktree.primaryContextTabTitle)
                 .font(.caption.weight(.semibold))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(isPlanSelected ? Color(nsColor: .underPageBackgroundColor) : Color.clear)
+        .background(isPrimaryContextSelected ? Color(nsColor: .underPageBackgroundColor) : Color.clear)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(isPlanSelected ? Color.accentColor : Color.secondary.opacity(0.2))
-                .frame(height: isPlanSelected ? 2 : 1)
+                .fill(isPrimaryContextSelected ? Color.accentColor : Color.secondary.opacity(0.2))
+                .frame(height: isPrimaryContextSelected ? 2 : 1)
         }
         .overlay(alignment: .trailing) {
             Rectangle()
@@ -68,7 +68,7 @@ struct TerminalTabStrip: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            appModel.selectPlanTab(for: worktree, in: repository)
+            appModel.selectPrimaryContextTab(for: worktree, in: repository)
         }
     }
 }
