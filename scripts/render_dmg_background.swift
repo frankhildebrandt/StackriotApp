@@ -171,7 +171,7 @@ NSAttributedString(
     ]
 ).draw(at: NSPoint(x: 364, y: 235))
 
-let footnote = NSBezierPath(roundedRect: NSRect(x: 80, y: 68, width: 338, height: 34), xRadius: 17, yRadius: 17)
+let footnote = NSBezierPath(roundedRect: NSRect(x: 281, y: 68, width: 338, height: 34), xRadius: 17, yRadius: 17)
 NSColor(calibratedWhite: 1.0, alpha: 0.06).setFill()
 footnote.fill()
 
@@ -182,7 +182,7 @@ NSAttributedString(
         .foregroundColor: NSColor(calibratedWhite: 0.92, alpha: 0.82),
         .paragraphStyle: wrappedParagraph,
     ]
-).draw(in: NSRect(x: 96, y: 74, width: 306, height: 28))
+).draw(in: NSRect(x: 297, y: 74, width: 306, height: 28))
 
 image.unlockFocus()
 

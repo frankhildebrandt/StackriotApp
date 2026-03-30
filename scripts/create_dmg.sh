@@ -85,7 +85,7 @@ on run argv
         set position of item "Applications" of container window to {560, 250}
       end try
       try
-        set position of item "README.md" of container window to {190, 430}
+        set position of item "README.md" of container window to {375, 430}
       end try
 
       close
