@@ -47,8 +47,8 @@ final class AppModel: @unchecked Sendable {
     var terminalTabs = TerminalTabBookkeeping()
     var summarizingRunIDs: Set<UUID> = []
     var dismissedAISummaryRunIDs: Set<UUID> = []
-    var codexPlanDraftsByWorktreeID: [UUID: CodexPlanDraft] = [:]
-    var activeCodexPlanDraftWorktreeID: UUID?
+    var agentPlanDraftsByWorktreeID: [UUID: AgentPlanDraft] = [:]
+    var activeAgentPlanDraftWorktreeID: UUID?
     var planContentVersionsByWorktreeID: [UUID: Int] = [:]
 
     let services: AppServices

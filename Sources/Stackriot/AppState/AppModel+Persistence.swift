@@ -11,7 +11,7 @@ extension AppModel {
     }
 
     func runRecord(with id: UUID) -> RunRecord? {
-        if let draftRun = codexPlanDraftsByWorktreeID.values.first(where: { $0.run.id == id })?.run {
+        if let draftRun = agentPlanDraftsByWorktreeID.values.first(where: { $0.run.id == id })?.run {
             return draftRun
         }
 

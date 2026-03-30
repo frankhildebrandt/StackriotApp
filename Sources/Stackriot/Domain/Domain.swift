@@ -387,7 +387,22 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         case .githubCopilot:
             "GitHub Copilot"
         case .cursorCLI:
-            "Cursor CLI"
+            "Cursor"
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .none:
+            "sparkles"
+        case .claudeCode:
+            "sparkles.rectangle.stack"
+        case .codex:
+            "terminal"
+        case .githubCopilot:
+            "chevron.left.forwardslash.chevron.right"
+        case .cursorCLI:
+            "cursorarrow.click.2"
         }
     }
 
@@ -402,8 +417,21 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         case .githubCopilot:
             "copilot"
         case .cursorCLI:
-            "cursor"
+            "cursor-agent"
         }
+    }
+
+    var supportsPlanning: Bool {
+        switch self {
+        case .codex, .cursorCLI:
+            true
+        default:
+            false
+        }
+    }
+
+    var supportsPlanResume: Bool {
+        supportsPlanning
     }
 
     func launchCommand(in path: String) -> String {
@@ -417,7 +445,7 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         case .githubCopilot:
             "cd \(path.shellEscaped) && copilot"
         case .cursorCLI:
-            "cd \(path.shellEscaped) && cursor ."
+            "cd \(path.shellEscaped) && cursor-agent"
         }
     }
 
@@ -438,7 +466,7 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             // copilot -p executes the task and exits cleanly; --allow-all-tools enables agentic execution
             "cd \(path.shellEscaped) && copilot -p \(prompt.shellEscaped) --allow-all-tools --output-format json"
         case .cursorCLI:
-            launchCommand(in: path)
+            "cd \(path.shellEscaped) && cursor-agent --print --output-format json --trust --force \(prompt.shellEscaped)"
         }
     }
 }
@@ -638,6 +666,71 @@ enum RunOutputInterpreterKind: String, Codable, Sendable {
     case codexExecJSONL
     case claudePrintStreamJSON
     case copilotPromptJSONL
+    case cursorAgentPrintJSON
+}
+
+struct CursorAgentPrintedResponse: Decodable, Equatable, Sendable {
+    let result: String?
+    let sessionID: String?
+    let error: String?
+
+    init(result: String?, sessionID: String?, error: String?) {
+        self.result = result
+        self.sessionID = sessionID
+        self.error = error
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case result
+        case output
+        case response
+        case message
+        case error
+        case sessionID = "session_id"
+        case sessionId
+        case chatID = "chat_id"
+        case chatId
+        case id
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        result = container.decodeFirstString(forKeys: [.result, .output, .response, .message])
+        sessionID = container.decodeFirstString(forKeys: [.sessionID, .sessionId, .chatID, .chatId, .id])
+        error = container.decodeFirstString(forKeys: [.error])
+    }
+
+    static func parse(from text: String) -> CursorAgentPrintedResponse? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmed.data(using: .utf8) else { return nil }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return CursorAgentPrintedResponse(
+            result: cursorPrintedResponseString(in: object, keys: ["result", "output", "response", "message"]),
+            sessionID: cursorPrintedResponseString(in: object, keys: ["session_id", "sessionId", "chat_id", "chatId", "id"]),
+            error: cursorPrintedResponseString(in: object, keys: ["error"])
+        )
+    }
+
+    private static func cursorPrintedResponseString(in object: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = object[key] as? String,
+               let text = value.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty {
+                return text
+            }
+        }
+        return nil
+    }
+}
+
+private extension KeyedDecodingContainer where K == CursorAgentPrintedResponse.CodingKeys {
+    func decodeFirstString(forKeys keys: [K]) -> String? {
+        for key in keys {
+            if let value = try? decodeIfPresent(String.self, forKey: key), let text = value.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty {
+                return text
+            }
+        }
+        return nil
+    }
 }
 
 struct RemoteExecutionContext: Sendable {

@@ -145,15 +145,15 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: Binding(
-            get: { appModel.activeCodexPlanDraftWorktreeID != nil },
+            get: { appModel.activeAgentPlanDraftWorktreeID != nil },
             set: { newValue in
                 if !newValue {
-                    appModel.dismissPresentedCodexPlanDraft()
+                    appModel.dismissPresentedAgentPlanDraft()
                 }
             }
         )) {
-            if let worktreeID = appModel.activeCodexPlanDraftWorktreeID {
-                CodexPlanDraftSheet(worktreeID: worktreeID)
+            if let worktreeID = appModel.activeAgentPlanDraftWorktreeID {
+                AgentPlanDraftSheet(worktreeID: worktreeID)
                     .environment(appModel)
             }
         }
