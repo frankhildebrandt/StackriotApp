@@ -62,6 +62,7 @@ final class AppModel: @unchecked Sendable {
     var prMonitoringTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored
     var codexExecOutputParsers: [UUID: CodexExecJSONLParser] = [:]
+    var codexRunSegmentsByRunID: [UUID: [CodexRunSegment]] = [:]
     var storedModelContext: ModelContext?
     var autoRefreshTask: Task<Void, Never>?
     var nodeRuntimeRefreshTask: Task<Void, Never>?
