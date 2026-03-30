@@ -30,6 +30,10 @@ struct RunConsoleColumn: View {
                 // Action Toolbar
                 WorktreeActionBar(worktree: worktree, repository: repository)
 
+                if appModel.hasDevContainerConfiguration(for: worktree) {
+                    DevContainerConsolePanel(worktree: worktree)
+                }
+
                 Divider()
 
                 // Terminal Tabs + Console
@@ -76,6 +80,20 @@ struct RunConsoleColumn: View {
             if showLogDrawer, let drawerWorktree = worktree {
                 logDrawer(worktree: drawerWorktree)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .task(id: worktree?.id) {
+            guard let worktree, appModel.hasDevContainerConfiguration(for: worktree) else { return }
+            await appModel.refreshDevContainerState(for: worktree)
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                await appModel.refreshDevContainerState(for: worktree)
+            }
+        }
+        .onDisappear {
+            if let worktree {
+                appModel.stopDevContainerLogStreaming(for: worktree.id)
             }
         }
         .toolbar {

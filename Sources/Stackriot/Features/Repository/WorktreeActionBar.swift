@@ -25,12 +25,21 @@ struct WorktreeActionBar: View {
     @State private var pendingDependencyAction: DependencyActionDraft?
     @State private var pendingGitPush = false
     @State private var pendingGitCommit = false
+    @State private var pendingDevContainerDeletion = false
 
     var body: some View {
         HStack(spacing: 6) {
             devToolMenuButton
             agentMenuButton
             terminalButton
+
+            if hasDevContainerConfiguration {
+                Divider()
+                    .frame(height: 18)
+                    .padding(.horizontal, 2)
+
+                devContainerButtonGroup
+            }
 
             Divider()
                 .frame(height: 18)
@@ -107,6 +116,16 @@ struct WorktreeActionBar: View {
         .sheet(isPresented: $pendingGitCommit) {
             GitCommitSheet(worktree: worktree, repository: repository)
         }
+        .confirmationDialog("Devcontainer entfernen?", isPresented: $pendingDevContainerDeletion) {
+            Button("Entfernen", role: .destructive) {
+                Task {
+                    await appModel.deleteDevContainer(for: worktree)
+                }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Die zu diesem Worktree gehoerenden Devcontainer werden mit `docker rm -f` entfernt. Laufende Container werden dabei beendet.")
+        }
     }
 
     private var devToolMenuButton: some View {
@@ -159,6 +178,67 @@ struct WorktreeActionBar: View {
         .buttonStyle(.bordered)
         .disabled(worktree.isDefaultBranchWorkspace)
         .help("Neues Terminal öffnen")
+    }
+
+    private var devContainerButtonGroup: some View {
+        let state = appModel.devContainerState(for: worktree)
+
+        return HStack(spacing: 6) {
+            Button {
+                Task {
+                    await appModel.startDevContainer(for: worktree)
+                }
+            } label: {
+                Image(systemName: DevContainerOperation.start.systemImage)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!state.canStart)
+            .help("Devcontainer starten")
+
+            Button {
+                Task {
+                    await appModel.stopDevContainer(for: worktree)
+                }
+            } label: {
+                Image(systemName: DevContainerOperation.stop.systemImage)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!state.canStop)
+            .help("Devcontainer stoppen")
+
+            Button {
+                Task {
+                    await appModel.restartDevContainer(for: worktree)
+                }
+            } label: {
+                Image(systemName: DevContainerOperation.restart.systemImage)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!state.canRestart)
+            .help("Devcontainer neu starten")
+
+            Button {
+                Task {
+                    await appModel.rebuildDevContainer(for: worktree)
+                }
+            } label: {
+                Image(systemName: DevContainerOperation.rebuild.systemImage)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!state.canRebuild)
+            .help("Devcontainer ohne Build-Cache neu aufbauen")
+
+            Button(role: .destructive) {
+                pendingDevContainerDeletion = true
+            } label: {
+                Image(systemName: DevContainerOperation.delete.systemImage)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!state.canDelete)
+            .help("Devcontainer entfernen")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Devcontainer controls")
     }
 
     private var runConfigButton: some View {
@@ -278,6 +358,10 @@ struct WorktreeActionBar: View {
 
     private var runConfigurations: [RunConfiguration] {
         appModel.availableRunConfigurations(for: worktree)
+    }
+
+    private var hasDevContainerConfiguration: Bool {
+        appModel.hasDevContainerConfiguration(for: worktree)
     }
 
     private var hasDependencyActions: Bool {

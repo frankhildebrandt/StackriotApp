@@ -13,6 +13,7 @@
 		E00000000000000000000002 /* StackriotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000002 /* StackriotApp.swift */; };
 		E00000000000000000000003 /* ModelContainer+Stackriot.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000003 /* ModelContainer+Stackriot.swift */; };
 		E00000000000000000000004 /* AppModel+AgentsNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000004 /* AppModel+AgentsNode.swift */; };
+		E00000000000000000000074 /* AppModel+DevContainers.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000074 /* AppModel+DevContainers.swift */; };
 		E00000000000000000000005 /* AppModel+Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000005 /* AppModel+Persistence.swift */; };
 		E00000000000000000000006 /* AppModel+RemotesSSH.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000006 /* AppModel+RemotesSSH.swift */; };
 		E00000000000000000000007 /* AppModel+Repositories.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000007 /* AppModel+Repositories.swift */; };
@@ -21,6 +22,7 @@
 		E0000000000000000000000A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000A /* AppModel.swift */; };
 		E0000000000000000000000B /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000B /* AppServices.swift */; };
 		E0000000000000000000000C /* Drafts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000C /* Drafts.swift */; };
+		E00000000000000000000075 /* DevContainerDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000075 /* DevContainerDomain.swift */; };
 		E0000000000000000000000E /* Domain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000E /* Domain.swift */; };
 		E00000000000000000000048 /* GeneratedCommitMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000048 /* GeneratedCommitMessage.swift */; };
 		E0000000000000000000000F /* AgentActivityDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000F /* AgentActivityDot.swift */; };
@@ -29,6 +31,7 @@
 		E00000000000000000000012 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000012 /* RootView.swift */; };
 		E00000000000000000000013 /* RunConsoleColumn.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000013 /* RunConsoleColumn.swift */; };
 		E00000000000000000000014 /* RunConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000014 /* RunConsoleView.swift */; };
+		E00000000000000000000076 /* DevContainerConsolePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000076 /* DevContainerConsolePanel.swift */; };
 		E00000000000000000000050 /* CodexRunFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000050 /* CodexRunFeedView.swift */; };
 		E00000000000000000000055 /* CodexPlanDraftSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000055 /* CodexPlanDraftSheet.swift */; };
 		E00000000000000000000015 /* TerminalTabChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000015 /* TerminalTabChip.swift */; };
@@ -79,6 +82,7 @@
 		E00000000000000000000042 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000042 /* AIProviderService.swift */; };
 			E00000000000000000000043 /* AgentRunSummaryWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000043 /* AgentRunSummaryWindow.swift */; };
 			E00000000000000000000044 /* DevToolDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000044 /* DevToolDiscoveryService.swift */; };
+			E00000000000000000000077 /* DevContainerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000077 /* DevContainerService.swift */; };
 			E00000000000000000000045 /* RunConfigurationDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000045 /* RunConfigurationDiscoveryService.swift */; };
 		E00000000000000000000047 /* WorkspaceDiffFileList.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000047 /* WorkspaceDiffFileList.swift */; };
 		E00000000000000000000049 /* CodexExecJSONLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000049 /* CodexExecJSONLParser.swift */; };
@@ -125,6 +129,7 @@
 		D00000000000000000000002 /* StackriotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackriotApp.swift; sourceTree = "<group>"; };
 		D00000000000000000000003 /* ModelContainer+Stackriot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ModelContainer+Stackriot.swift"; sourceTree = "<group>"; };
 		D00000000000000000000004 /* AppModel+AgentsNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+AgentsNode.swift"; sourceTree = "<group>"; };
+		D00000000000000000000074 /* AppModel+DevContainers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+DevContainers.swift"; sourceTree = "<group>"; };
 		D00000000000000000000005 /* AppModel+Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Persistence.swift"; sourceTree = "<group>"; };
 		D00000000000000000000006 /* AppModel+RemotesSSH.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+RemotesSSH.swift"; sourceTree = "<group>"; };
 		D00000000000000000000007 /* AppModel+Repositories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Repositories.swift"; sourceTree = "<group>"; };
@@ -133,6 +138,7 @@
 		D0000000000000000000000A /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		D0000000000000000000000B /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServices.swift; sourceTree = "<group>"; };
 		D0000000000000000000000C /* Drafts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Drafts.swift; sourceTree = "<group>"; };
+		D00000000000000000000075 /* DevContainerDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevContainerDomain.swift; sourceTree = "<group>"; };
 		D0000000000000000000000E /* Domain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain.swift; sourceTree = "<group>"; };
 		D00000000000000000000048 /* GeneratedCommitMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneratedCommitMessage.swift; sourceTree = "<group>"; };
 		D0000000000000000000000F /* AgentActivityDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivityDot.swift; sourceTree = "<group>"; };
@@ -141,6 +147,7 @@
 		D00000000000000000000012 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		D00000000000000000000013 /* RunConsoleColumn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConsoleColumn.swift; sourceTree = "<group>"; };
 		D00000000000000000000014 /* RunConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConsoleView.swift; sourceTree = "<group>"; };
+		D00000000000000000000076 /* DevContainerConsolePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevContainerConsolePanel.swift; sourceTree = "<group>"; };
 		D00000000000000000000050 /* CodexRunFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexRunFeedView.swift; sourceTree = "<group>"; };
 		D00000000000000000000055 /* CodexPlanDraftSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexPlanDraftSheet.swift; sourceTree = "<group>"; };
 		D00000000000000000000015 /* TerminalTabChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTabChip.swift; sourceTree = "<group>"; };
@@ -191,6 +198,7 @@
 		D00000000000000000000042 /* AIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderService.swift; sourceTree = "<group>"; };
 			D00000000000000000000043 /* AgentRunSummaryWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunSummaryWindow.swift; sourceTree = "<group>"; };
 			D00000000000000000000044 /* DevToolDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevToolDiscoveryService.swift; sourceTree = "<group>"; };
+			D00000000000000000000077 /* DevContainerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevContainerService.swift; sourceTree = "<group>"; };
 			D00000000000000000000045 /* RunConfigurationDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConfigurationDiscoveryService.swift; sourceTree = "<group>"; };
 			D00000000000000000000047 /* WorkspaceDiffFileList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDiffFileList.swift; sourceTree = "<group>"; };
 			D00000000000000000000049 /* CodexExecJSONLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexExecJSONLParser.swift; sourceTree = "<group>"; };
@@ -288,6 +296,7 @@
 			isa = PBXGroup;
 			children = (
 				D00000000000000000000004 /* AppModel+AgentsNode.swift */,
+				D00000000000000000000074 /* AppModel+DevContainers.swift */,
 				D00000000000000000000038 /* AppModel+Namespaces.swift */,
 				D0000000000000000000006A /* AppModel+MCP.swift */,
 				D00000000000000000000005 /* AppModel+Persistence.swift */,
@@ -309,6 +318,7 @@
 			isa = PBXGroup;
 			children = (
 				D0000000000000000000000E /* Domain.swift */,
+				D00000000000000000000075 /* DevContainerDomain.swift */,
 				D00000000000000000000048 /* GeneratedCommitMessage.swift */,
 				D0000000000000000000006B /* MCPDomain.swift */,
 				D00000000000000000000064 /* WorktreeContext.swift */,
@@ -365,6 +375,7 @@
 				D00000000000000000000049 /* CodexExecJSONLParser.swift */,
 				D00000000000000000000053 /* CopilotPromptJSONLParser.swift */,
 				D0000000000000000000005F /* CursorAgentPrintJSONParser.swift */,
+				D00000000000000000000077 /* DevContainerService.swift */,
 				D00000000000000000000044 /* DevToolDiscoveryService.swift */,
 				D00000000000000000000069 /* EmbeddedBrowserSessionStore.swift */,
 				D0000000000000000000003D /* GitHubCLIService.swift */,
@@ -425,6 +436,7 @@
 			isa = PBXGroup;
 			children = (
 				D00000000000000000000043 /* AgentRunSummaryWindow.swift */,
+				D00000000000000000000076 /* DevContainerConsolePanel.swift */,
 				D00000000000000000000013 /* RunConsoleColumn.swift */,
 				D00000000000000000000014 /* RunConsoleView.swift */,
 				D00000000000000000000050 /* CodexRunFeedView.swift */,
@@ -582,6 +594,7 @@
 				E00000000000000000000002 /* StackriotApp.swift in Sources */,
 				E00000000000000000000003 /* ModelContainer+Stackriot.swift in Sources */,
 				E00000000000000000000004 /* AppModel+AgentsNode.swift in Sources */,
+				E00000000000000000000074 /* AppModel+DevContainers.swift in Sources */,
 				E00000000000000000000038 /* AppModel+Namespaces.swift in Sources */,
 				E0000000000000000000006A /* AppModel+MCP.swift in Sources */,
 				E00000000000000000000005 /* AppModel+Persistence.swift in Sources */,
@@ -595,6 +608,7 @@
 				E0000000000000000000000A /* AppModel.swift in Sources */,
 				E0000000000000000000000B /* AppServices.swift in Sources */,
 				E0000000000000000000000C /* Drafts.swift in Sources */,
+				E00000000000000000000075 /* DevContainerDomain.swift in Sources */,
 				E0000000000000000000000E /* Domain.swift in Sources */,
 				E0000000000000000000006B /* MCPDomain.swift in Sources */,
 				E00000000000000000000064 /* WorktreeContext.swift in Sources */,
@@ -620,6 +634,7 @@
 				E00000000000000000000071 /* RawLogBrowserWindow.swift in Sources */,
 				E00000000000000000000013 /* RunConsoleColumn.swift in Sources */,
 				E00000000000000000000014 /* RunConsoleView.swift in Sources */,
+				E00000000000000000000076 /* DevContainerConsolePanel.swift in Sources */,
 				E00000000000000000000050 /* CodexRunFeedView.swift in Sources */,
 				E00000000000000000000055 /* CodexPlanDraftSheet.swift in Sources */,
 				E00000000000000000000051 /* CodexRunSegment.swift in Sources */,
@@ -658,6 +673,7 @@
 				E0000000000000000000006C /* MCPModels.swift in Sources */,
 				E0000000000000000000006E /* MCPServerManager.swift in Sources */,
 				E0000000000000000000006D /* MCPToolRegistry.swift in Sources */,
+				E00000000000000000000077 /* DevContainerService.swift in Sources */,
 				E00000000000000000000028 /* AppPaths.swift in Sources */,
 				E00000000000000000000029 /* CommandRunner.swift in Sources */,
 				E0000000000000000000002A /* StackriotError.swift in Sources */,
