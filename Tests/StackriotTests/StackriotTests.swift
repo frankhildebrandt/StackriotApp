@@ -1992,6 +1992,30 @@ struct StackriotTests {
         #expect(response?.planMarkdown == nil)
     }
 
+    @Test
+    func codexPlanResponseParserRejectsNeedsUserInputWithoutQuestions() {
+        let response = AppModel.parseCodexPlanResponse(from: """
+        {
+          "status": "needs_user_input",
+          "summary": "Need product clarification before planning."
+        }
+        """)
+
+        #expect(response == nil)
+    }
+
+    @Test
+    func codexPlanResponseParserRejectsReadyWithoutPlanMarkdown() {
+        let response = AppModel.parseCodexPlanResponse(from: """
+        {
+          "status": "ready",
+          "summary": "Plan is ready."
+        }
+        """)
+
+        #expect(response == nil)
+    }
+
     @MainActor
     @Test
     func codexPlanImportReplacesPersistedPlanWithExtractedMarkdown() throws {
