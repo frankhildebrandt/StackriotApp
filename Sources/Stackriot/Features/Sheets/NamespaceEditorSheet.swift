@@ -24,11 +24,13 @@ struct NamespaceEditorSheet: View {
                     appModel.dismissNamespaceEditor()
                     dismiss()
                 }
+                .keyboardShortcut(.cancelAction)
                 Button(draft.mode == .create ? "Create" : "Save") {
                     let namespace = draft.namespaceID.flatMap(appModel.namespaceRecord(with:))
                     appModel.saveNamespace(name: name, editing: namespace, in: modelContext)
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
