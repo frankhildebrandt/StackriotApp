@@ -127,6 +127,20 @@ final class AgentTerminalSession: ObservableObject {
 
 final class StackriotTerminalView: LocalProcessTerminalView {
     weak var session: AgentTerminalSession?
+    private var didAttemptMetalConfiguration = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, !didAttemptMetalConfiguration else { return }
+        didAttemptMetalConfiguration = true
+        // Prefer full-frame GPU buffers for streaming agent output (vs. per-row cache).
+        metalBufferingMode = .perFrameAggregated
+        do {
+            try setUseMetal(true)
+        } catch {
+            // Falls back to CoreGraphics if Metal is unavailable.
+        }
+    }
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
         super.dataReceived(slice: slice)
