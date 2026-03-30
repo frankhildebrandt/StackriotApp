@@ -274,6 +274,7 @@ enum AgentRunFeedRow: Identifiable, Equatable {
     case turnGroup(
         id: String,
         sourceAgent: AIAgentTool,
+        header: String?,
         title: String,
         subtitle: String?,
         status: AgentRunSegment.Status?,
@@ -286,7 +287,7 @@ enum AgentRunFeedRow: Identifiable, Equatable {
         switch self {
         case .segment(let segment):
             segment.id
-        case .turnGroup(let id, _, _, _, _, _, _):
+        case .turnGroup(let id, _, _, _, _, _, _, _):
             id
         case .changedFiles(let id, _, _, _, _):
             id
@@ -322,6 +323,7 @@ enum AgentRunFeedLayout {
                         .turnGroup(
                             id: "turn-group-\(groupID)",
                             sourceAgent: sourceAgent,
+                            header: turnGroupHeader(from: groupedSegments),
                             title: turnGroupTitle(from: groupedSegments),
                             subtitle: turnGroupSubtitle(from: groupedSegments),
                             status: turnGroupStatus(from: groupedSegments),
@@ -391,18 +393,34 @@ enum AgentRunFeedLayout {
         return groupID
     }
 
-    private static func turnGroupTitle(from segments: [AgentRunSegment]) -> String {
+    private static func turnGroupHeader(from segments: [AgentRunSegment]) -> String? {
         if let intentTitle = segments.reversed().first(where: \.isIntentSegment)?.title {
             return intentTitle
         }
         if let turnTitle = segments.first(where: \.isTurnLifecycleSegment)?.title {
             return turnTitle
         }
-        return segments.last?.title ?? "Turn"
+        return nil
+    }
+
+    private static func turnGroupTitle(from segments: [AgentRunSegment]) -> String {
+        if let assistantTitle = segments.reversed().first(where: { $0.kind == .agentMessage })?.title {
+            return assistantTitle
+        }
+        if let activeToolTitle = segments.reversed().first(where: { $0.isUserVisibleToolSegment })?.title {
+            return activeToolTitle
+        }
+        return turnGroupHeader(from: segments) ?? segments.last?.title ?? "Turn"
     }
 
     private static func turnGroupSubtitle(from segments: [AgentRunSegment]) -> String? {
-        segments.reversed().compactMap(\.subtitle).first
+        if let toolSubtitle = segments.reversed().first(where: { $0.isUserVisibleToolSegment })?.preferredTurnSubtitle {
+            return toolSubtitle
+        }
+        if let userPrompt = segments.reversed().first(where: \.isUserPromptSegment)?.bodyText?.nonEmpty {
+            return userPrompt
+        }
+        return segments.reversed().compactMap(\.subtitle).first
     }
 
     private static func turnGroupStatus(from segments: [AgentRunSegment]) -> AgentRunSegment.Status? {
@@ -421,15 +439,20 @@ enum AgentRunFeedLayout {
     private static func turnGroupSummary(from segments: [AgentRunSegment]) -> String? {
         let actionableSegments = segments.filter { !$0.isTurnLifecycleSegment }
         let toolSegments = actionableSegments.filter { $0.kind == .commandExecution || $0.kind == .toolCall }
+        let summarizedCompletedToolCount = toolSegments.filter(\.isSummarizableCompletedTool).count
         guard !toolSegments.isEmpty else {
-            return actionableSegments.first?.title
+            return actionableSegments.first?.title ?? actionableSegments.first?.bodyText
         }
 
         let firstTool = toolSegments.first?.title ?? "Action"
         if toolSegments.count == 1 {
             return firstTool
         }
-        return "\(toolSegments.count) actions · \(firstTool) + \(toolSegments.count - 1) more"
+        let summary = "\(toolSegments.count) actions · \(firstTool) + \(toolSegments.count - 1) more"
+        guard summarizedCompletedToolCount > 1 else {
+            return summary
+        }
+        return "\(summary) · \(summarizedCompletedToolCount) completed"
     }
 }
 
@@ -440,9 +463,10 @@ private struct AgentRunFeedRowView: View {
         switch row {
         case .segment(let segment):
             AgentRunSegmentRow(segment: segment)
-        case .turnGroup(_, let sourceAgent, let title, let subtitle, let status, let summary, let segments):
+        case .turnGroup(_, let sourceAgent, let header, let title, let subtitle, let status, let summary, let segments):
             AgentTurnGroupRow(
                 sourceAgent: sourceAgent,
+                header: header,
                 title: title,
                 subtitle: subtitle,
                 status: status,
@@ -480,6 +504,7 @@ private struct AgentRunSegmentRow: View {
 
 private struct AgentTurnGroupRow: View {
     let sourceAgent: AIAgentTool
+    let header: String?
     let title: String
     let subtitle: String?
     let status: AgentRunSegment.Status?
@@ -490,6 +515,7 @@ private struct AgentTurnGroupRow: View {
 
     init(
         sourceAgent: AIAgentTool,
+        header: String?,
         title: String,
         subtitle: String?,
         status: AgentRunSegment.Status?,
@@ -497,6 +523,7 @@ private struct AgentTurnGroupRow: View {
         segments: [AgentRunSegment]
     ) {
         self.sourceAgent = sourceAgent
+        self.header = header
         self.title = title
         self.subtitle = subtitle
         self.status = status
@@ -506,8 +533,16 @@ private struct AgentTurnGroupRow: View {
     }
 
     private var visibleSegments: [AgentRunSegment] {
-        let filtered = segments.filter { !$0.isTurnLifecycleSegment }
+        let filtered = segments.filter { !$0.isTurnLifecycleSegment && !$0.isIntentSegment }
         return filtered.isEmpty ? segments : filtered
+    }
+
+    private var expandedSegments: [AgentRunSegment] {
+        visibleSegments.filter { !$0.isSummarizableCompletedTool }
+    }
+
+    private var summarizedCompletedTools: [AgentRunSegment] {
+        visibleSegments.filter(\.isSummarizableCompletedTool)
     }
 
     var body: some View {
@@ -523,15 +558,21 @@ private struct AgentTurnGroupRow: View {
                         .foregroundStyle(.secondary)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(title)
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                            if let subtitle {
-                                Text(subtitle)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                        if let header, header != title {
+                            Text(header)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text(title)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+
+                        if let subtitle, !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
                         }
 
                         HStack(spacing: 8) {
@@ -559,7 +600,11 @@ private struct AgentTurnGroupRow: View {
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(visibleSegments) { segment in
+                    if !summarizedCompletedTools.isEmpty {
+                        AgentCompletedToolSummaryRow(segments: summarizedCompletedTools)
+                    }
+
+                    ForEach(expandedSegments) { segment in
                         AgentRunSegmentRow(segment: segment)
                     }
                 }
@@ -605,6 +650,40 @@ private struct AgentTurnGroupRow: View {
     }
 }
 
+private struct AgentCompletedToolSummaryRow: View {
+    let segments: [AgentRunSegment]
+
+    private var labels: [String] {
+        var seen: Set<String> = []
+        return segments.compactMap { segment in
+            let candidate = (segment.preferredTurnSubtitle ?? segment.title).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !candidate.isEmpty, seen.insert(candidate).inserted else { return nil }
+            return candidate
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle")
+                    .foregroundStyle(.green)
+                Text("\(segments.count) completed tool calls")
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            if !labels.isEmpty {
+                Text(labels.joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
 private struct AgentChatBubble: View {
     let segment: AgentRunSegment
 
@@ -613,8 +692,10 @@ private struct AgentChatBubble: View {
             HStack(spacing: 8) {
                 Image(systemName: sourceIcon)
                     .foregroundStyle(Color.accentColor)
+                Text(segment.title)
+                    .font(.headline)
                 Text(segment.sourceAgent.displayName)
-                    .font(.caption.weight(.semibold))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer()
                 if let subtitle = segment.subtitle {
@@ -1070,5 +1151,27 @@ private extension AgentRunSegment {
         sourceAgent == .githubCopilot
             && kind == .toolCall
             && id.hasPrefix("turn-")
+    }
+
+    var isUserPromptSegment: Bool {
+        kind == .toolCall && title == "User prompt"
+    }
+
+    var preferredTurnSubtitle: String? {
+        subtitle?.nonEmpty ?? bodyText?.nonEmpty ?? title.nonEmpty
+    }
+
+    var isUserVisibleToolSegment: Bool {
+        (kind == .commandExecution || kind == .toolCall)
+            && !isTurnLifecycleSegment
+            && !isIntentSegment
+            && !isUserPromptSegment
+    }
+
+    var isSummarizableCompletedTool: Bool {
+        isUserVisibleToolSegment
+            && status == .completed
+            && aggregatedOutput == nil
+            && detailText == nil
     }
 }

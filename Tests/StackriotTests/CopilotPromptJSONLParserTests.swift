@@ -118,6 +118,38 @@ struct CopilotPromptJSONLParserTests {
     }
 
     @Test
+    func groupsGenericTurnLifecycleEventsWithChildrenUsingRawTurnUUIDs() {
+        let parser = CopilotPromptJSONLParser()
+
+        let chunk = parser.consume("""
+        {"type":"turn.started","data":{"turnId":"turn-uuid-1","interactionId":"it-90"},"id":"event-90","timestamp":"2026-03-30T13:31:52.000Z"}
+        {"type":"tool.execution_start","data":{"toolCallId":"intent-90","toolName":"report_intent","arguments":{"intent":"Exploring discovery UI"}},"id":"event-91","timestamp":"2026-03-30T13:31:52.050Z","parentId":"turn-uuid-1"}
+        {"type":"assistant.message","data":{"messageId":"msg-90","content":"Looking around","phase":"analysis"},"id":"event-92","timestamp":"2026-03-30T13:31:52.100Z","parentId":"turn-uuid-1"}
+        {"type":"tool.execution_start","data":{"toolCallId":"tool-90","toolName":"glob","intentionSummary":"Inspect matching files","arguments":{"pattern":"Sources/**/*.swift"}},"id":"event-93","timestamp":"2026-03-30T13:31:52.150Z","parentId":"turn-uuid-1"}
+        {"type":"turn.completed","data":{"turnId":"turn-uuid-1","interactionId":"it-90"},"id":"event-94","timestamp":"2026-03-30T13:31:52.200Z"}
+        """ + "\n")
+
+        #expect(chunk.renderedText.contains("[copilot] Turn turn-uuid-1 started"))
+        #expect(chunk.renderedText.contains("[copilot] Turn turn-uuid-1 finished"))
+
+        let turn = chunk.segments.first { $0.id == "turn-turn-uuid-1" }
+        #expect(turn?.status == .completed)
+        #expect(turn?.title == "Exploring discovery UI")
+        #expect(turn?.groupID == "turn-uuid-1")
+
+        let intent = chunk.segments.first { $0.id == "intent-90" }
+        #expect(intent?.groupID == "turn-uuid-1")
+
+        let message = chunk.segments.first { $0.id == "msg-90" }
+        #expect(message?.groupID == "turn-uuid-1")
+        #expect(message?.title == "Analysis")
+
+        let tool = chunk.segments.first { $0.id == "tool-90" }
+        #expect(tool?.groupID == "turn-uuid-1")
+        #expect(tool?.subtitle == "Inspect matching files")
+    }
+
+    @Test
     func ignoresEphemeralSessionNoiseEvents() {
         let parser = CopilotPromptJSONLParser()
 
