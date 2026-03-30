@@ -63,6 +63,48 @@ struct CopilotPromptJSONLParserTests {
     }
 
     @Test
+    func mapsTurnLifecycleAndUserMessagesWithoutFallbackSegments() {
+        let parser = CopilotPromptJSONLParser()
+
+        let chunk = parser.consume("""
+        {"type":"assistant.turn_start","data":{"turnId":"22","interactionId":"it-22"},"id":"event-20","timestamp":"2026-03-30T06:40:17.441Z"}
+        {"type":"user.message","data":{"content":"# Cursor CLI Integration","transformedContent":"normalized content","interactionId":"it-22"},"id":"event-21","timestamp":"2026-03-30T06:40:17.500Z"}
+        {"type":"assistant.reasoning_delta","data":{"reasoningId":"reason-22","deltaContent":"Inspecting"},"id":"event-22","timestamp":"2026-03-30T06:40:17.600Z","ephemeral":true}
+        {"type":"assistant.message","data":{"messageId":"msg-22","content":"I am checking the parser","interactionId":"it-22"},"id":"event-23","timestamp":"2026-03-30T06:40:17.700Z"}
+        {"type":"assistant.turn_end","data":{"turnId":"22","interactionId":"it-22"},"id":"event-24","timestamp":"2026-03-30T06:40:17.800Z"}
+        """ + "\n")
+
+        #expect(chunk.renderedText.contains("[copilot] Turn 22 started"))
+        #expect(chunk.renderedText.contains("[user] # Cursor CLI Integration"))
+        #expect(chunk.renderedText.contains("[copilot] I am checking the parser"))
+        #expect(chunk.renderedText.contains("[copilot] Turn 22 finished"))
+
+        let turn = chunk.segments.first { $0.id == "turn-22" }
+        #expect(turn?.kind == .toolCall)
+        #expect(turn?.title == "Turn 22")
+        #expect(turn?.status == .completed)
+        #expect(turn?.revision == 2)
+        #expect(turn?.groupID == "it-22")
+
+        let userMessage = chunk.segments.first { $0.id == "user-event-21" }
+        #expect(userMessage?.kind == .toolCall)
+        #expect(userMessage?.title == "User prompt")
+        #expect(userMessage?.bodyText == "# Cursor CLI Integration")
+        #expect(userMessage?.status == .completed)
+        #expect(userMessage?.groupID == "it-22")
+
+        let reasoning = chunk.segments.first { $0.id == "reason-22" }
+        #expect(reasoning?.kind == .reasoning)
+        #expect(reasoning?.bodyText == "Inspecting")
+
+        let message = chunk.segments.first { $0.id == "msg-22" }
+        #expect(message?.kind == .agentMessage)
+        #expect(message?.bodyText == "I am checking the parser")
+
+        #expect(chunk.segments.contains { $0.kind == .fallbackText } == false)
+    }
+
+    @Test
     func parsesPlanAndFileEventsFromRealCopilotSchemas() {
         let parser = CopilotPromptJSONLParser()
 

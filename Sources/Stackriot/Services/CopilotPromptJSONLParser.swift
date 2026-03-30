@@ -51,6 +51,9 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         if let todoChunk = renderTodoIfNeeded(type: type, object: object) {
             return todoChunk
         }
+        if let conversationChunk = renderConversationEventIfNeeded(type: type, object: object) {
+            return conversationChunk
+        }
         if let toolChunk = renderToolEventIfNeeded(type: type, object: object) {
             return toolChunk
         }
@@ -154,6 +157,56 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         }
 
         return nil
+    }
+
+    private func renderConversationEventIfNeeded(type: String, object: [String: Any]) -> StructuredAgentOutputChunk? {
+        let normalizedType = type.lowercased()
+        let payload = eventPayload(from: object)
+
+        if normalizedType == "user.message" {
+            guard let text = extractMessageText(from: payload.isEmpty ? object : payload, eventType: normalizedType) else {
+                return nil
+            }
+            let segment = makeSegment(
+                id: userMessageSegmentID(for: payload, object: object),
+                kind: .toolCall,
+                title: "User prompt",
+                subtitle: StructuredAgentOutputParserSupport.firstString(
+                    in: payload.isEmpty ? object : payload,
+                    keys: ["interactionId"]
+                ),
+                bodyText: text,
+                status: .completed,
+                groupID: messageGroupID(for: payload, object: object)
+            )
+            return StructuredAgentOutputChunk(
+                renderedText: "[user] \(text)\n",
+                segments: [segment]
+            )
+        }
+
+        guard normalizedType == "assistant.turn_start" || normalizedType == "assistant.turn_end" else {
+            return nil
+        }
+
+        let turnID = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["turnId"])
+            ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["turnId"])
+        let interactionID = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["interactionId"])
+            ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["interactionId"])
+        let title = turnID.map { "Turn \($0)" } ?? "Turn"
+        let status: AgentRunSegment.Status = normalizedType.hasSuffix("start") ? .running : .completed
+        let segment = makeSegment(
+            id: turnSegmentID(for: payload, object: object),
+            kind: .toolCall,
+            title: title,
+            subtitle: interactionID,
+            status: status,
+            groupID: interactionID
+        )
+        let rendered = normalizedType.hasSuffix("start")
+            ? "[copilot] \(title) started\n"
+            : "[copilot] \(title) finished\n"
+        return StructuredAgentOutputChunk(renderedText: rendered, segments: [segment])
     }
 
     private func reasoningChunk(text: String, id: String, groupID: String?, renderedPrefix: String) -> StructuredAgentOutputChunk {
@@ -428,10 +481,10 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
 
     private func extractMessageText(from object: [String: Any], eventType: String) -> String? {
         if eventType.contains("delta") {
-            return StructuredAgentOutputParserSupport.firstString(in: object, keys: ["deltaContent", "content", "text"])
+            return StructuredAgentOutputParserSupport.firstString(in: object, keys: ["deltaContent", "content", "text", "transformedContent"])
                 ?? StructuredAgentOutputParserSupport.joinedText(from: object["delta"])
         }
-        return StructuredAgentOutputParserSupport.firstString(in: object, keys: ["content", "text", "message", "response"])
+        return StructuredAgentOutputParserSupport.firstString(in: object, keys: ["content", "text", "message", "response", "transformedContent"])
             ?? StructuredAgentOutputParserSupport.joinedText(from: object["parts"])
             ?? StructuredAgentOutputParserSupport.joinedText(from: object["message"])
     }
@@ -563,6 +616,17 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
     private func toolSegmentID(for payload: [String: Any], object: [String: Any]) -> String {
         StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["toolCallId", "requestId", "id"])
             ?? stableToolSegmentID(for: object, fallbackPrefix: "copilot-tool")
+    }
+
+    private func turnSegmentID(for payload: [String: Any], object: [String: Any]) -> String {
+        StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["turnId"]).map { "turn-\($0)" }
+            ?? stableSegmentID(for: object, fallbackPrefix: "copilot-turn")
+    }
+
+    private func userMessageSegmentID(for payload: [String: Any], object: [String: Any]) -> String {
+        StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["messageId", "id"]).map { "user-\($0)" }
+            ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["id"]).map { "user-\($0)" }
+            ?? stableSegmentID(for: object, fallbackPrefix: "copilot-user-message")
     }
 
     private func messageGroupID(for payload: [String: Any], object: [String: Any]) -> String? {
