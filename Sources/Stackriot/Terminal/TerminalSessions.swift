@@ -142,8 +142,10 @@ final class StackriotTerminalView: LocalProcessTerminalView {
 final class TerminalSessionContainerView: NSView {
     private weak var hostedTerminalView: StackriotTerminalView?
 
-    func host(_ terminalView: StackriotTerminalView) {
-        guard hostedTerminalView !== terminalView else { return }
+    /// Returns `true` when the hosted view was replaced (not a no-op).
+    @discardableResult
+    func host(_ terminalView: StackriotTerminalView) -> Bool {
+        guard hostedTerminalView !== terminalView else { return false }
 
         hostedTerminalView?.removeFromSuperview()
         hostedTerminalView = terminalView
@@ -156,6 +158,7 @@ final class TerminalSessionContainerView: NSView {
             terminalView.topAnchor.constraint(equalTo: topAnchor),
             terminalView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        return true
     }
 }
 
@@ -164,14 +167,19 @@ struct TerminalSessionView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> TerminalSessionContainerView {
         let container = TerminalSessionContainerView(frame: .zero)
-        container.host(session.view)
+        if container.host(session.view) {
+            DispatchQueue.main.async {
+                session.view.window?.makeFirstResponder(session.view)
+            }
+        }
         return container
     }
 
     func updateNSView(_ nsView: TerminalSessionContainerView, context: Context) {
-        nsView.host(session.view)
-        DispatchQueue.main.async {
-            session.view.window?.makeFirstResponder(session.view)
+        if nsView.host(session.view) {
+            DispatchQueue.main.async {
+                session.view.window?.makeFirstResponder(session.view)
+            }
         }
     }
 }

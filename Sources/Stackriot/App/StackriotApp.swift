@@ -11,7 +11,7 @@ struct StackriotApp: App {
                 .environment(appModel)
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     Task {
-                        await appModel.refreshAllRepositories(force: true)
+                        await appModel.handleAppDidBecomeActive()
                     }
                 }
         }

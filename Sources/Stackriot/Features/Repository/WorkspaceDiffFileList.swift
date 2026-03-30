@@ -43,6 +43,7 @@ struct WorkspaceDiffFileList: View {
 struct DiffFileSection: View {
     let file: WorkspaceDiffFile
     @State private var isExpanded = true
+    @State private var renderedLines: [String] = []
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
@@ -70,10 +71,9 @@ struct DiffFileSection: View {
         }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private var renderedLines: [String] {
-        file.patch.split(whereSeparator: \.isNewline).map(String.init)
+        .task(id: file.patch) {
+            renderedLines = file.patch.split(whereSeparator: \.isNewline).map(String.init)
+        }
     }
 
     private var statusColor: Color {

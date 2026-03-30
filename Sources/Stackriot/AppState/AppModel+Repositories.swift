@@ -188,6 +188,17 @@ extension AppModel {
         }
     }
 
+    /// Lightweight status refresh when the app returns to the foreground (no full `git fetch` for every repo).
+    func handleAppDidBecomeActive() async {
+        let now = Date.now
+        if let last = lastForegroundLightRefreshAt, now.timeIntervalSince(last) < 2 {
+            return
+        }
+        lastForegroundLightRefreshAt = now
+        guard let repository = selectedRepository(), storedModelContext != nil else { return }
+        await refreshWorktreeStatuses(for: repository)
+    }
+
     func revealWorktreeInFinder(_ worktree: WorktreeRecord) async {
         do {
             try await services.ideManager.revealInFinder(path: URL(fileURLWithPath: worktree.path))

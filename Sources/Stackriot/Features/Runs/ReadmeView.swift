@@ -205,10 +205,13 @@ struct MarkdownWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
+        guard context.coordinator.lastMarkdown != markdown else { return }
+        context.coordinator.lastMarkdown = markdown
         webView.loadHTMLString(renderHTML(for: markdown), baseURL: baseURL)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
+        var lastMarkdown: String?
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction

@@ -199,35 +199,28 @@ extension AppModel {
 
     func handleRunOutput(runID: UUID, chunk: String) {
         guard let run = runRecord(with: runID) else { return }
-        appendRawLogChunkIfNeeded(runID: runID, chunk: chunk)
-        if let parser = structuredOutputParsersByRunID[runID] {
-            run.outputText += chunk
-            applyStructuredParsedChunk(parser.consume(chunk), to: runID)
-            if run.isTransientPlanRun {
-                syncAgentPlanSessionID(forRunID: runID)
-            }
-        } else {
-            run.outputText += chunk
-        }
+
         if run.isTransientPlanRun {
+            appendRawLogChunkBuffered(runID: runID, chunk: chunk)
+            if let parser = structuredOutputParsersByRunID[runID] {
+                run.outputText += chunk
+                applyStructuredParsedChunk(parser.consume(chunk), to: runID)
+                syncAgentPlanSessionID(forRunID: runID)
+            } else {
+                run.outputText += chunk
+            }
             importCompletedAgentPlanIfAvailable(forRunID: runID)
             return
         }
-        guard
-            run.actionKind == .aiAgent,
-            let repositoryID = run.repository?.id,
-            let worktreeID = run.worktree?.id,
-            selectedRepositoryID == repositoryID,
-            selectedWorktreeIDsByRepository[repositoryID] == worktreeID
-        else {
-            return
-        }
 
-        terminalTabs.activate(runID: runID, worktreeID: worktreeID)
+        appendRawLogChunkBuffered(runID: runID, chunk: chunk)
+        pendingRunOutputBuffer[runID, default: ""] += chunk
+        scheduleRunOutputFlush(runID: runID)
     }
 
     func handleRunTermination(runID: UUID, exitCode: Int32, wasCancelled: Bool) {
         guard let run = runRecord(with: runID), let modelContext = storedModelContext else { return }
+        flushPendingRunOutput(runID: runID)
         flushBufferedRunOutputIfNeeded(runID: runID)
         if run.isTransientPlanRun {
             syncAgentPlanSessionID(forRunID: runID)
@@ -274,7 +267,9 @@ extension AppModel {
     func handleRunFailure(runID: UUID, message: String) {
         guard let run = runRecord(with: runID), let modelContext = storedModelContext else { return }
         let renderedMessage = "\n\(message)\n"
-        appendRawLogChunkIfNeeded(runID: runID, chunk: renderedMessage)
+        flushPendingRunOutput(runID: runID)
+        flushRawLogBuffer(for: runID)
+        writeRawLogChunkToDisk(runID: runID, chunk: renderedMessage)
         if let parser = structuredOutputParsersByRunID[runID] {
             run.outputText += renderedMessage
             applyStructuredParsedChunk(parser.consume(renderedMessage), to: runID)
@@ -514,7 +509,81 @@ extension AppModel {
         return record
     }
 
-    private func appendRawLogChunkIfNeeded(runID: UUID, chunk: String) {
+    private enum RunOutputBuffering {
+        static let flushInterval: Duration = .milliseconds(75)
+        static let rawLogMaxBufferChars = 256 * 1024
+        static let rawLogFlushInterval: Duration = .milliseconds(250)
+    }
+
+    private func scheduleRunOutputFlush(runID: UUID) {
+        runOutputFlushTasks[runID]?.cancel()
+        runOutputFlushTasks[runID] = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: RunOutputBuffering.flushInterval)
+            guard !Task.isCancelled else { return }
+            self?.performRunOutputFlush(runID: runID)
+        }
+    }
+
+    private func performRunOutputFlush(runID: UUID) {
+        mergePendingRunOutput(runID: runID, activateTerminal: true)
+    }
+
+    private func flushPendingRunOutput(runID: UUID) {
+        mergePendingRunOutput(runID: runID, activateTerminal: false)
+    }
+
+    private func mergePendingRunOutput(runID: UUID, activateTerminal: Bool) {
+        runOutputFlushTasks[runID]?.cancel()
+        runOutputFlushTasks[runID] = nil
+        guard let merged = pendingRunOutputBuffer.removeValue(forKey: runID), !merged.isEmpty else { return }
+        guard let run = runRecord(with: runID) else { return }
+        if let parser = structuredOutputParsersByRunID[runID] {
+            run.outputText += merged
+            applyStructuredParsedChunk(parser.consume(merged), to: runID)
+        } else {
+            run.outputText += merged
+        }
+        guard activateTerminal else { return }
+        guard
+            run.actionKind == .aiAgent,
+            let repositoryID = run.repository?.id,
+            let worktreeID = run.worktree?.id,
+            selectedRepositoryID == repositoryID,
+            selectedWorktreeIDsByRepository[repositoryID] == worktreeID
+        else {
+            return
+        }
+        terminalTabs.activate(runID: runID, worktreeID: worktreeID)
+    }
+
+    private func appendRawLogChunkBuffered(runID: UUID, chunk: String) {
+        guard rawLogRecordIDsByRunID[runID] != nil else { return }
+        rawLogDiskBuffer[runID, default: ""] += chunk
+        if rawLogDiskBuffer[runID]!.utf16.count >= RunOutputBuffering.rawLogMaxBufferChars {
+            flushRawLogBuffer(for: runID)
+        } else {
+            scheduleRawLogFlush(runID: runID)
+        }
+    }
+
+    private func scheduleRawLogFlush(runID: UUID) {
+        rawLogFlushTasks[runID]?.cancel()
+        rawLogFlushTasks[runID] = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: RunOutputBuffering.rawLogFlushInterval)
+            guard !Task.isCancelled else { return }
+            self?.flushRawLogBuffer(for: runID)
+            self?.rawLogFlushTasks.removeValue(forKey: runID)
+        }
+    }
+
+    private func flushRawLogBuffer(for runID: UUID) {
+        rawLogFlushTasks[runID]?.cancel()
+        rawLogFlushTasks[runID] = nil
+        guard let text = rawLogDiskBuffer.removeValue(forKey: runID), !text.isEmpty else { return }
+        writeRawLogChunkToDisk(runID: runID, chunk: text)
+    }
+
+    private func writeRawLogChunkToDisk(runID: UUID, chunk: String) {
         guard let record = rawLogRecordForRunID(runID) else { return }
         do {
             try services.rawLogArchive.append(chunk, to: record)
@@ -524,6 +593,7 @@ extension AppModel {
     }
 
     private func finalizeRawLogIfNeeded(runID: UUID, endedAt: Date, status: RunStatusKind) {
+        flushRawLogBuffer(for: runID)
         defer {
             rawLogRecordIDsByRunID.removeValue(forKey: runID)
         }
