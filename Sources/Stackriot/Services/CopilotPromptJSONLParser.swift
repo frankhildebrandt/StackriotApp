@@ -209,7 +209,14 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
             )
         }
 
-        guard normalizedType == "assistant.turn_start" || normalizedType == "assistant.turn_end" else {
+        let isLifecycleEvent = [
+            "assistant.turn_start",
+            "assistant.turn_end",
+            "turn.started",
+            "turn.completed",
+            "turn.failed",
+        ].contains(normalizedType)
+        guard isLifecycleEvent else {
             return nil
         }
 
@@ -219,7 +226,15 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
             ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["interactionId"])
         let groupID = segmentGroupID(for: payload, object: object) ?? interactionID
         let fallbackTitle = turnID.map { "Turn \($0)" } ?? "Turn"
-        let status: AgentRunSegment.Status = normalizedType.hasSuffix("start") ? .running : .completed
+        let status: AgentRunSegment.Status
+        switch normalizedType {
+        case "assistant.turn_start", "turn.started":
+            status = .running
+        case "turn.failed":
+            status = .failed
+        default:
+            status = .completed
+        }
         let segment = makeSegment(
             id: turnSegmentID(for: payload, object: object),
             kind: .toolCall,
@@ -228,9 +243,15 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
             status: status,
             groupID: groupID
         )
-        let rendered = normalizedType.hasSuffix("start")
-            ? "[copilot] \(fallbackTitle) started\n"
-            : "[copilot] \(fallbackTitle) finished\n"
+        let rendered: String
+        switch normalizedType {
+        case "assistant.turn_start", "turn.started":
+            rendered = "[copilot] \(fallbackTitle) started\n"
+        case "turn.failed":
+            rendered = "[copilot] \(fallbackTitle) failed\n"
+        default:
+            rendered = "[copilot] \(fallbackTitle) finished\n"
+        }
         return StructuredAgentOutputChunk(renderedText: rendered, segments: [segment])
     }
 
@@ -668,10 +689,11 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
 
     private func segmentGroupID(for payload: [String: Any], object: [String: Any]) -> String? {
         StructuredAgentOutputParserSupport.firstString(in: object, keys: ["parentId", "parent_id"])
-            ?? StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["parentId", "parent_id", "interactionId", "parentToolCallId", "conversation_id", "session_id"])
+            ?? StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["parentId", "parent_id"])
+            ?? StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["turnId"])
+            ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["turnId"])
+            ?? StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["interactionId", "parentToolCallId", "conversation_id", "session_id"])
             ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["interactionId", "conversation_id", "session_id"])
-            ?? StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["turnId"]).map { "turn-\($0)" }
-            ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["turnId"]).map { "turn-\($0)" }
     }
 
     private func stableSegmentID(for object: [String: Any], fallbackPrefix: String) -> String {
