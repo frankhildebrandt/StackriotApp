@@ -69,6 +69,22 @@ extension AppModel {
             worktree: worktree
         )
         run.outputText = "$ \(commandLine)\n"
+
+        let rawLogRecord: AgentRawLogRecord?
+        do {
+            rawLogRecord = try prepareRawLogRecordIfNeeded(
+                for: run,
+                descriptor: descriptor,
+                repository: repository,
+                worktree: worktree,
+                initialOutput: run.outputText,
+                modelContext: modelContext
+            )
+        } catch {
+            pendingErrorMessage = "RAW log archive could not be created: \(error.localizedDescription)"
+            return nil
+        }
+
         repository.runs.append(run)
         modelContext.insert(run)
         if let interpreter = descriptor.outputInterpreter {
@@ -80,6 +96,9 @@ extension AppModel {
         do {
             try modelContext.save()
             let runID = run.id
+            if let rawLogRecord {
+                rawLogRecordIDsByRunID[runID] = rawLogRecord.id
+            }
             activeRunIDs.insert(runID)
             if descriptor.actionKind == .aiAgent {
                 if descriptor.showsAgentIndicator {
@@ -99,6 +118,10 @@ extension AppModel {
             }
             return run
         } catch {
+            if let rawLogRecord {
+                try? services.rawLogArchive.delete(rawLogRecord)
+                modelContext.delete(rawLogRecord)
+            }
             modelContext.delete(run)
             pendingErrorMessage = error.localizedDescription
             return nil
@@ -111,7 +134,11 @@ extension AppModel {
         repository: ManagedRepository,
         worktree: WorktreeRecord?,
         isTransientPlanRun: Bool = false
-    ) -> RunRecord {
+    ) -> RunRecord? {
+        guard let modelContext = storedModelContext else {
+            pendingErrorMessage = "The model context is unavailable."
+            return nil
+        }
         let commandLine = descriptor.displayCommandLine ?? ([descriptor.executable] + descriptor.arguments).joined(separator: " ")
         let run = RunRecord(
             actionKind: descriptor.actionKind,
@@ -126,6 +153,25 @@ extension AppModel {
         )
         run.isTransientPlanRun = isTransientPlanRun
         run.outputText = "$ \(commandLine)\n"
+
+        let rawLogRecord: AgentRawLogRecord?
+        do {
+            rawLogRecord = try prepareRawLogRecordIfNeeded(
+                for: run,
+                descriptor: descriptor,
+                repository: repository,
+                worktree: worktree,
+                initialOutput: run.outputText,
+                modelContext: modelContext
+            )
+            if let rawLogRecord {
+                try modelContext.save()
+                rawLogRecordIDsByRunID[run.id] = rawLogRecord.id
+            }
+        } catch {
+            pendingErrorMessage = "RAW log archive could not be created: \(error.localizedDescription)"
+            return nil
+        }
 
         if let interpreter = descriptor.outputInterpreter {
             let parser = StructuredAgentOutputParserFactory.makeParser(for: interpreter)
@@ -153,6 +199,7 @@ extension AppModel {
 
     func handleRunOutput(runID: UUID, chunk: String) {
         guard let run = runRecord(with: runID) else { return }
+        appendRawLogChunkIfNeeded(runID: runID, chunk: chunk)
         if let parser = structuredOutputParsersByRunID[runID] {
             run.outputText += chunk
             applyStructuredParsedChunk(parser.consume(chunk), to: runID)
@@ -185,9 +232,12 @@ extension AppModel {
         if run.isTransientPlanRun {
             syncAgentPlanSessionID(forRunID: runID)
         }
-        run.endedAt = .now
+        let endedAt = Date.now
+        run.endedAt = endedAt
         run.exitCode = Int(exitCode)
-        run.status = wasCancelled ? .cancelled : (exitCode == 0 ? .succeeded : .failed)
+        let finalStatus: RunStatusKind = wasCancelled ? .cancelled : (exitCode == 0 ? .succeeded : .failed)
+        run.status = finalStatus
+        finalizeRawLogIfNeeded(runID: runID, endedAt: endedAt, status: finalStatus)
         activeRunIDs.remove(runID)
         delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
@@ -224,6 +274,7 @@ extension AppModel {
     func handleRunFailure(runID: UUID, message: String) {
         guard let run = runRecord(with: runID), let modelContext = storedModelContext else { return }
         let renderedMessage = "\n\(message)\n"
+        appendRawLogChunkIfNeeded(runID: runID, chunk: renderedMessage)
         if let parser = structuredOutputParsersByRunID[runID] {
             run.outputText += renderedMessage
             applyStructuredParsedChunk(parser.consume(renderedMessage), to: runID)
@@ -234,8 +285,10 @@ extension AppModel {
             run.outputText += renderedMessage
         }
         flushBufferedRunOutputIfNeeded(runID: runID)
-        run.endedAt = .now
+        let endedAt = Date.now
+        run.endedAt = endedAt
         run.status = .failed
+        finalizeRawLogIfNeeded(runID: runID, endedAt: endedAt, status: .failed)
         activeRunIDs.remove(runID)
         delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
@@ -438,6 +491,56 @@ extension AppModel {
     private func flushBufferedRunOutputIfNeeded(runID: UUID) {
         guard let parser = structuredOutputParsersByRunID[runID] else { return }
         applyStructuredParsedChunk(parser.finish(), to: runID)
+    }
+
+    private func prepareRawLogRecordIfNeeded(
+        for run: RunRecord,
+        descriptor: CommandExecutionDescriptor,
+        repository: ManagedRepository,
+        worktree: WorktreeRecord?,
+        initialOutput: String,
+        modelContext: ModelContext
+    ) throws -> AgentRawLogRecord? {
+        guard descriptor.agentTool != nil else { return nil }
+        let record = try services.rawLogArchive.createRecord(
+            runID: run.id,
+            descriptor: descriptor,
+            repository: repository,
+            worktree: worktree,
+            startedAt: run.startedAt,
+            initialOutput: initialOutput
+        )
+        modelContext.insert(record)
+        return record
+    }
+
+    private func appendRawLogChunkIfNeeded(runID: UUID, chunk: String) {
+        guard let record = rawLogRecordForRunID(runID) else { return }
+        do {
+            try services.rawLogArchive.append(chunk, to: record)
+        } catch {
+            pendingErrorMessage = "RAW log archive could not be updated: \(error.localizedDescription)"
+        }
+    }
+
+    private func finalizeRawLogIfNeeded(runID: UUID, endedAt: Date, status: RunStatusKind) {
+        defer {
+            rawLogRecordIDsByRunID.removeValue(forKey: runID)
+        }
+        guard let record = rawLogRecordForRunID(runID) else { return }
+        do {
+            try services.rawLogArchive.finalize(record, endedAt: endedAt, status: status)
+        } catch {
+            pendingErrorMessage = "RAW log archive could not be finalized: \(error.localizedDescription)"
+        }
+    }
+
+    private func rawLogRecordForRunID(_ runID: UUID) -> AgentRawLogRecord? {
+        guard let recordID = rawLogRecordIDsByRunID[runID], let modelContext = storedModelContext else {
+            return nil
+        }
+        let descriptor = FetchDescriptor<AgentRawLogRecord>(predicate: #Predicate { $0.id == recordID })
+        return try? modelContext.fetch(descriptor).first
     }
 
     func structuredSegments(for run: RunRecord) -> [AgentRunSegment] {

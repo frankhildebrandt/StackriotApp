@@ -49,6 +49,10 @@ enum AppPaths {
         applicationSupportDirectory.appendingPathComponent("Plans", isDirectory: true)
     }
 
+    static var rawLogsDirectory: URL {
+        applicationSupportDirectory.appendingPathComponent("RawLogs", isDirectory: true)
+    }
+
     static var codexPlanArtifactsDirectory: URL {
         agentPlanArtifactsDirectory(for: .codex)
     }
@@ -91,6 +95,7 @@ enum AppPaths {
         try fileManager.createDirectory(at: bareRepositoriesRoot, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: worktreesRoot, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: plansDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: rawLogsDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: codexPlanArtifactsDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: agentPlanArtifactsDirectory(for: .cursorCLI), withIntermediateDirectories: true)
     }

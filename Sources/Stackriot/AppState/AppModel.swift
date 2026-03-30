@@ -71,6 +71,8 @@ final class AppModel: @unchecked Sendable {
     var prMonitoringTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored
     var structuredOutputParsersByRunID: [UUID: any StructuredAgentOutputParsing] = [:]
+    @ObservationIgnored
+    var rawLogRecordIDsByRunID: [UUID: UUID] = [:]
     var agentRunSegmentsByRunID: [UUID: [AgentRunSegment]] = [:]
     var storedModelContext: ModelContext?
     var autoRefreshTask: Task<Void, Never>?

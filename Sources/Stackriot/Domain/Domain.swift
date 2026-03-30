@@ -747,6 +747,8 @@ struct CommandExecutionDescriptor: Sendable {
     let environment: [String: String]
     let usesTerminalSession: Bool
     let outputInterpreter: RunOutputInterpreterKind?
+    let agentTool: AIAgentTool?
+    let initialPrompt: String?
 
     init(
         title: String,
@@ -763,7 +765,9 @@ struct CommandExecutionDescriptor: Sendable {
         stdinText: String? = nil,
         environment: [String: String] = [:],
         usesTerminalSession: Bool = true,
-        outputInterpreter: RunOutputInterpreterKind? = nil
+        outputInterpreter: RunOutputInterpreterKind? = nil,
+        agentTool: AIAgentTool? = nil,
+        initialPrompt: String? = nil
     ) {
         self.title = title
         self.actionKind = actionKind
@@ -780,6 +784,8 @@ struct CommandExecutionDescriptor: Sendable {
         self.environment = environment
         self.usesTerminalSession = usesTerminalSession
         self.outputInterpreter = outputInterpreter
+        self.agentTool = agentTool
+        self.initialPrompt = initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
     }
 }
 

@@ -55,6 +55,11 @@ struct StackriotAppCommands: Commands {
             }
             .keyboardShortcut("1", modifiers: [.command])
 
+            Button("RAW Logs") {
+                openWindow(id: "raw-logs")
+            }
+            .keyboardShortcut("2", modifiers: [.command])
+
             Button("Show About") {
                 openWindow(id: "about")
             }
