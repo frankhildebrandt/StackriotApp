@@ -96,6 +96,10 @@
 		E0000000000000000000005C /* SettingsScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000005C /* SettingsScaffold.swift */; };
 		E0000000000000000000005D /* SSHKeysSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000005D /* SSHKeysSettingsView.swift */; };
 		E0000000000000000000005E /* TerminalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000005E /* TerminalSettingsView.swift */; };
+		E00000000000000000000060 /* JiraSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000060 /* JiraSettingsView.swift */; };
+		E00000000000000000000061 /* JiraCloudService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000061 /* JiraCloudService.swift */; };
+		E00000000000000000000062 /* KeychainSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000062 /* KeychainSecretStore.swift */; };
+		E00000000000000000000063 /* TicketProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000063 /* TicketProviderService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -188,6 +192,10 @@
 		D0000000000000000000005C /* SettingsScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScaffold.swift; sourceTree = "<group>"; };
 		D0000000000000000000005D /* SSHKeysSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeysSettingsView.swift; sourceTree = "<group>"; };
 		D0000000000000000000005E /* TerminalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsView.swift; sourceTree = "<group>"; };
+		D00000000000000000000060 /* JiraSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraSettingsView.swift; sourceTree = "<group>"; };
+		D00000000000000000000061 /* JiraCloudService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraCloudService.swift; sourceTree = "<group>"; };
+		D00000000000000000000062 /* KeychainSecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecretStore.swift; sourceTree = "<group>"; };
+		D00000000000000000000063 /* TicketProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketProviderService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -319,12 +327,14 @@
 				D0000000000000000000005F /* CursorAgentPrintJSONParser.swift */,
 				D00000000000000000000044 /* DevToolDiscoveryService.swift */,
 				D0000000000000000000003D /* GitHubCLIService.swift */,
+				D00000000000000000000061 /* JiraCloudService.swift */,
 				D00000000000000000000028 /* AppPaths.swift */,
 				D00000000000000000000029 /* CommandRunner.swift */,
 				D0000000000000000000002A /* StackriotError.swift */,
 				D0000000000000000000002B /* GitSSHEnvironmentBuilder.swift */,
 				D0000000000000000000002C /* IDEManager.swift */,
 				D0000000000000000000002D /* KeychainSSHKeyStore.swift */,
+				D00000000000000000000062 /* KeychainSecretStore.swift */,
 				D0000000000000000000002E /* MakeToolingService.swift */,
 				D0000000000000000000002F /* NodeToolingService.swift */,
 				D00000000000000000000030 /* RepositoryManager.swift */,
@@ -332,6 +342,7 @@
 				D00000000000000000000032 /* ShellEnvironment.swift */,
 				D00000000000000000000031 /* SSHKeyManager.swift */,
 				D00000000000000000000054 /* StructuredAgentOutputParser.swift */,
+				D00000000000000000000063 /* TicketProviderService.swift */,
 				D00000000000000000000033 /* WorktreeManager.swift */,
 				D00000000000000000000034 /* WorktreeStatusService.swift */,
 			);
@@ -422,6 +433,7 @@
 			children = (
 				D00000000000000000000056 /* AboutSettingsView.swift */,
 				D00000000000000000000057 /* AIProviderSettingsView.swift */,
+				D00000000000000000000060 /* JiraSettingsView.swift */,
 				D00000000000000000000058 /* NodeSettingsView.swift */,
 				D00000000000000000000059 /* RepositoriesSettingsView.swift */,
 				D0000000000000000000005A /* SettingsCategory.swift */,
@@ -527,6 +539,7 @@
 				E0000000000000000000000E /* Domain.swift in Sources */,
 				E00000000000000000000056 /* AboutSettingsView.swift in Sources */,
 				E00000000000000000000057 /* AIProviderSettingsView.swift in Sources */,
+				E00000000000000000000060 /* JiraSettingsView.swift in Sources */,
 				E00000000000000000000058 /* NodeSettingsView.swift in Sources */,
 				E00000000000000000000059 /* RepositoriesSettingsView.swift in Sources */,
 				E0000000000000000000005A /* SettingsCategory.swift in Sources */,
@@ -574,17 +587,20 @@
 				E00000000000000000000026 /* NodeRuntimeManager.swift in Sources */,
 				E00000000000000000000027 /* AIAgentManager.swift in Sources */,
 				E0000000000000000000003D /* GitHubCLIService.swift in Sources */,
+				E00000000000000000000061 /* JiraCloudService.swift in Sources */,
 				E00000000000000000000028 /* AppPaths.swift in Sources */,
 				E00000000000000000000029 /* CommandRunner.swift in Sources */,
 				E0000000000000000000002A /* StackriotError.swift in Sources */,
 				E0000000000000000000002B /* GitSSHEnvironmentBuilder.swift in Sources */,
 				E0000000000000000000002C /* IDEManager.swift in Sources */,
 				E0000000000000000000002D /* KeychainSSHKeyStore.swift in Sources */,
+				E00000000000000000000062 /* KeychainSecretStore.swift in Sources */,
 				E0000000000000000000002E /* MakeToolingService.swift in Sources */,
 				E0000000000000000000002F /* NodeToolingService.swift in Sources */,
 				E00000000000000000000030 /* RepositoryManager.swift in Sources */,
 				E00000000000000000000031 /* SSHKeyManager.swift in Sources */,
 				E00000000000000000000032 /* ShellEnvironment.swift in Sources */,
+				E00000000000000000000063 /* TicketProviderService.swift in Sources */,
 				E00000000000000000000033 /* WorktreeManager.swift in Sources */,
 				E00000000000000000000034 /* WorktreeStatusService.swift in Sources */,
 				E00000000000000000000035 /* TerminalSessions.swift in Sources */,

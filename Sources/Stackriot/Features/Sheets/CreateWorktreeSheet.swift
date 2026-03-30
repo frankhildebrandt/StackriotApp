@@ -31,8 +31,8 @@ struct CreateWorktreeSheet: View {
         Dateien und Metadaten in diesem Repository werden lokal erweitert.
         """
 
-        if appModel.worktreeDraft.hasConfirmedTicket, let selectedIssue = appModel.worktreeDraft.selectedTicket {
-            message += "\n\nDie bestaetigte Issue #\(selectedIssue.number) wird als Kontext uebernommen und der initiale Plan vorbereitet."
+        if appModel.worktreeDraft.hasConfirmedTicket, let selectedTicket = appModel.worktreeDraft.selectedTicket {
+            message += "\n\nDas bestaetigte \(selectedTicket.reference.provider.ticketLabel) \(selectedTicket.reference.displayID) wird als Kontext uebernommen und der initiale Plan vorbereitet."
         } else if let issueContext = appModel.worktreeDraft.issueContext.nilIfBlank {
             message += "\n\nDer Kontext \"\(issueContext)\" wird dem Worktree zugeordnet."
         }
@@ -54,7 +54,8 @@ struct CreateWorktreeSheet: View {
     var body: some View {
         @Bindable var appModel = appModel
         let draft = appModel.worktreeDraft
-        let status = draft.ticketProviderStatus
+        let status = draft.selectedTicketProviderStatus
+        let selectedProvider = draft.ticketProvider ?? draft.availableTicketProviders.first
 
         VStack(alignment: .leading, spacing: 20) {
             Text("Create Worktree")
@@ -156,11 +157,11 @@ struct CreateWorktreeSheet: View {
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                                 .frame(width: 12)
-                            Text("GitHub-Issue (optional)")
+                            Text("Ticket (optional)")
                                 .font(.headline)
                             Spacer()
-                            if draft.hasConfirmedTicket, let selectedIssue = draft.selectedTicket {
-                                Text("#\(selectedIssue.number)")
+                            if draft.hasConfirmedTicket, let selectedTicket = draft.selectedTicket {
+                                Text(selectedTicket.reference.displayID)
                                     .font(.caption.weight(.medium))
                                     .foregroundStyle(.green)
                             }
@@ -171,6 +172,21 @@ struct CreateWorktreeSheet: View {
 
                     if draft.isTicketSectionExpanded {
                         VStack(alignment: .leading, spacing: 12) {
+                            if draft.availableTicketProviders.count > 1 {
+                                Picker("Provider", selection: Binding(
+                                    get: { draft.ticketProvider ?? draft.availableTicketProviders.first ?? .github },
+                                    set: { appModel.setWorktreeTicketProvider($0) }
+                                )) {
+                                    ForEach(draft.availableTicketProviders) { provider in
+                                        Text(provider.displayName).tag(provider)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .disabled(isCreating)
+                            } else if let selectedProvider {
+                                LabeledContent("Provider", value: selectedProvider.displayName)
+                            }
+
                             if let status {
                                 HStack(alignment: .top, spacing: 8) {
                                     Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
@@ -185,7 +201,7 @@ struct CreateWorktreeSheet: View {
                             }
 
                             HStack(spacing: 8) {
-                                TextField("Issue # oder Titel", text: $appModel.worktreeDraft.ticketSearchText)
+                                TextField(selectedProvider?.searchPrompt ?? "Ticket-Key oder Titel", text: $appModel.worktreeDraft.ticketSearchText)
                                     .textFieldStyle(.roundedBorder)
                                     .disabled(isCreating || status?.isAvailable != true)
 
@@ -196,15 +212,15 @@ struct CreateWorktreeSheet: View {
                             }
 
                             if draft.isTicketLoading {
-                                ProgressView("GitHub-Issues werden geladen...")
+                                ProgressView("Tickets werden geladen...")
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             } else if status?.isAvailable == true {
                                 if draft.ticketSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    Text("Suche nach einer Issue-Nummer oder einem Titel, um optional Kontext fuer diesen Worktree zu uebernehmen.")
+                                    Text(selectedProvider?.searchHint ?? "Suche nach einem Ticket, um optional Kontext fuer diesen Worktree zu uebernehmen.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 } else if draft.ticketSearchResults.isEmpty {
-                                    Text("Keine Issues gefunden.")
+                                    Text("Keine Tickets gefunden.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 } else {
@@ -217,11 +233,11 @@ struct CreateWorktreeSheet: View {
                                                     }
                                                 } label: {
                                                     VStack(alignment: .leading, spacing: 4) {
-                                                        Text("#\(issue.number) \(issue.title)")
+                                                        Text("\(issue.reference.displayID) \(issue.title)")
                                                             .font(.subheadline.weight(.medium))
                                                             .foregroundStyle(.primary)
                                                             .frame(maxWidth: .infinity, alignment: .leading)
-                                                        Text(issue.state.capitalized)
+                                                        Text(issue.status.capitalized)
                                                             .font(.caption)
                                                             .foregroundStyle(.secondary)
                                                     }
@@ -238,17 +254,17 @@ struct CreateWorktreeSheet: View {
                                 }
                             }
 
-                            if let selectedIssue = draft.selectedTicket {
+                            if let selectedTicket = draft.selectedTicket {
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack(spacing: 8) {
                                         Image(systemName: draft.hasConfirmedTicket ? "checkmark.seal.fill" : "number")
                                             .foregroundStyle(draft.hasConfirmedTicket ? .green : .secondary)
-                                        Text(draft.hasConfirmedTicket ? "Issue bestaetigt" : "Issue ausgewaehlt")
+                                        Text(draft.hasConfirmedTicket ? "\(selectedTicket.reference.provider.ticketLabel) bestaetigt" : "\(selectedTicket.reference.provider.ticketLabel) ausgewaehlt")
                                             .font(.caption.weight(.medium))
                                             .foregroundStyle(.secondary)
                                     }
 
-                                    Text("#\(selectedIssue.number) \(selectedIssue.title)")
+                                    Text("\(selectedTicket.reference.displayID) \(selectedTicket.title)")
                                         .font(.subheadline.weight(.medium))
 
                                     if let details = draft.selectedIssueDetails {
@@ -318,6 +334,12 @@ struct CreateWorktreeSheet: View {
         .onChange(of: appModel.worktreeDraft.ticketSearchText) { _, newValue in
             scheduleSearch(for: newValue)
         }
+        .onChange(of: appModel.worktreeDraft.ticketProvider) { _, _ in
+            guard appModel.worktreeDraft.ticketSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+                return
+            }
+            triggerImmediateSearch()
+        }
         .confirmationDialog("Worktree erstellen?", isPresented: $pendingCreationConfirmation) {
             Button("Erstellen") {
                 createWorktree()
@@ -334,7 +356,7 @@ struct CreateWorktreeSheet: View {
             appModel.clearWorktreeTicketSelection()
         }
 
-        guard appModel.worktreeDraft.ticketProviderStatus?.isAvailable == true else { return }
+        guard appModel.worktreeDraft.selectedTicketProviderStatus?.isAvailable == true else { return }
         guard appModel.worktreeDraft.isTicketSectionExpanded else { return }
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             Task { @MainActor in
