@@ -230,7 +230,8 @@ extension AppModel {
         _ tool: AIAgentTool,
         for worktree: WorktreeRecord,
         in modelContext: ModelContext,
-        initialPrompt: String? = nil
+        initialPrompt: String? = nil,
+        options: AgentLaunchOptions = AgentLaunchOptions()
     ) -> RunRecord? {
         guard tool != .none else { return nil }
 
@@ -249,15 +250,30 @@ extension AppModel {
             let promptText = initialPrompt?.nonEmpty
             if let promptText {
                 let descriptor: CommandExecutionDescriptor?
-                switch tool {
-                case .codex:
+                if let components = tool.promptCommandComponents(for: promptText, options: options),
+                   let executable = tool.executableName
+                {
+                    let outputInterpreter: RunOutputInterpreterKind?
+                    switch tool {
+                    case .codex:
+                        outputInterpreter = .codexExecJSONL
+                    case .claudeCode:
+                        outputInterpreter = .claudePrintStreamJSON
+                    case .githubCopilot:
+                        outputInterpreter = .copilotPromptJSONL
+                    case .cursorCLI:
+                        outputInterpreter = .cursorAgentPrintJSON
+                    case .none:
+                        outputInterpreter = nil
+                    }
+
                     descriptor = CommandExecutionDescriptor(
                         title: tool.displayName,
                         actionKind: .aiAgent,
                         showsAgentIndicator: true,
-                        executable: "codex",
-                        arguments: ["exec", "--full-auto", "--json", "--color", "never", promptText],
-                        displayCommandLine: "codex exec --full-auto --json --color never \(promptText.shellEscaped)",
+                        executable: executable,
+                        arguments: components.arguments,
+                        displayCommandLine: components.displayCommandLine,
                         currentDirectoryURL: URL(fileURLWithPath: worktree.path),
                         repositoryID: repository.id,
                         worktreeID: worktree.id,
@@ -265,68 +281,11 @@ extension AppModel {
                         stdinText: nil,
                         environment: [:],
                         usesTerminalSession: false,
-                        outputInterpreter: .codexExecJSONL,
+                        outputInterpreter: outputInterpreter,
                         agentTool: tool,
                         initialPrompt: promptText
                     )
-                case .claudeCode:
-                    descriptor = CommandExecutionDescriptor(
-                        title: tool.displayName,
-                        actionKind: .aiAgent,
-                        showsAgentIndicator: true,
-                        executable: "claude",
-                        arguments: ["-p", "--dangerously-skip-permissions", "--output-format", "stream-json", promptText],
-                        displayCommandLine: "claude -p --dangerously-skip-permissions --output-format stream-json \(promptText.shellEscaped)",
-                        currentDirectoryURL: URL(fileURLWithPath: worktree.path),
-                        repositoryID: repository.id,
-                        worktreeID: worktree.id,
-                        runtimeRequirement: nil,
-                        stdinText: nil,
-                        environment: [:],
-                        usesTerminalSession: false,
-                        outputInterpreter: .claudePrintStreamJSON,
-                        agentTool: tool,
-                        initialPrompt: promptText
-                    )
-                case .githubCopilot:
-                    descriptor = CommandExecutionDescriptor(
-                        title: tool.displayName,
-                        actionKind: .aiAgent,
-                        showsAgentIndicator: true,
-                        executable: "copilot",
-                        arguments: ["-p", promptText, "--allow-all-tools", "--output-format", "json"],
-                        displayCommandLine: "copilot -p \(promptText.shellEscaped) --allow-all-tools --output-format json",
-                        currentDirectoryURL: URL(fileURLWithPath: worktree.path),
-                        repositoryID: repository.id,
-                        worktreeID: worktree.id,
-                        runtimeRequirement: nil,
-                        stdinText: nil,
-                        environment: [:],
-                        usesTerminalSession: false,
-                        outputInterpreter: .copilotPromptJSONL,
-                        agentTool: tool,
-                        initialPrompt: promptText
-                    )
-                case .cursorCLI:
-                    descriptor = CommandExecutionDescriptor(
-                        title: tool.displayName,
-                        actionKind: .aiAgent,
-                        showsAgentIndicator: true,
-                        executable: "cursor-agent",
-                        arguments: ["--print", "--output-format", "stream-json", "--stream-partial-output", "--trust", "--force", promptText],
-                        displayCommandLine: "cursor-agent --print --output-format stream-json --stream-partial-output --trust --force \(promptText.shellEscaped)",
-                        currentDirectoryURL: URL(fileURLWithPath: worktree.path),
-                        repositoryID: repository.id,
-                        worktreeID: worktree.id,
-                        runtimeRequirement: nil,
-                        stdinText: nil,
-                        environment: [:],
-                        usesTerminalSession: false,
-                        outputInterpreter: .cursorAgentPrintJSON,
-                        agentTool: tool,
-                        initialPrompt: promptText
-                    )
-                default:
+                } else {
                     descriptor = nil
                 }
 
@@ -340,7 +299,7 @@ extension AppModel {
             let shellCommand: String
             let stdinText: String?
             if let prompt = promptText {
-                let cmd = tool.launchCommandWithPrompt(prompt, in: worktree.path)
+                let cmd = tool.launchCommandWithPrompt(prompt, in: worktree.path, options: options)
                 if cmd != tool.launchCommand(in: worktree.path) {
                     // Tool handles the prompt via flag — no PTY stdin injection needed
                     shellCommand = cmd

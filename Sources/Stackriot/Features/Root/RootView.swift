@@ -160,6 +160,17 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: Binding(
+            get: { appModel.pendingCopilotExecutionDraft != nil },
+            set: { newValue in
+                if !newValue {
+                    appModel.dismissPendingCopilotExecutionDraft()
+                }
+            }
+        )) {
+            PendingCopilotExecutionSheet()
+                .environment(appModel)
+        }
+        .sheet(isPresented: Binding(
             get: { appModel.activeAgentPlanDraftWorktreeID != nil },
             set: { newValue in
                 if !newValue {

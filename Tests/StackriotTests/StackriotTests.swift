@@ -162,6 +162,15 @@ struct StackriotTests {
         #expect(copilot.contains("copilot -p"))
         #expect(copilot.contains("--allow-all-tools --output-format json"))
         #expect(copilot.contains(prompt.shellEscaped))
+        #expect(!copilot.contains("--model"))
+
+        let copilotExplicitModel = AIAgentTool.githubCopilot.launchCommandWithPrompt(
+            prompt,
+            in: path,
+            options: AgentLaunchOptions(copilotModelOverride: "gpt-5.4")
+        )
+        #expect(copilotExplicitModel.contains("--model"))
+        #expect(copilotExplicitModel.contains("'gpt-5.4'"))
 
         let cursor = AIAgentTool.cursorCLI.launchCommandWithPrompt(prompt, in: path)
         #expect(cursor.contains("cursor-agent --print --output-format stream-json --stream-partial-output --trust --force"))
