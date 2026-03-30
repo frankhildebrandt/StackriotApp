@@ -55,6 +55,7 @@ final class AppModel: @unchecked Sendable {
     var activeAgentPlanDraftWorktreeID: UUID?
     var intentContentVersionsByWorktreeID: [UUID: Int] = [:]
     var implementationPlanContentVersionsByWorktreeID: [UUID: Int] = [:]
+    var devContainerStatesByWorktreeID: [UUID: DevContainerWorkspaceState] = [:]
     var mcpServerStatus = MCPServerStatus.idle()
     var mcpLogEntries: [MCPLogEntry] = []
     /// When set, `RootView` opens `WindowGroup(id: "cursor-agent-markdown")` with this payload.
@@ -78,6 +79,8 @@ final class AppModel: @unchecked Sendable {
     var pendingRunOutputBuffer: [UUID: String] = [:]
     @ObservationIgnored
     var runOutputFlushTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored
+    var devContainerLogProcessesByWorktreeID: [UUID: RunningProcess] = [:]
     @ObservationIgnored
     var rawLogDiskBuffer: [UUID: String] = [:]
     @ObservationIgnored

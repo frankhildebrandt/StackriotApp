@@ -58,7 +58,7 @@
 | Plattform | macOS 14+, Swift 6, SwiftUI, SwiftData |
 | UI | Drei-spaltige `NavigationSplitView`: Sidebar → Repository-Detail → Run-Konsole |
 | State | `AppModel` (SwiftUI `@Observable`) als zentraler App-State |
-| Services | `RepositoryManager`, `WorktreeManager`, `IDEManager`, `AIAgentManager`, `NodeToolingService`, `SSHKeyManager`, `GitHubCLIService`, `MakeToolingService` |
+| Services | `RepositoryManager`, `WorktreeManager`, `IDEManager`, `AIAgentManager`, `NodeToolingService`, `SSHKeyManager`, `GitHubCLIService`, `MakeToolingService`, `DevContainerService` |
 | Persistenz | SwiftData (Bare-Repository-Pfade, Worktrees, SSH-Keys, Runs, Action-Templates) |
 | Terminal | [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) (Vendor-Abhängigkeit) |
 
@@ -68,7 +68,7 @@
 
 - macOS 14 (Sonoma) oder neuer
 - Xcode 16+ mit Swift 6
-- Optionale CLI-Tools (je nach genutzter Funktion): `git`, `gh`, `node`/`nvm`, `make`, `claude`, `codex`, `cursor`
+- Optionale CLI-Tools (je nach genutzter Funktion): `git`, `gh`, `node`/`nvm`, `make`, `claude`, `codex`, `cursor`, `docker`, `devcontainer` oder `npx`
 
 ---
 
