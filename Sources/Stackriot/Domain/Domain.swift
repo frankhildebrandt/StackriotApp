@@ -183,6 +183,34 @@ struct AIRunSummary: Sendable, Equatable {
     let summary: String
 }
 
+struct AgentLaunchOptions: Sendable, Equatable {
+    let copilotModelOverride: String?
+
+    init(copilotModelOverride: String? = nil) {
+        let trimmedOverride = copilotModelOverride?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty
+        if let trimmedOverride, trimmedOverride.caseInsensitiveCompare("auto") != .orderedSame {
+            self.copilotModelOverride = trimmedOverride
+        } else {
+            self.copilotModelOverride = nil
+        }
+    }
+}
+
+struct AgentPromptCommandComponents: Sendable, Equatable {
+    let arguments: [String]
+    let displayCommandLine: String
+}
+
+struct CopilotModelOption: Identifiable, Sendable, Equatable, Hashable {
+    let id: String
+    let displayName: String
+    let isAuto: Bool
+
+    static let auto = CopilotModelOption(id: "auto", displayName: "Auto", isAuto: true)
+}
+
 enum RunConfigurationSource: String, Codable, CaseIterable, Identifiable, Sendable {
     case native
     case vscode
@@ -502,21 +530,49 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
     /// Starts the agent with a pre-filled task prompt.
     /// For tools that support a documented non-interactive mode, prefer that over PTY stdin
     /// injection so scripted runs behave predictably.
-    func launchCommandWithPrompt(_ prompt: String, in path: String) -> String {
+    func launchCommandWithPrompt(
+        _ prompt: String,
+        in path: String,
+        options: AgentLaunchOptions = AgentLaunchOptions()
+    ) -> String {
+        guard let components = promptCommandComponents(for: prompt, options: options) else {
+            return launchCommand(in: path)
+        }
+        return "cd \(path.shellEscaped) && \(components.displayCommandLine)"
+    }
+
+    func promptCommandComponents(
+        for prompt: String,
+        options: AgentLaunchOptions = AgentLaunchOptions()
+    ) -> AgentPromptCommandComponents? {
         switch self {
         case .none:
-            ""
+            return nil
         case .claudeCode:
             // Claude Code uses print mode for automation. Permissions must be non-interactive.
-            "cd \(path.shellEscaped) && claude -p --dangerously-skip-permissions --output-format stream-json \(prompt.shellEscaped)"
+            return AgentPromptCommandComponents(
+                arguments: ["-p", "--dangerously-skip-permissions", "--output-format", "stream-json", prompt],
+                displayCommandLine: "claude -p --dangerously-skip-permissions --output-format stream-json \(prompt.shellEscaped)"
+            )
         case .codex:
             // Codex CLI uses `exec` in automation contexts; `--full-auto` enables edits.
-            "cd \(path.shellEscaped) && codex exec --full-auto --json --color never \(prompt.shellEscaped)"
+            return AgentPromptCommandComponents(
+                arguments: ["exec", "--full-auto", "--json", "--color", "never", prompt],
+                displayCommandLine: "codex exec --full-auto --json --color never \(prompt.shellEscaped)"
+            )
         case .githubCopilot:
-            // copilot -p executes the task and exits cleanly; --allow-all-tools enables agentic execution
-            "cd \(path.shellEscaped) && copilot -p \(prompt.shellEscaped) --allow-all-tools --output-format json"
+            // `--model` is only set when the user explicitly selects a concrete model.
+            let modelArguments = options.copilotModelOverride.map { ["--model", $0] } ?? []
+            let modelDisplaySuffix = options.copilotModelOverride.map { " --model \($0.shellEscaped)" } ?? ""
+            return AgentPromptCommandComponents(
+                arguments: ["-p", prompt] + modelArguments + ["--allow-all-tools", "--output-format", "json"],
+                displayCommandLine: "copilot -p \(prompt.shellEscaped)\(modelDisplaySuffix) --allow-all-tools --output-format json"
+            )
         case .cursorCLI:
-            "cd \(path.shellEscaped) && cursor-agent --print --output-format stream-json --stream-partial-output --trust --force \(prompt.shellEscaped)"
+            return AgentPromptCommandComponents(
+                arguments: ["--print", "--output-format", "stream-json", "--stream-partial-output", "--trust", "--force", prompt],
+                displayCommandLine: "cursor-agent --print --output-format stream-json --stream-partial-output --trust --force \(prompt.shellEscaped)"
+            )
         }
     }
 }

@@ -53,6 +53,7 @@ final class AppModel: @unchecked Sendable {
     var agentPlanDraftsByWorktreeID: [UUID: AgentPlanDraft] = [:]
     var pendingRunFixesByAgentRunID: [UUID: RunFixRequest] = [:]
     var activeAgentPlanDraftWorktreeID: UUID?
+    var pendingCopilotExecutionDraft: PendingAgentExecutionDraft?
     var intentContentVersionsByWorktreeID: [UUID: Int] = [:]
     var implementationPlanContentVersionsByWorktreeID: [UUID: Int] = [:]
     var devContainerStatesByWorktreeID: [UUID: DevContainerWorkspaceState] = [:]

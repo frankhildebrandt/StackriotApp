@@ -198,6 +198,7 @@ struct AppServices {
     let worktreeStatusService: WorktreeStatusService
     let devToolDiscovery: DevToolDiscoveryService
     let runConfigurationDiscovery: RunConfigurationDiscoveryService
+    let copilotModelDiscovery: CopilotModelDiscoveryService
     let devContainerService: DevContainerService
     let mcpServerManager: MCPServerManager
     let rawLogArchive: AgentRawLogArchiveService
@@ -218,6 +219,7 @@ struct AppServices {
         worktreeStatusService: WorktreeStatusService = WorktreeStatusService(),
         devToolDiscovery: DevToolDiscoveryService = DevToolDiscoveryService(),
         runConfigurationDiscovery: RunConfigurationDiscoveryService = RunConfigurationDiscoveryService(),
+        copilotModelDiscovery: CopilotModelDiscoveryService = CopilotModelDiscoveryService(),
         devContainerService: DevContainerService = DevContainerService(),
         mcpServerManager: MCPServerManager = MCPServerManager(),
         rawLogArchive: AgentRawLogArchiveService = AgentRawLogArchiveService(),
@@ -237,6 +239,7 @@ struct AppServices {
         self.worktreeStatusService = worktreeStatusService
         self.devToolDiscovery = devToolDiscovery
         self.runConfigurationDiscovery = runConfigurationDiscovery
+        self.copilotModelDiscovery = copilotModelDiscovery
         self.devContainerService = devContainerService
         self.mcpServerManager = mcpServerManager
         self.rawLogArchive = rawLogArchive
@@ -258,6 +261,7 @@ struct AppServices {
         worktreeStatusService: WorktreeStatusService(),
         devToolDiscovery: DevToolDiscoveryService(),
         runConfigurationDiscovery: RunConfigurationDiscoveryService(),
+        copilotModelDiscovery: CopilotModelDiscoveryService(),
         devContainerService: DevContainerService(),
         mcpServerManager: MCPServerManager(),
         rawLogArchive: AgentRawLogArchiveService(),

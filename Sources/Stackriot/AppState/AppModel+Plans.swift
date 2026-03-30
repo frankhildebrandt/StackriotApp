@@ -166,21 +166,107 @@ extension AppModel {
 
     // MARK: - Agent Dispatch with Plan
 
-    func launchAgentWithPlan(_ tool: AIAgentTool, for worktree: WorktreeRecord, in modelContext: ModelContext) {
-        let promptText: String
-        switch terminalTabs.primaryPane(for: worktree.id) {
-        case .implementationPlan:
-            promptText = loadImplementationPlan(for: worktree.id)
-        case .intent, .browser:
-            promptText = loadIntent(for: worktree.id)
-        }
+    func launchAgentWithPlan(
+        _ tool: AIAgentTool,
+        for worktree: WorktreeRecord,
+        in modelContext: ModelContext,
+        options: AgentLaunchOptions = AgentLaunchOptions(),
+        promptOverride: String? = nil
+    ) {
+        let promptText = promptOverride ?? planExecutionPrompt(for: worktree).text
         terminalTabs.deselectPlanTab(for: worktree.id)
-        launchAgent(tool, for: worktree, in: modelContext, initialPrompt: promptText)
+        launchAgent(tool, for: worktree, in: modelContext, initialPrompt: promptText, options: options)
+    }
+
+    func prepareCopilotExecutionWithPlan(for worktree: WorktreeRecord, in repository: ManagedRepository) async {
+        guard availableAgents.contains(.githubCopilot) else {
+            pendingErrorMessage = "GitHub Copilot is not available on this machine."
+            return
+        }
+
+        let prompt = planExecutionPrompt(for: worktree)
+        let trimmedPrompt = prompt.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPrompt.isEmpty else {
+            pendingErrorMessage = "\(prompt.sourceTitle) is empty."
+            return
+        }
+
+        pendingCopilotExecutionDraft = PendingAgentExecutionDraft(
+            tool: .githubCopilot,
+            worktreeID: worktree.id,
+            repositoryID: repository.id,
+            promptSourceTitle: prompt.sourceTitle,
+            promptText: prompt.text,
+            availableCopilotModels: [.auto],
+            selectedCopilotModelID: CopilotModelOption.auto.id,
+            isLoadingCopilotModels: true,
+            modelDiscoveryErrorMessage: nil
+        )
+
+        await reloadPendingCopilotExecutionModels()
+    }
+
+    func reloadPendingCopilotExecutionModels() async {
+        guard let draft = pendingCopilotExecutionDraft else { return }
+        pendingCopilotExecutionDraft?.isLoadingCopilotModels = true
+        pendingCopilotExecutionDraft?.modelDiscoveryErrorMessage = nil
+
+        do {
+            let discoveredModels = try await services.copilotModelDiscovery.discoverModels()
+            guard pendingCopilotExecutionDraft?.id == draft.id else { return }
+            pendingCopilotExecutionDraft?.availableCopilotModels = discoveredModels
+            pendingCopilotExecutionDraft?.selectedCopilotModelID = discoveredModels.first(where: \.isAuto)?.id
+                ?? discoveredModels.first?.id
+                ?? CopilotModelOption.auto.id
+            pendingCopilotExecutionDraft?.isLoadingCopilotModels = false
+        } catch {
+            guard pendingCopilotExecutionDraft?.id == draft.id else { return }
+            pendingCopilotExecutionDraft?.availableCopilotModels = [.auto]
+            pendingCopilotExecutionDraft?.selectedCopilotModelID = CopilotModelOption.auto.id
+            pendingCopilotExecutionDraft?.isLoadingCopilotModels = false
+            pendingCopilotExecutionDraft?.modelDiscoveryErrorMessage = "GitHub Copilot models could not be loaded: \(error.localizedDescription)"
+        }
+    }
+
+    func dismissPendingCopilotExecutionDraft() {
+        pendingCopilotExecutionDraft = nil
+    }
+
+    func executePendingCopilotExecution(in modelContext: ModelContext) {
+        guard let draft = pendingCopilotExecutionDraft else { return }
+        guard let worktree = worktreeRecord(with: draft.worktreeID) else {
+            pendingCopilotExecutionDraft = nil
+            pendingErrorMessage = StackriotError.worktreeUnavailable.localizedDescription
+            return
+        }
+
+        let selectedModel = draft.availableCopilotModels.first(where: { $0.id == draft.selectedCopilotModelID })
+        let options = AgentLaunchOptions(
+            copilotModelOverride: selectedModel?.isAuto == false ? selectedModel?.id : nil
+        )
+
+        pendingCopilotExecutionDraft = nil
+        launchAgentWithPlan(
+            .githubCopilot,
+            for: worktree,
+            in: modelContext,
+            options: options,
+            promptOverride: draft.promptText
+        )
     }
 
     func availablePlanningAgents() -> [AIAgentTool] {
         AIAgentTool.allCases.filter { tool in
             tool != .none && tool.supportsPlanning && availableAgents.contains(tool)
+        }
+    }
+
+    private func planExecutionPrompt(for worktree: WorktreeRecord) -> (sourceTitle: String, text: String) {
+        switch terminalTabs.primaryPane(for: worktree.id) {
+        case .implementationPlan:
+            ("Implementation Plan", loadImplementationPlan(for: worktree.id))
+        case .intent, .browser:
+            ("Intent", loadIntent(for: worktree.id))
         }
     }
 

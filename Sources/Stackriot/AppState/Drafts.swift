@@ -153,6 +153,20 @@ struct AgentPlanDraft: Identifiable {
     var runID: UUID { run.id }
 }
 
+struct PendingAgentExecutionDraft: Identifiable {
+    let tool: AIAgentTool
+    let worktreeID: UUID
+    let repositoryID: UUID
+    let promptSourceTitle: String
+    let promptText: String
+    var availableCopilotModels: [CopilotModelOption]
+    var selectedCopilotModelID: String
+    var isLoadingCopilotModels = false
+    var modelDiscoveryErrorMessage: String?
+
+    var id: UUID { worktreeID }
+}
+
 struct RunFixRequest {
     let tool: AIAgentTool
     let sourceRunID: UUID

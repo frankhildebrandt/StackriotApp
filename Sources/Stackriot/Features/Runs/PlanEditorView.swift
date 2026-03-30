@@ -118,7 +118,7 @@ struct PlanEditorView: View {
                 ForEach(planningAgents) { tool in
                     Button {
                         saveTask?.cancel()
-                        appModel.saveIntent(bodyText, for: worktree.id)
+                        persistCurrentBodyText()
                         appModel.startAgentPlanDraft(
                             using: tool,
                             for: worktree,
@@ -147,7 +147,15 @@ struct PlanEditorView: View {
             } else {
                 ForEach(agents) { tool in
                     Button("Execute with \(tool.displayName)") {
-                        appModel.launchAgentWithPlan(tool, for: worktree, in: modelContext)
+                        saveTask?.cancel()
+                        persistCurrentBodyText()
+                        if tool == .githubCopilot {
+                            Task {
+                                await appModel.prepareCopilotExecutionWithPlan(for: worktree, in: repository)
+                            }
+                        } else {
+                            appModel.launchAgentWithPlan(tool, for: worktree, in: modelContext)
+                        }
                     }
                 }
             }
@@ -177,5 +185,14 @@ struct PlanEditorView: View {
 
     private var canCreatePlan: Bool {
         !worktree.isDefaultBranchWorkspace && !availablePlanningAgents.isEmpty
+    }
+
+    private func persistCurrentBodyText() {
+        switch role {
+        case .intent:
+            appModel.saveIntent(bodyText, for: worktree.id)
+        case .implementationPlan:
+            appModel.saveImplementationPlan(bodyText, for: worktree.id)
+        }
     }
 }
