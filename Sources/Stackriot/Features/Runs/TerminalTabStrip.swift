@@ -12,10 +12,38 @@ struct TerminalTabStrip: View {
     var body: some View {
         let isPrimaryContextSelected = appModel.isPrimaryContextTabSelected(for: worktree)
             || (worktree.isDefaultBranchWorkspace && tabs.isEmpty)
+        let selectedPane = appModel.primaryPane(for: worktree)
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
-                // Plan chip — always first, never closable
-                primaryContextChip(isPrimaryContextSelected: isPrimaryContextSelected)
+                if worktree.primaryContextTabKind == .readme {
+                    readmePrimaryChip(isPrimaryContextSelected: isPrimaryContextSelected)
+                } else {
+                    primaryPaneChip(
+                        title: "Intent",
+                        systemImage: "text.alignleft",
+                        isSelected: isPrimaryContextSelected && selectedPane == .intent
+                    ) {
+                        appModel.selectPrimaryPane(.intent, for: worktree, in: repository)
+                    }
+                    if appModel.hasImplementationPlanContent(for: worktree.id) {
+                        primaryPaneChip(
+                            title: "Plan",
+                            systemImage: "doc.text",
+                            isSelected: isPrimaryContextSelected && selectedPane == .implementationPlan
+                        ) {
+                            appModel.selectPrimaryPane(.implementationPlan, for: worktree, in: repository)
+                        }
+                    }
+                    if worktree.resolvedPrimaryContext != nil {
+                        primaryPaneChip(
+                            title: "Browser",
+                            systemImage: worktree.primaryContextTabSystemImage,
+                            isSelected: isPrimaryContextSelected && selectedPane == .browser
+                        ) {
+                            appModel.selectPrimaryPane(.browser, for: worktree, in: repository)
+                        }
+                    }
+                }
 
                 ForEach(tabs) { run in
                     TerminalTabChip(
@@ -44,9 +72,9 @@ struct TerminalTabStrip: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    // MARK: - Primary Context Chip
+    // MARK: - Primary Context Chips
 
-    private func primaryContextChip(isPrimaryContextSelected: Bool) -> some View {
+    private func readmePrimaryChip(isPrimaryContextSelected: Bool) -> some View {
         HStack(spacing: 5) {
             Image(systemName: worktree.primaryContextTabSystemImage)
                 .font(.caption.weight(.semibold))
@@ -71,4 +99,34 @@ struct TerminalTabStrip: View {
             appModel.selectPrimaryContextTab(for: worktree, in: repository)
         }
     }
+
+    private func primaryPaneChip(
+        title: String,
+        systemImage: String,
+        isSelected: Bool,
+        onTap: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.semibold))
+            Text(title)
+                .font(.caption.weight(.semibold))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(isSelected ? Color(nsColor: .underPageBackgroundColor) : Color.clear)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.2))
+                .frame(height: isSelected ? 2 : 1)
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.15))
+                .frame(width: 1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+    }
 }
+

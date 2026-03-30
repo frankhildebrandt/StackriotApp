@@ -126,7 +126,8 @@ extension AppModel {
         }
         return MCPWorktreeContextPayload(
             worktree: mcpWorktreeSummary(for: worktree, repository: repository),
-            planText: loadPlan(for: worktree.id),
+            intentText: loadIntent(for: worktree.id),
+            planText: loadImplementationPlan(for: worktree.id),
             latestRuns: Array(runs(forWorktreeID: worktree.id, in: repository).prefix(10)).map(mcpRunSummary)
         )
     }
@@ -145,14 +146,15 @@ extension AppModel {
         guard let worktree = worktreeRecord(with: worktreeID) else {
             throw MCPToolRegistryError.toolFailed("Worktree \(worktreeID.uuidString) was not found.")
         }
-        let planURL = AppPaths.planFile(for: worktree.id)
+        let planURL = AppPaths.implementationPlanFile(for: worktree.id)
         let attributes = try? FileManager.default.attributesOfItem(atPath: planURL.path)
         let modifiedAt = attributes?[.modificationDate] as? Date
         return MCPPlanPayload(
             worktreeID: worktree.id.uuidString,
             branchName: worktree.branchName,
             path: worktree.path,
-            planText: loadPlan(for: worktree.id),
+            planText: loadImplementationPlan(for: worktree.id),
+            intentText: loadIntent(for: worktree.id),
             lastModifiedAt: modifiedAt
         )
     }

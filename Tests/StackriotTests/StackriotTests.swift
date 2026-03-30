@@ -2473,8 +2473,8 @@ struct StackriotTests {
         #expect(worktree.ticketIdentifier == "123")
         #expect(worktree.ticketURL == "https://github.com/octo/example/issues/123")
 
-        let planURL = AppPaths.planFile(for: worktree.id)
-        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        let intentURL = AppPaths.intentFile(for: worktree.id)
+        let plan = try String(contentsOf: intentURL, encoding: .utf8)
         #expect(plan.contains("# Ticket backed worktree"))
         #expect(plan.contains("- Provider: GitHub"))
         #expect(plan.contains("- Issue: #123"))
@@ -2482,7 +2482,7 @@ struct StackriotTests {
         #expect(plan.contains("## Kommentare"))
         #expect(plan.contains("### alice - 2025-03-29T12:00:00Z"))
 
-        try? FileManager.default.removeItem(at: planURL)
+        try? FileManager.default.removeItem(at: intentURL)
         try? FileManager.default.removeItem(at: URL(fileURLWithPath: worktree.path))
         try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
     }
@@ -2551,13 +2551,13 @@ struct StackriotTests {
         #expect(worktree.ticketIdentifier == "ABC-123")
         #expect(worktree.ticketURL == "https://example.atlassian.net/browse/ABC-123")
 
-        let planURL = AppPaths.planFile(for: worktree.id)
-        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        let intentURL = AppPaths.intentFile(for: worktree.id)
+        let plan = try String(contentsOf: intentURL, encoding: .utf8)
         #expect(plan.contains("- Provider: Jira Cloud"))
         #expect(plan.contains("- Ticket: ABC-123"))
         #expect(plan.contains("Kommentar aus Jira."))
 
-        try? FileManager.default.removeItem(at: planURL)
+        try? FileManager.default.removeItem(at: intentURL)
         try? FileManager.default.removeItem(at: URL(fileURLWithPath: worktree.path))
         try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
     }
@@ -2808,6 +2808,43 @@ struct StackriotTests {
     }
 
     @Test
+    func cursorParserIgnoresWhitespaceOnlyAssistantMessageWithoutFallbackSegment() {
+        let parser = CursorAgentPrintJSONParser()
+        let session = "1690b03e-2db8-4cd8-aab4-ba772c07f05c"
+        let content: [[String: Any]] = [["type": "text", "text": "\n\n\n"]]
+        let o: [String: Any] = [
+            "type": "assistant",
+            "session_id": session,
+            "message": [
+                "role": "assistant",
+                "content": content,
+            ] as [String: Any],
+            "timestamp_ms": 1774876090804,
+        ]
+        let line = String(data: try! JSONSerialization.data(withJSONObject: o), encoding: .utf8)! + "\n"
+        let merged = parser.consume(line)
+        #expect(merged.segments.isEmpty)
+    }
+
+    @Test
+    func cursorParserSystemInitUpdatesSessionAndEmitsNoSegments() {
+        let parser = CursorAgentPrintJSONParser()
+        let o: [String: Any] = [
+            "type": "system",
+            "subtype": "init",
+            "apiKeySource": "login",
+            "cwd": "/tmp",
+            "session_id": "session-abc",
+            "model": "Auto",
+            "permissionMode": "default",
+        ]
+        let line = String(data: try! JSONSerialization.data(withJSONObject: o), encoding: .utf8)! + "\n"
+        let merged = parser.consume(line)
+        #expect(merged.segments.isEmpty)
+        #expect(parser.currentSessionID == "session-abc")
+    }
+
+    @Test
     func cursorPlanResponseParserExtractsEmbeddedStructuredJSON() {
         let structuredResponse = AppModel.parseAgentPlanResponse(from: """
         Got it. I'll scan the worktree and then return the plan.
@@ -2841,7 +2878,7 @@ struct StackriotTests {
             repository: repository
         )
         repository.worktrees = [worktree]
-        try appModel.writePlan("Original plan", for: worktree.id)
+        try appModel.writeIntent("Original plan", for: worktree.id)
         let responseURL = URL(fileURLWithPath: "/tmp/cursor-plan-response-\(UUID().uuidString).json")
         try """
         {
@@ -2852,7 +2889,8 @@ struct StackriotTests {
         }
         """.write(to: responseURL, atomically: true, encoding: .utf8)
         defer {
-            try? FileManager.default.removeItem(at: AppPaths.planFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: AppPaths.intentFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: AppPaths.implementationPlanFile(for: worktree.id))
             try? FileManager.default.removeItem(at: responseURL)
         }
 
@@ -2880,12 +2918,13 @@ struct StackriotTests {
 
         appModel.importCompletedAgentPlanIfAvailable(forRunID: run.id)
 
-        let importedPlan = try String(contentsOf: AppPaths.planFile(for: worktree.id), encoding: .utf8)
+        let importedPlan = try String(contentsOf: AppPaths.implementationPlanFile(for: worktree.id), encoding: .utf8)
         #expect(importedPlan == """
         # Cursor Structured Plan
         - Inspect flow
         - Replace plan page
         """)
+        #expect(try String(contentsOf: AppPaths.intentFile(for: worktree.id), encoding: .utf8) == "Original plan")
         #expect(appModel.agentPlanDraft(for: worktree.id) == nil)
         #expect(appModel.activeAgentPlanDraftWorktreeID == nil)
     }
@@ -2903,9 +2942,10 @@ struct StackriotTests {
             repository: repository
         )
         repository.worktrees = [worktree]
-        try appModel.writePlan("Original plan", for: worktree.id)
+        try appModel.writeIntent("Original plan", for: worktree.id)
         defer {
-            try? FileManager.default.removeItem(at: AppPaths.planFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: AppPaths.intentFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: AppPaths.implementationPlanFile(for: worktree.id))
         }
 
         let run = RunRecord(
@@ -2937,13 +2977,13 @@ struct StackriotTests {
 
         appModel.importCompletedCodexPlanIfAvailable(forRunID: run.id)
 
-        let importedPlan = try String(contentsOf: AppPaths.planFile(for: worktree.id), encoding: .utf8)
+        let importedPlan = try String(contentsOf: AppPaths.implementationPlanFile(for: worktree.id), encoding: .utf8)
         #expect(importedPlan == """
         # Imported Plan
         - Build the sheet
         - Replace the plan file
         """)
-        #expect(appModel.planContentVersion(for: worktree.id) == 1)
+        #expect(appModel.implementationPlanContentVersion(for: worktree.id) == 1)
         #expect(appModel.codexPlanDraft(for: worktree.id) == nil)
         #expect(appModel.activeAgentPlanDraftWorktreeID == nil)
     }
@@ -2961,7 +3001,7 @@ struct StackriotTests {
             repository: repository
         )
         repository.worktrees = [worktree]
-        try appModel.writePlan("Original plan", for: worktree.id)
+        try appModel.writeIntent("Original plan", for: worktree.id)
         let responseURL = URL(fileURLWithPath: "/tmp/codex-plan-response-\(UUID().uuidString).json")
         try """
         {
@@ -2971,7 +3011,8 @@ struct StackriotTests {
         }
         """.write(to: responseURL, atomically: true, encoding: .utf8)
         defer {
-            try? FileManager.default.removeItem(at: AppPaths.planFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: AppPaths.intentFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: AppPaths.implementationPlanFile(for: worktree.id))
             try? FileManager.default.removeItem(at: responseURL)
         }
 
@@ -2998,7 +3039,7 @@ struct StackriotTests {
 
         appModel.importCompletedCodexPlanIfAvailable(forRunID: run.id)
 
-        let importedPlan = try String(contentsOf: AppPaths.planFile(for: worktree.id), encoding: .utf8)
+        let importedPlan = try String(contentsOf: AppPaths.implementationPlanFile(for: worktree.id), encoding: .utf8)
         #expect(importedPlan == """
         # Structured Plan
         - Inspect flow
@@ -3020,9 +3061,10 @@ struct StackriotTests {
             repository: repository
         )
         repository.worktrees = [worktree]
-        try appModel.writePlan("Existing plan", for: worktree.id)
+        try appModel.writeIntent("Existing plan", for: worktree.id)
         defer {
-            try? FileManager.default.removeItem(at: AppPaths.planFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: AppPaths.intentFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: AppPaths.implementationPlanFile(for: worktree.id))
         }
 
         let run = RunRecord(
@@ -3051,9 +3093,10 @@ struct StackriotTests {
 
         appModel.importCompletedCodexPlanIfAvailable(forRunID: run.id)
 
-        let persistedPlan = try String(contentsOf: AppPaths.planFile(for: worktree.id), encoding: .utf8)
-        #expect(persistedPlan == "Existing plan")
-        #expect(appModel.planContentVersion(for: worktree.id) == 0)
+        let persistedIntent = try String(contentsOf: AppPaths.intentFile(for: worktree.id), encoding: .utf8)
+        #expect(persistedIntent == "Existing plan")
+        #expect(appModel.loadImplementationPlan(for: worktree.id).isEmpty)
+        #expect(appModel.implementationPlanContentVersion(for: worktree.id) == 0)
         #expect(appModel.codexPlanDraft(for: worktree.id)?.runID == run.id)
         #expect(appModel.activeAgentPlanDraftWorktreeID == worktree.id)
     }

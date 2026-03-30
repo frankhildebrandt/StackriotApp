@@ -38,5 +38,43 @@ struct StackriotApp: App {
         }
         .defaultSize(width: 1480, height: 920)
         .modelContainer(for: StackriotModelContainer.persistentModelTypes)
+
+        WindowGroup("Antwort", id: "cursor-agent-markdown", for: AgentMarkdownWindowPayload.self) { $payload in
+            if let payload {
+                AgentMarkdownReadOnlyWindow(payload: payload)
+                    .environment(appModel)
+            }
+        }
+        .defaultSize(width: 560, height: 720)
+    }
+}
+
+private struct AgentMarkdownReadOnlyWindow: View {
+    let payload: AgentMarkdownWindowPayload
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(payload.title)
+                    .font(.headline)
+                agentMarkdownText(payload.markdown)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minWidth: 480, minHeight: 360)
+    }
+
+    private func agentMarkdownText(_ raw: String) -> Text {
+        let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        if let attributed = try? AttributedString(
+            markdown: normalized,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
+        ) {
+            return Text(attributed)
+        }
+        return Text(normalized)
     }
 }

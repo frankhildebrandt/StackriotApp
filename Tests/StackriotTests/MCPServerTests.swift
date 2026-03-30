@@ -182,6 +182,7 @@ struct MCPServerTests {
                         lastOpenedAt: nil,
                         primaryContext: nil
                     ),
+                    intentText: "# Intent",
                     planText: "# Plan",
                     latestRuns: []
                 )
@@ -195,6 +196,7 @@ struct MCPServerTests {
                     branchName: "feature/demo",
                     path: "/tmp/demo",
                     planText: "# Plan",
+                    intentText: "# Intent",
                     lastModifiedAt: .now
                 )
             }

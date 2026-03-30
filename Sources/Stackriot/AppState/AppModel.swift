@@ -53,9 +53,12 @@ final class AppModel: @unchecked Sendable {
     var agentPlanDraftsByWorktreeID: [UUID: AgentPlanDraft] = [:]
     var pendingRunFixesByAgentRunID: [UUID: RunFixRequest] = [:]
     var activeAgentPlanDraftWorktreeID: UUID?
-    var planContentVersionsByWorktreeID: [UUID: Int] = [:]
+    var intentContentVersionsByWorktreeID: [UUID: Int] = [:]
+    var implementationPlanContentVersionsByWorktreeID: [UUID: Int] = [:]
     var mcpServerStatus = MCPServerStatus.idle()
     var mcpLogEntries: [MCPLogEntry] = []
+    /// When set, `RootView` opens `WindowGroup(id: "cursor-agent-markdown")` with this payload.
+    var pendingAgentMarkdownWindowPayload: AgentMarkdownWindowPayload?
 
     let services: AppServices
     var runningProcesses: [UUID: RunningProcess] = [:]
@@ -84,6 +87,8 @@ final class AppModel: @unchecked Sendable {
     @ObservationIgnored
     var rawLogRecordIDsByRunID: [UUID: UUID] = [:]
     var agentRunSegmentsByRunID: [UUID: [AgentRunSegment]] = [:]
+    @ObservationIgnored
+    var deliveredCursorAgentMarkdownSnapshotRunIDs: Set<UUID> = []
     var storedModelContext: ModelContext?
     var autoRefreshTask: Task<Void, Never>?
     var nodeRuntimeRefreshTask: Task<Void, Never>?
