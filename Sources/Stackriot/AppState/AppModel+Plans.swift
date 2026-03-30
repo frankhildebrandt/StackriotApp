@@ -23,13 +23,21 @@ extension AppModel {
 
     // MARK: - Plan Tab Selection
 
-    func selectPlanTab(for worktree: WorktreeRecord, in repository: ManagedRepository) {
+    func selectPrimaryContextTab(for worktree: WorktreeRecord, in repository: ManagedRepository) {
         selectedWorktreeIDsByRepository[repository.id] = worktree.id
         terminalTabs.selectPlanTab(for: worktree.id)
     }
 
-    func isPlanTabSelected(for worktree: WorktreeRecord) -> Bool {
+    func isPrimaryContextTabSelected(for worktree: WorktreeRecord) -> Bool {
         terminalTabs.isPlanTabSelected(for: worktree.id)
+    }
+
+    func selectPlanTab(for worktree: WorktreeRecord, in repository: ManagedRepository) {
+        selectPrimaryContextTab(for: worktree, in: repository)
+    }
+
+    func isPlanTabSelected(for worktree: WorktreeRecord) -> Bool {
+        isPrimaryContextTabSelected(for: worktree)
     }
 
     // MARK: - Plan File I/O

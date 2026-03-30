@@ -156,6 +156,11 @@ struct RepositoryDetailView: View {
                 }
                 .disabled(isRefreshingStatuses)
                 Button {
+                    appModel.presentPullRequestCheckoutSheet(for: repository)
+                } label: {
+                    Label("Checkout PR", systemImage: "arrow.down.doc")
+                }
+                Button {
                     appModel.presentWorktreeSheet(for: repository)
                 } label: {
                     Label("Create Worktree", systemImage: "plus")
@@ -334,7 +339,21 @@ struct RepositoryDetailView: View {
                     worktreeStatusRow(for: worktree)
                     worktreeLifecycleIndicator(for: worktree)
 
-                    if let issueContext = worktree.issueContext {
+                    if let context = worktree.resolvedPrimaryContext {
+                        HStack(spacing: 8) {
+                            Label(context.label, systemImage: context.kind == .pullRequest ? "arrow.triangle.merge" : (context.provider == .jira ? "link" : "number.square"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let prStatus = appModel.pullRequestUpstreamStatuses[worktree.id],
+                               context.kind == .pullRequest,
+                               prStatus.hasRemoteUpdate
+                            {
+                                Label("Update verfuegbar", systemImage: "arrow.down.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                    } else if let issueContext = worktree.issueContext {
                         Label(issueContext, systemImage: "number")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -349,6 +368,23 @@ struct RepositoryDetailView: View {
                         .help(isRemovingWorktree(worktree) ? "Worktree wird entfernt" : "Worktree wird verschoben")
                 } else {
                     HStack(spacing: 10) {
+                        if let prStatus = appModel.pullRequestUpstreamStatuses[worktree.id],
+                           worktree.resolvedPrimaryContext?.kind == .pullRequest,
+                           prStatus.hasRemoteUpdate
+                        {
+                            Button {
+                                Task {
+                                    await appModel.updateCheckedOutPullRequest(worktree, repository: repository, modelContext: modelContext)
+                                }
+                            } label: {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .foregroundStyle(.orange)
+                                    .imageScale(.large)
+                            }
+                            .buttonStyle(.plain)
+                            .help("PR-Head aktualisieren")
+                        }
+
                         if !worktree.isDefaultBranchWorkspace {
                             Button {
                                 togglePinned(worktree)
@@ -524,6 +560,7 @@ struct RepositoryDetailView: View {
 
     private func showsIntegrationButton(for worktree: WorktreeRecord) -> Bool {
         guard !worktree.isDefaultBranchWorkspace else { return false }
+        guard worktree.resolvedPrimaryContext?.kind != .pullRequest else { return false }
         if worktree.lifecycleState == .integrating {
             return true
         }
@@ -598,13 +635,31 @@ struct RepositoryDetailView: View {
     private func worktreeLifecycleIndicator(for worktree: WorktreeRecord) -> some View {
         switch worktree.lifecycleState {
         case .active:
-            EmptyView()
+            if worktree.resolvedPrimaryContext?.kind == .pullRequest {
+                HStack(spacing: 6) {
+                    Label("PR Worktree", systemImage: "arrow.triangle.merge")
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                    if let prStatus = appModel.pullRequestUpstreamStatuses[worktree.id], prStatus.hasRemoteUpdate {
+                        Label("Update verfuegbar", systemImage: "arrow.down.circle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            } else {
+                EmptyView()
+            }
         case .integrating:
             HStack(spacing: 6) {
                 Label("PR offen", systemImage: "arrow.triangle.merge")
                     .font(.caption)
                     .foregroundStyle(.blue)
-                if let urlString = worktree.prURL, let url = URL(string: urlString) {
+                if let prStatus = appModel.pullRequestUpstreamStatuses[worktree.id], prStatus.hasRemoteUpdate {
+                    Label("Update verfuegbar", systemImage: "arrow.down.circle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                if let urlString = worktree.prURL ?? worktree.resolvedPrimaryContext?.canonicalURL, let url = URL(string: urlString) {
                     Link(destination: url) {
                         Image(systemName: "arrow.up.right.square")
                             .font(.caption)

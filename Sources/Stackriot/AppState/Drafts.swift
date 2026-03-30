@@ -49,6 +49,33 @@ struct WorktreeDraft {
     }
 }
 
+
+struct PullRequestCheckoutDraft {
+    var repositoryID: UUID?
+    var searchText = ""
+    var searchResults: [PullRequestSearchResult] = []
+    var selectedPullRequest: PullRequestDetails?
+    var destinationRootPath: String?
+    var isLoading = false
+
+    init(repositoryID: UUID? = nil) {
+        self.repositoryID = repositoryID
+    }
+
+    var normalizedBranchName: String {
+        guard let selectedPullRequest else { return "" }
+        return WorktreeManager.normalizedPullRequestBranchName(
+            number: selectedPullRequest.number,
+            title: selectedPullRequest.title
+        )
+    }
+
+    var destinationRootURL: URL? {
+        guard let destinationRootPath = destinationRootPath?.nilIfBlank else { return nil }
+        return URL(fileURLWithPath: destinationRootPath, isDirectory: true)
+    }
+}
+
 struct PublishBranchDraft {
     var repositoryID: UUID?
     var worktreeID: UUID?

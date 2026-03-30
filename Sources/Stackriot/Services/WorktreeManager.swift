@@ -114,6 +114,12 @@ struct WorktreeManager {
         return segments.joined(separator: "/")
     }
 
+    static func normalizedPullRequestBranchName(number: Int, title: String) -> String {
+        let slug = normalizedWorktreeName(from: title).replacingOccurrences(of: "/", with: "-")
+        let suffix = slug.nilIfBlank ?? "pull-request"
+        return "pr/\(number)-\(suffix)"
+    }
+
     func createWorktree(
         bareRepositoryPath: URL,
         repositoryName: String,
@@ -154,6 +160,119 @@ struct WorktreeManager {
         }
 
         return CreatedWorktreeInfo(branchName: trimmedBranch, path: destination)
+    }
+
+    func checkoutPullRequest(
+        bareRepositoryPath: URL,
+        repositoryName: String,
+        prNumber: Int,
+        title: String,
+        destinationRoot: URL? = nil
+    ) async throws -> CreatedWorktreeInfo {
+        let branchName = Self.normalizedPullRequestBranchName(number: prNumber, title: title)
+        if let existingPath = try await existingWorktreePath(
+            bareRepositoryPath: bareRepositoryPath,
+            branchName: branchName
+        ) {
+            return CreatedWorktreeInfo(branchName: branchName, path: existingPath)
+        }
+
+        let fetchResult = try await runCommand(
+            "git",
+            [
+                "--git-dir", bareRepositoryPath.path,
+                "fetch", "--force", "origin",
+                "pull/\(prNumber)/head:refs/heads/\(branchName)",
+            ],
+            nil,
+            [:]
+        )
+        guard fetchResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(fetchResult.stderr.isEmpty ? fetchResult.stdout : fetchResult.stderr)
+        }
+
+        let worktreeRoot = try resolvedWorktreeRoot(repositoryName: repositoryName, destinationRoot: destinationRoot)
+        try FileManager.default.createDirectory(at: worktreeRoot, withIntermediateDirectories: true)
+        let destination = try uniquePreservingDirectory(in: worktreeRoot, preferredName: branchName)
+        let addResult = try await runCommand(
+            "git",
+            ["--git-dir", bareRepositoryPath.path, "worktree", "add", destination.path, branchName],
+            nil,
+            [:]
+        )
+        guard addResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(addResult.stderr.isEmpty ? addResult.stdout : addResult.stderr)
+        }
+
+        return CreatedWorktreeInfo(branchName: branchName, path: destination)
+    }
+
+    func updateCheckedOutPullRequest(
+        bareRepositoryPath: URL,
+        worktreePath: URL,
+        localBranchName: String,
+        prNumber: Int
+    ) async throws {
+        let cleanStatusResult = try await runCommand(
+            "git",
+            ["-C", worktreePath.path, "status", "--porcelain"],
+            nil,
+            [:]
+        )
+        guard cleanStatusResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(cleanStatusResult.stderr.isEmpty ? cleanStatusResult.stdout : cleanStatusResult.stderr)
+        }
+        guard cleanStatusResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw StackriotError.commandFailed("The PR worktree has local changes. Commit, stash, or discard them before updating from upstream.")
+        }
+
+        let upstreamRef = "refs/stackriot/pull/\(prNumber)"
+        let fetchResult = try await runCommand(
+            "git",
+            [
+                "--git-dir", bareRepositoryPath.path,
+                "fetch", "--force", "origin",
+                "pull/\(prNumber)/head:\(upstreamRef)",
+            ],
+            nil,
+            [:]
+        )
+        guard fetchResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(fetchResult.stderr.isEmpty ? fetchResult.stdout : fetchResult.stderr)
+        }
+
+        let checkoutResult = try await runCommand(
+            "git",
+            ["-C", worktreePath.path, "checkout", localBranchName],
+            nil,
+            [:]
+        )
+        guard checkoutResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(checkoutResult.stderr.isEmpty ? checkoutResult.stdout : checkoutResult.stderr)
+        }
+
+        let mergeResult = try await runCommand(
+            "git",
+            ["-C", worktreePath.path, "merge", "--ff-only", upstreamRef],
+            nil,
+            [:]
+        )
+        guard mergeResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(mergeResult.stderr.isEmpty ? mergeResult.stdout : mergeResult.stderr)
+        }
+    }
+
+    func currentRevision(worktreePath: URL) async throws -> String {
+        let result = try await runCommand(
+            "git",
+            ["-C", worktreePath.path, "rev-parse", "HEAD"],
+            nil,
+            [:]
+        )
+        guard result.exitCode == 0 else {
+            throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
+        return result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func moveWorktree(
@@ -292,7 +411,7 @@ struct WorktreeManager {
     private static func normalizedWorktreeSegment(from value: String) -> String {
         let transliterated = value
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "ß", with: "ss")
+            .replacingOccurrences(of: "", with: "ss")
             .folding(options: [.diacriticInsensitive], locale: .current)
         let whitespaceCollapsed = transliterated.replacingOccurrences(
             of: #"\s+"#,

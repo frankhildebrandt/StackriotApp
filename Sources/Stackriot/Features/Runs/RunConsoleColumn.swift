@@ -34,17 +34,13 @@ struct RunConsoleColumn: View {
 
                 // Terminal Tabs + Console
                 let tabs = appModel.visibleTabs(for: worktree, in: repository)
-                let isPlanSelected = appModel.isPlanTabSelected(for: worktree)
+                let isPlanSelected = appModel.isPrimaryContextTabSelected(for: worktree)
                     || (worktree.isDefaultBranchWorkspace && tabs.isEmpty)
 
                 TerminalTabStrip(repository: repository, worktree: worktree, tabs: tabs)
 
                 if isPlanSelected {
-                    if worktree.isDefaultBranchWorkspace {
-                        ReadmeView(worktreePath: worktree.path)
-                    } else {
-                        PlanEditorView(worktree: worktree, repository: repository)
-                    }
+                    WorktreePrimaryContextView(worktree: worktree, repository: repository)
                 } else if tabs.isEmpty {
                     ContentUnavailableView(
                         "No Tabs for This Worktree",
