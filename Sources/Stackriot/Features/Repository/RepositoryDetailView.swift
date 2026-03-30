@@ -35,7 +35,6 @@ struct RepositoryDetailView: View {
         .task(id: repository.id) {
             _ = await appModel.ensureDefaultBranchWorkspace(for: repository, in: modelContext)
             appModel.ensureSelectedWorktree(in: repository)
-            await appModel.refreshWorktreeStatuses(for: repository)
             appModel.restoreAllPRMonitoring(in: modelContext)
         }
         .sheet(isPresented: $isIntegrationSheetPresented) {

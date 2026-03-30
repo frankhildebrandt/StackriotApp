@@ -965,6 +965,33 @@ struct StackriotTests {
         #expect(parts.count == 3)
     }
 
+    @Test
+    func worktreeStatusPollingPreferencesDefaultsAndIntervalFallback() {
+        let defaults = UserDefaults.standard
+        let previousEnabled = defaults.object(forKey: AppPreferences.worktreeStatusPollingEnabledKey)
+        let previousInterval = defaults.object(forKey: AppPreferences.worktreeStatusPollingIntervalKey)
+        defer {
+            if let previousEnabled {
+                defaults.set(previousEnabled, forKey: AppPreferences.worktreeStatusPollingEnabledKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.worktreeStatusPollingEnabledKey)
+            }
+            if let previousInterval {
+                defaults.set(previousInterval, forKey: AppPreferences.worktreeStatusPollingIntervalKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.worktreeStatusPollingIntervalKey)
+            }
+        }
+
+        defaults.removeObject(forKey: AppPreferences.worktreeStatusPollingEnabledKey)
+        defaults.removeObject(forKey: AppPreferences.worktreeStatusPollingIntervalKey)
+        #expect(AppPreferences.worktreeStatusPollingEnabled == AppPreferences.defaultWorktreeStatusPollingEnabled)
+        #expect(AppPreferences.worktreeStatusPollingInterval == AppPreferences.defaultWorktreeStatusPollingInterval)
+
+        defaults.set(0.0, forKey: AppPreferences.worktreeStatusPollingIntervalKey)
+        #expect(AppPreferences.worktreeStatusPollingInterval == AppPreferences.defaultWorktreeStatusPollingInterval)
+    }
+
     @MainActor
     @Test
     func refreshAllRepositoriesUsesDefaultBranchSyncPath() async throws {
