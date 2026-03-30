@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 import SwiftUI
 
@@ -49,8 +50,6 @@ struct PlanEditorView: View {
         }
     }
 
-    // MARK: - Toolbar
-
     private var toolbar: some View {
         HStack(spacing: 8) {
             Image(systemName: "doc.text")
@@ -58,7 +57,7 @@ struct PlanEditorView: View {
             Text("Plan")
                 .font(.subheadline.weight(.semibold))
             Spacer()
-            createPlanWithCodexButton
+            createPlanButton
             agentDispatchMenu
         }
         .padding(.horizontal, 16)
@@ -66,22 +65,34 @@ struct PlanEditorView: View {
         .background(.thinMaterial)
     }
 
-    private var createPlanWithCodexButton: some View {
-        Button {
-            saveTask?.cancel()
-            appModel.savePlan(planText, for: worktree.id)
-            appModel.startCodexPlanDraft(
-                for: worktree,
-                in: repository,
-                currentPlanText: planText,
-                modelContext: modelContext
-            )
+    private var createPlanButton: some View {
+        let planningAgents = availablePlanningAgents
+        return Menu {
+            if planningAgents.isEmpty {
+                Text("No planning agents installed")
+            } else {
+                ForEach(planningAgents) { tool in
+                    Button {
+                        saveTask?.cancel()
+                        appModel.savePlan(planText, for: worktree.id)
+                        appModel.startAgentPlanDraft(
+                            using: tool,
+                            for: worktree,
+                            in: repository,
+                            currentPlanText: planText,
+                            modelContext: modelContext
+                        )
+                    } label: {
+                        Label(tool.displayName, systemImage: tool.systemImageName)
+                    }
+                }
+            }
         } label: {
-            Label("Create Plan with Codex", systemImage: "sparkles.rectangle.stack")
+            Label("Create Plan with…", systemImage: "sparkles.rectangle.stack")
         }
         .buttonStyle(.borderedProminent)
-        .disabled(!canCreatePlanWithCodex)
-        .help("Interaktiven Codex-Planlauf im Sheet starten")
+        .disabled(!canCreatePlan)
+        .help("Interaktiven Planlauf mit einem unterstützten Agenten starten")
     }
 
     private var agentDispatchMenu: some View {
@@ -103,13 +114,15 @@ struct PlanEditorView: View {
         .help("Plan mit AI-Agent ausführen")
     }
 
-    // MARK: - Helpers
-
     private var availableAgents: [AIAgentTool] {
         AIAgentTool.allCases.filter { $0 != .none && appModel.availableAgents.contains($0) }
     }
 
-    private var canCreatePlanWithCodex: Bool {
-        !worktree.isDefaultBranchWorkspace && appModel.availableAgents.contains(.codex)
+    private var availablePlanningAgents: [AIAgentTool] {
+        appModel.availablePlanningAgents()
+    }
+
+    private var canCreatePlan: Bool {
+        !worktree.isDefaultBranchWorkspace && !availablePlanningAgents.isEmpty
     }
 }

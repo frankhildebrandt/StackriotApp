@@ -160,6 +160,10 @@ struct StackriotTests {
         #expect(copilot.contains("copilot -p"))
         #expect(copilot.contains("--allow-all-tools --output-format json"))
         #expect(copilot.contains(prompt.shellEscaped))
+
+        let cursor = AIAgentTool.cursorCLI.launchCommandWithPrompt(prompt, in: path)
+        #expect(cursor.contains("cursor-agent --print --output-format json --trust --force"))
+        #expect(cursor.contains(prompt.shellEscaped))
     }
 
     @Test
@@ -2021,6 +2025,90 @@ struct StackriotTests {
         #expect(response == nil)
     }
 
+    @Test
+    func cursorPrintedResponseParserExtractsSessionAndStructuredResult() {
+        let parser = CursorAgentPrintJSONParser()
+        let innerResult = "{\"status\":\"ready\",\"summary\":\"Plan is ready.\",\"questions\":null,\"plan_markdown\":\"# Cursor Plan\\n- Inspect workspace\"}"
+        let responseText = String(
+            data: try! JSONSerialization.data(withJSONObject: [
+                "result": innerResult,
+                "session_id": "chat-123",
+            ]),
+            encoding: .utf8
+        )!
+
+        _ = parser.consume(responseText)
+        let chunk = parser.finish()
+        let structuredResponse = AppModel.parseAgentPlanResponse(from: parser.latestResultText ?? "")
+
+        #expect(parser.currentSessionID == "chat-123")
+        #expect(parser.latestResultText?.contains("\"status\":\"ready\"") == true)
+        #expect(chunk.segments.first?.sourceAgent == .cursorCLI)
+        #expect(structuredResponse?.planMarkdown == "# Cursor Plan\n- Inspect workspace")
+    }
+
+    @MainActor
+    @Test
+    func cursorPlanImportUsesSharedStructuredSchema() throws {
+        let defaults = try makeUserDefaultsSuite()
+        let appModel = AppModel(userDefaults: defaults)
+        let repository = makeRepository(name: "CursorPlanStructuredImport")
+        let worktree = WorktreeRecord(
+            branchName: "feature/cursor-plan",
+            issueContext: "Create the feature plan",
+            path: "/tmp/cursor-plan-structured-import",
+            repository: repository
+        )
+        repository.worktrees = [worktree]
+        try appModel.writePlan("Original plan", for: worktree.id)
+        let responseURL = URL(fileURLWithPath: "/tmp/cursor-plan-response-\(UUID().uuidString).json")
+        try """
+        {
+          "status": "ready",
+          "summary": "Plan is ready.",
+          "questions": null,
+          "plan_markdown": "# Cursor Structured Plan\\n- Inspect flow\\n- Replace plan page"
+        }
+        """.write(to: responseURL, atomically: true, encoding: .utf8)
+        defer {
+            try? FileManager.default.removeItem(at: AppPaths.planFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: responseURL)
+        }
+
+        let run = RunRecord(
+            actionKind: .aiAgent,
+            title: "Cursor Plan",
+            commandLine: "cursor-agent --print --output-format json",
+            outputText: "Noise only\n",
+            status: .succeeded,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        run.isTransientPlanRun = true
+        appModel.agentPlanDraftsByWorktreeID[worktree.id] = AgentPlanDraft(
+            tool: .cursorCLI,
+            worktreeID: worktree.id,
+            repositoryID: repository.id,
+            branchName: worktree.branchName,
+            issueContext: worktree.issueContext ?? "",
+            run: run,
+            responseFilePath: responseURL.path
+        )
+        appModel.activeAgentPlanDraftWorktreeID = worktree.id
+
+        appModel.importCompletedAgentPlanIfAvailable(forRunID: run.id)
+
+        let importedPlan = try String(contentsOf: AppPaths.planFile(for: worktree.id), encoding: .utf8)
+        #expect(importedPlan == """
+        # Cursor Structured Plan
+        - Inspect flow
+        - Replace plan page
+        """)
+        #expect(appModel.agentPlanDraft(for: worktree.id) == nil)
+        #expect(appModel.activeAgentPlanDraftWorktreeID == nil)
+    }
+
     @MainActor
     @Test
     func codexPlanImportReplacesPersistedPlanWithExtractedMarkdown() throws {
@@ -2057,14 +2145,14 @@ struct StackriotTests {
             worktree: worktree
         )
         run.isTransientPlanRun = true
-        appModel.codexPlanDraftsByWorktreeID[worktree.id] = CodexPlanDraft(
+        appModel.agentPlanDraftsByWorktreeID[worktree.id] = AgentPlanDraft(tool: .codex, 
             worktreeID: worktree.id,
             repositoryID: repository.id,
             branchName: worktree.branchName,
             issueContext: worktree.issueContext ?? "",
             run: run
         )
-        appModel.activeCodexPlanDraftWorktreeID = worktree.id
+        appModel.activeAgentPlanDraftWorktreeID = worktree.id
 
         appModel.importCompletedCodexPlanIfAvailable(forRunID: run.id)
 
@@ -2076,7 +2164,7 @@ struct StackriotTests {
         """)
         #expect(appModel.planContentVersion(for: worktree.id) == 1)
         #expect(appModel.codexPlanDraft(for: worktree.id) == nil)
-        #expect(appModel.activeCodexPlanDraftWorktreeID == nil)
+        #expect(appModel.activeAgentPlanDraftWorktreeID == nil)
     }
 
     @MainActor
@@ -2117,7 +2205,7 @@ struct StackriotTests {
             worktree: worktree
         )
         run.isTransientPlanRun = true
-        appModel.codexPlanDraftsByWorktreeID[worktree.id] = CodexPlanDraft(
+        appModel.agentPlanDraftsByWorktreeID[worktree.id] = AgentPlanDraft(tool: .codex, 
             worktreeID: worktree.id,
             repositoryID: repository.id,
             branchName: worktree.branchName,
@@ -2125,7 +2213,7 @@ struct StackriotTests {
             run: run,
             responseFilePath: responseURL.path
         )
-        appModel.activeCodexPlanDraftWorktreeID = worktree.id
+        appModel.activeAgentPlanDraftWorktreeID = worktree.id
 
         appModel.importCompletedCodexPlanIfAvailable(forRunID: run.id)
 
@@ -2171,14 +2259,14 @@ struct StackriotTests {
             worktree: worktree
         )
         run.isTransientPlanRun = true
-        appModel.codexPlanDraftsByWorktreeID[worktree.id] = CodexPlanDraft(
+        appModel.agentPlanDraftsByWorktreeID[worktree.id] = AgentPlanDraft(tool: .codex, 
             worktreeID: worktree.id,
             repositoryID: repository.id,
             branchName: worktree.branchName,
             issueContext: worktree.issueContext ?? "",
             run: run
         )
-        appModel.activeCodexPlanDraftWorktreeID = worktree.id
+        appModel.activeAgentPlanDraftWorktreeID = worktree.id
 
         appModel.importCompletedCodexPlanIfAvailable(forRunID: run.id)
 
@@ -2186,7 +2274,7 @@ struct StackriotTests {
         #expect(persistedPlan == "Existing plan")
         #expect(appModel.planContentVersion(for: worktree.id) == 0)
         #expect(appModel.codexPlanDraft(for: worktree.id)?.runID == run.id)
-        #expect(appModel.activeCodexPlanDraftWorktreeID == worktree.id)
+        #expect(appModel.activeAgentPlanDraftWorktreeID == worktree.id)
     }
 
     @MainActor

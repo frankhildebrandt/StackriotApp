@@ -214,6 +214,23 @@ extension AppModel {
                         usesTerminalSession: false,
                         outputInterpreter: .copilotPromptJSONL
                     )
+                case .cursorCLI:
+                    descriptor = CommandExecutionDescriptor(
+                        title: tool.displayName,
+                        actionKind: .aiAgent,
+                        showsAgentIndicator: true,
+                        executable: "cursor-agent",
+                        arguments: ["--print", "--output-format", "json", "--trust", "--force", promptText],
+                        displayCommandLine: "cursor-agent --print --output-format json --trust --force \(promptText.shellEscaped)",
+                        currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                        repositoryID: repository.id,
+                        worktreeID: worktree.id,
+                        runtimeRequirement: nil,
+                        stdinText: nil,
+                        environment: [:],
+                        usesTerminalSession: false,
+                        outputInterpreter: .cursorAgentPrintJSON
+                    )
                 default:
                     descriptor = nil
                 }

@@ -92,7 +92,8 @@ struct ProjectEditorDraft: Identifiable {
     var name = ""
 }
 
-struct CodexPlanDraft: Identifiable {
+struct AgentPlanDraft: Identifiable {
+    let tool: AIAgentTool
     let worktreeID: UUID
     let repositoryID: UUID
     let branchName: String

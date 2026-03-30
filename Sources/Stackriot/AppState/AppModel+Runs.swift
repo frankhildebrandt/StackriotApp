@@ -29,7 +29,7 @@ extension AppModel {
 
     func cancelRun(_ run: RunRecord, in modelContext: ModelContext) {
         if run.isTransientPlanRun, let worktreeID = run.worktree?.id {
-            cancelCodexPlanDraft(for: worktreeID)
+            cancelAgentPlanDraft(for: worktreeID)
             return
         }
         if let session = terminalSessions[run.id] {
@@ -122,8 +122,8 @@ extension AppModel {
         run.isTransientPlanRun = isTransientPlanRun
         run.outputText = "$ \(commandLine)\n"
 
-        if descriptor.outputInterpreter == .codexExecJSONL {
-            let parser = CodexExecJSONLParser()
+        if let interpreter = descriptor.outputInterpreter {
+            let parser = StructuredAgentOutputParserFactory.makeParser(for: interpreter)
             structuredOutputParsersByRunID[run.id] = parser
             applyStructuredParsedChunk(parser.consume(run.outputText), to: run.id)
         }
@@ -152,13 +152,13 @@ extension AppModel {
             run.outputText += chunk
             applyStructuredParsedChunk(parser.consume(chunk), to: runID)
             if run.isTransientPlanRun {
-                syncCodexPlanSessionID(forRunID: runID)
+                syncAgentPlanSessionID(forRunID: runID)
             }
         } else {
             run.outputText += chunk
         }
         if run.isTransientPlanRun {
-            importCompletedCodexPlanIfAvailable(forRunID: runID)
+            importCompletedAgentPlanIfAvailable(forRunID: runID)
             return
         }
         guard
@@ -178,7 +178,7 @@ extension AppModel {
         guard let run = runRecord(with: runID), let modelContext = storedModelContext else { return }
         flushBufferedRunOutputIfNeeded(runID: runID)
         if run.isTransientPlanRun {
-            syncCodexPlanSessionID(forRunID: runID)
+            syncAgentPlanSessionID(forRunID: runID)
         }
         run.endedAt = .now
         run.exitCode = Int(exitCode)
@@ -190,10 +190,10 @@ extension AppModel {
         refreshRunningAgentWorktrees()
 
         if run.isTransientPlanRun {
-            importCompletedCodexPlanIfAvailable(forRunID: runID)
-            if let (worktreeID, draft) = codexPlanDraftEntry(forRunID: runID),
+            importCompletedAgentPlanIfAvailable(forRunID: runID)
+            if let (worktreeID, draft) = agentPlanDraftEntry(forRunID: runID),
                draft.didImportPlan || draft.requestedSessionTermination {
-                cleanupCodexPlanDraft(for: worktreeID)
+                cleanupAgentPlanDraft(for: worktreeID)
             } else {
                 terminalSessions[runID] = nil
             }
@@ -222,7 +222,7 @@ extension AppModel {
             run.outputText += renderedMessage
             applyStructuredParsedChunk(parser.consume(renderedMessage), to: runID)
             if run.isTransientPlanRun {
-                syncCodexPlanSessionID(forRunID: runID)
+                syncAgentPlanSessionID(forRunID: runID)
             }
         } else {
             run.outputText += renderedMessage
@@ -237,9 +237,9 @@ extension AppModel {
         refreshRunningAgentWorktrees()
 
         if run.isTransientPlanRun {
-            if let (worktreeID, draft) = codexPlanDraftEntry(forRunID: runID),
+            if let (worktreeID, draft) = agentPlanDraftEntry(forRunID: runID),
                draft.requestedSessionTermination {
-                cleanupCodexPlanDraft(for: worktreeID)
+                cleanupAgentPlanDraft(for: worktreeID)
             } else {
                 terminalSessions[runID] = nil
             }

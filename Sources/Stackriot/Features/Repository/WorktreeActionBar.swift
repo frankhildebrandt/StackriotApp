@@ -138,11 +138,11 @@ struct WorktreeActionBar: View {
                 Button {
                     appModel.launchAgent(tool, for: worktree, in: modelContext)
                 } label: {
-                    Label(tool.displayName, systemImage: agentIcon(for: tool))
+                    Label(tool.displayName, systemImage: tool.systemImageName)
                 }
             }
         } label: {
-            Image(systemName: agentIcon(for: worktree.assignedAgent))
+            Image(systemName: worktree.assignedAgent.systemImageName)
         }
         .menuStyle(.button)
         .buttonStyle(.bordered)
@@ -324,20 +324,6 @@ struct WorktreeActionBar: View {
         return sections
     }
 
-    private func agentIcon(for tool: AIAgentTool) -> String {
-        switch tool {
-        case .none:
-            "sparkles"
-        case .claudeCode:
-            "sparkles.rectangle.stack"
-        case .codex:
-            "terminal"
-        case .githubCopilot:
-            "chevron.left.forwardslash.chevron.right"
-        case .cursorCLI:
-            "cursorarrow.click.2"
-        }
-    }
 
     private func iconName(for configuration: RunConfiguration) -> String {
         switch configuration.executionBehavior {

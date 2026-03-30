@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct CodexPlanDraftSheet: View {
+struct AgentPlanDraftSheet: View {
     @Environment(AppModel.self) private var appModel
 
     let worktreeID: UUID
@@ -9,7 +9,7 @@ struct CodexPlanDraftSheet: View {
 
     var body: some View {
         Group {
-            if let draft = appModel.codexPlanDraft(for: worktreeID) {
+            if let draft = appModel.agentPlanDraft(for: worktreeID) {
                 VStack(spacing: 0) {
                     header(for: draft)
                     Divider()
@@ -20,19 +20,19 @@ struct CodexPlanDraftSheet: View {
                 .frame(minWidth: 780, minHeight: 560)
             } else {
                 ContentUnavailableView(
-                    "No Codex Plan Run",
+                    "No Planning Run",
                     systemImage: "sparkles.rectangle.stack",
-                    description: Text("The transient Codex planning session is no longer available.")
+                    description: Text("The transient planning session is no longer available.")
                 )
                 .frame(minWidth: 640, minHeight: 420)
             }
         }
     }
 
-    private func header(for draft: CodexPlanDraft) -> some View {
+    private func header(for draft: AgentPlanDraft) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Create Plan with Codex")
+                Text("Create Plan with \(draft.tool.displayName)")
                     .font(.title3.weight(.semibold))
                 Text(draft.branchName)
                     .font(.subheadline.weight(.medium))
@@ -43,7 +43,7 @@ struct CodexPlanDraftSheet: View {
             }
             Spacer()
             Button(activeButtonTitle(for: draft), role: activeButtonRole(for: draft)) {
-                appModel.cancelCodexPlanDraft(for: draft.worktreeID)
+                appModel.cancelAgentPlanDraft(for: draft.worktreeID)
             }
         }
         .padding(20)
@@ -51,8 +51,8 @@ struct CodexPlanDraftSheet: View {
     }
 
     @ViewBuilder
-    private func transcript(for draft: CodexPlanDraft) -> some View {
-        if draft.run.outputInterpreter == .codexExecJSONL {
+    private func transcript(for draft: AgentPlanDraft) -> some View {
+        if draft.run.outputInterpreter != nil {
             AgentRunFeedView(run: draft.run)
         } else {
             TextEditor(text: .constant(draft.run.outputText))
@@ -64,7 +64,7 @@ struct CodexPlanDraftSheet: View {
         }
     }
 
-    private func composer(for draft: CodexPlanDraft) -> some View {
+    private func composer(for draft: AgentPlanDraft) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(statusMessage(for: draft))
                 .font(.caption)
@@ -87,7 +87,7 @@ struct CodexPlanDraftSheet: View {
             }
 
             HStack(alignment: .bottom, spacing: 12) {
-                TextField("Reply to Codex…", text: $replyText, axis: .vertical)
+                TextField("Reply to \(draft.tool.displayName)…", text: $replyText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...4)
                     .disabled(!canSendReply(for: draft))
@@ -95,7 +95,7 @@ struct CodexPlanDraftSheet: View {
                 Button("Send") {
                     let reply = replyText
                     replyText = ""
-                    appModel.sendCodexPlanReply(reply, for: draft.worktreeID)
+                    appModel.sendAgentPlanReply(reply, for: draft.worktreeID)
                 }
                 .keyboardShortcut(.return, modifiers: [.command])
                 .disabled(!canSendReply(for: draft) || replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -105,21 +105,22 @@ struct CodexPlanDraftSheet: View {
         .background(.regularMaterial)
     }
 
-    private func canSendReply(for draft: CodexPlanDraft) -> Bool {
-        !appModel.activeRunIDs.contains(draft.runID)
+    private func canSendReply(for draft: AgentPlanDraft) -> Bool {
+        draft.tool.supportsPlanResume
+            && !appModel.activeRunIDs.contains(draft.runID)
             && draft.sessionID?.isEmpty == false
             && !draft.latestQuestions.isEmpty
     }
 
-    private func activeButtonTitle(for draft: CodexPlanDraft) -> String {
+    private func activeButtonTitle(for draft: AgentPlanDraft) -> String {
         appModel.activeRunIDs.contains(draft.runID) ? "Cancel" : "Close"
     }
 
-    private func activeButtonRole(for draft: CodexPlanDraft) -> ButtonRole? {
+    private func activeButtonRole(for draft: AgentPlanDraft) -> ButtonRole? {
         appModel.activeRunIDs.contains(draft.runID) ? .destructive : nil
     }
 
-    private func statusMessage(for draft: CodexPlanDraft) -> String {
+    private func statusMessage(for draft: AgentPlanDraft) -> String {
         if let importErrorMessage = draft.importErrorMessage?.nonEmpty {
             return "Import failed: \(importErrorMessage)"
         }
@@ -127,15 +128,15 @@ struct CodexPlanDraftSheet: View {
             return "The proposed plan was imported. The sheet will close automatically."
         }
         if appModel.activeRunIDs.contains(draft.runID) {
-            return "Codex is inspecting the worktree and preparing the next planning response."
+            return "\(draft.tool.displayName) is inspecting the worktree and preparing the next planning response."
         }
         if canSendReply(for: draft) {
-            return "Answer the follow-up questions here. After your reply, Stackriot resumes the same Codex session and replaces the worktree plan as soon as Codex returns a final plan."
+            return "Answer the follow-up questions here. After your reply, Stackriot resumes the same \(draft.tool.displayName) session and replaces the worktree plan as soon as the final plan returns."
         }
-        return "No final plan was imported. You can close this draft and start a new Codex planning run."
+        return "No final plan was imported. You can close this draft and start a new planning run."
     }
 
-    private func statusColor(for draft: CodexPlanDraft) -> Color {
+    private func statusColor(for draft: AgentPlanDraft) -> Color {
         if draft.importErrorMessage != nil {
             return .red
         }

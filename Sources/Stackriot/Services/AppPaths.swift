@@ -50,15 +50,32 @@ enum AppPaths {
     }
 
     static var codexPlanArtifactsDirectory: URL {
-        plansDirectory.appendingPathComponent("Codex", isDirectory: true)
+        agentPlanArtifactsDirectory(for: .codex)
     }
 
     static func planFile(for worktreeID: UUID) -> URL {
         plansDirectory.appendingPathComponent("\(worktreeID.uuidString).md", isDirectory: false)
     }
 
+    static func agentPlanArtifactsDirectory(for tool: AIAgentTool) -> URL {
+        let directoryName: String
+        switch tool {
+        case .codex:
+            directoryName = "Codex"
+        case .cursorCLI:
+            directoryName = "Cursor"
+        default:
+            directoryName = tool.rawValue
+        }
+        return plansDirectory.appendingPathComponent(directoryName, isDirectory: true)
+    }
+
     static func codexPlanArtifactsDirectory(for worktreeID: UUID) -> URL {
-        codexPlanArtifactsDirectory.appendingPathComponent(worktreeID.uuidString, isDirectory: true)
+        agentPlanArtifactsDirectory(for: .codex, worktreeID: worktreeID)
+    }
+
+    static func agentPlanArtifactsDirectory(for tool: AIAgentTool, worktreeID: UUID) -> URL {
+        agentPlanArtifactsDirectory(for: tool).appendingPathComponent(worktreeID.uuidString, isDirectory: true)
     }
 
     static func ensureBaseDirectories() throws {
@@ -75,6 +92,7 @@ enum AppPaths {
         try fileManager.createDirectory(at: worktreesRoot, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: plansDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: codexPlanArtifactsDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: agentPlanArtifactsDirectory(for: .cursorCLI), withIntermediateDirectories: true)
     }
 
     static func suggestedRepositoryName(from remoteURL: URL) -> String {
