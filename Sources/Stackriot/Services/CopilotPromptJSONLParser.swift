@@ -7,6 +7,8 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
     private var bodyTextByID: [String: String] = [:]
     private var aggregatedOutputByID: [String: String] = [:]
     private var detailTextByID: [String: String] = [:]
+    private var toolNameByID: [String: String] = [:]
+    private var commandByID: [String: String] = [:]
     private var lastTodoFingerprint: String?
 
     func consume(_ chunk: String) -> StructuredAgentOutputChunk {
@@ -52,8 +54,11 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         if let toolChunk = renderToolEventIfNeeded(type: type, object: object) {
             return toolChunk
         }
-        if let messageChunk = renderMessageIfNeeded(type: type, object: object) {
+        if let messageChunk = renderAssistantMessageIfNeeded(type: type, object: object) {
             return messageChunk
+        }
+        if let reasoningChunk = renderReasoningIfNeeded(type: type, object: object) {
+            return reasoningChunk
         }
 
         return StructuredAgentOutputParserSupport.summarizeUnknownEvent(
@@ -64,132 +69,336 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         )
     }
 
-    private func renderMessageIfNeeded(type: String, object: [String: Any]) -> StructuredAgentOutputChunk? {
+    private func renderAssistantMessageIfNeeded(type: String, object: [String: Any]) -> StructuredAgentOutputChunk? {
         let normalizedType = type.lowercased()
-        let role = StructuredAgentOutputParserSupport.firstString(in: object, keys: ["role", "speaker"])
-        let assistantLike = role?.lowercased() == "assistant"
-            || normalizedType.contains("assistant")
-            || normalizedType.contains("message")
-            || normalizedType.contains("response")
-        guard assistantLike else { return nil }
-        guard let text = extractText(from: object) else { return nil }
-        let segmentID = stableSegmentID(for: object, fallbackPrefix: "copilot-message")
+        let payload = eventPayload(from: object)
+        let legacyRole = StructuredAgentOutputParserSupport.firstString(in: object, keys: ["role", "speaker"])
+        let isLegacyAssistantMessage = (legacyRole?.lowercased() == "assistant")
+            || normalizedType == "assistant_message"
+            || normalizedType == "assistant.response"
+        let isRealAssistantMessage = normalizedType == "assistant.message" || normalizedType == "assistant.message_delta"
+        guard isRealAssistantMessage || isLegacyAssistantMessage else { return nil }
+
+        let phase = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["phase"])?.lowercased()
+        if phase == "thinking", let thinkingText = extractMessageText(from: payload, eventType: normalizedType) {
+            return reasoningChunk(
+                text: thinkingText,
+                id: reasoningSegmentID(for: payload, object: object),
+                groupID: messageGroupID(for: payload, object: object),
+                renderedPrefix: normalizedType.contains("delta") ? "" : "[copilot] Thinking: "
+            )
+        }
+
+        var chunk = StructuredAgentOutputChunk()
+
+        if let reasoningText = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["reasoningText"]),
+           let messageID = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["messageId"]) {
+            let reasoningID = "\(messageID)-reasoning"
+            let bodyText = mergedText(reasoningText, for: reasoningID, store: &bodyTextByID)
+            chunk.renderedText += "[copilot] Thinking: \(reasoningText)\n"
+            chunk.segments.append(
+                makeSegment(
+                    id: reasoningID,
+                    kind: .reasoning,
+                    title: "Thinking",
+                    bodyText: bodyText,
+                    groupID: messageGroupID(for: payload, object: object)
+                )
+            )
+        }
+
+        guard let text = extractMessageText(from: payload.isEmpty ? object : payload, eventType: normalizedType) else {
+            return chunk.segments.isEmpty ? StructuredAgentOutputChunk() : chunk
+        }
+
+        let segmentID = messageSegmentID(for: payload, object: object)
         let bodyText = mergedText(text, for: segmentID, store: &bodyTextByID)
-        let segment = makeSegment(
-            id: segmentID,
-            kind: .agentMessage,
-            title: "Antwort",
-            bodyText: bodyText,
-            groupID: StructuredAgentOutputParserSupport.firstString(in: object, keys: ["conversation_id", "session_id"])
+        chunk.segments.append(
+            makeSegment(
+                id: segmentID,
+                kind: .agentMessage,
+                title: "Antwort",
+                bodyText: bodyText,
+                groupID: messageGroupID(for: payload, object: object)
+            )
         )
         let renderedPrefix = normalizedType.contains("delta") || normalizedType.contains("partial") ? "" : "[copilot] "
-        return StructuredAgentOutputChunk(renderedText: renderedPrefix + text + (renderedPrefix.isEmpty ? "" : "\n"), segments: [segment])
+        chunk.renderedText += renderedPrefix + text + (renderedPrefix.isEmpty ? "" : "\n")
+        return chunk
+    }
+
+    private func renderReasoningIfNeeded(type: String, object: [String: Any]) -> StructuredAgentOutputChunk? {
+        let normalizedType = type.lowercased()
+        let payload = eventPayload(from: object)
+
+        if normalizedType == "assistant.reasoning" || normalizedType == "assistant.reasoning_delta" {
+            guard let text = extractReasoningText(from: payload) else { return nil }
+            return reasoningChunk(
+                text: text,
+                id: reasoningSegmentID(for: payload, object: object),
+                groupID: messageGroupID(for: payload, object: object),
+                renderedPrefix: normalizedType.contains("delta") ? "" : "[copilot] Thinking: "
+            )
+        }
+
+        if normalizedType.contains("reason") || normalizedType.contains("thinking") {
+            guard let text = extractReasoningText(from: payload.isEmpty ? object : payload) ?? extractMessageText(from: payload.isEmpty ? object : payload, eventType: normalizedType) else {
+                return nil
+            }
+            return reasoningChunk(
+                text: text,
+                id: reasoningSegmentID(for: payload, object: object),
+                groupID: messageGroupID(for: payload, object: object),
+                renderedPrefix: "[copilot] Thinking: "
+            )
+        }
+
+        return nil
+    }
+
+    private func reasoningChunk(text: String, id: String, groupID: String?, renderedPrefix: String) -> StructuredAgentOutputChunk {
+        let bodyText = mergedText(text, for: id, store: &bodyTextByID)
+        let segment = makeSegment(
+            id: id,
+            kind: .reasoning,
+            title: "Thinking",
+            bodyText: bodyText,
+            groupID: groupID
+        )
+        return StructuredAgentOutputChunk(
+            renderedText: renderedPrefix + text + (renderedPrefix.isEmpty ? "" : "\n"),
+            segments: [segment]
+        )
     }
 
     private func renderToolEventIfNeeded(type: String, object: [String: Any]) -> StructuredAgentOutputChunk? {
         let normalizedType = type.lowercased()
-        let toolName = StructuredAgentOutputParserSupport.firstString(in: object, keys: ["tool_name", "tool", "name"])
-        let toolInput = StructuredAgentOutputParserSupport.nestedDictionary(in: object, keys: ["input", "arguments", "payload"])
-        let command = extractCommand(from: object) ?? extractCommand(from: toolInput ?? [:])
-        let isToolEvent = toolName != nil
-            || command != nil
-            || normalizedType.contains("tool")
-            || normalizedType.contains("command")
-            || normalizedType.contains("shell")
-            || normalizedType.contains("exec")
-        guard isToolEvent else { return nil }
+        let payload = eventPayload(from: object)
+        let arguments = StructuredAgentOutputParserSupport.nestedDictionary(in: payload, keys: ["arguments", "input", "payload"])
+        let rawToolName = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["toolName", "tool_name", "tool", "name"])
+            ?? StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["mcpToolName"])
+        let rawCommand = extractCommand(from: arguments ?? payload)
+        let isRealToolEvent = [
+            "tool.user_requested",
+            "tool.execution_start",
+            "tool.execution_partial_result",
+            "tool.execution_progress",
+            "tool.execution_complete",
+        ].contains(normalizedType)
+        let isLegacyToolEvent = ["tool.started", "tool.completed"].contains(normalizedType)
+            || rawToolName != nil
+            || rawCommand != nil
+        guard isRealToolEvent || isLegacyToolEvent else { return nil }
 
-        let segmentID = stableToolSegmentID(for: object, fallbackPrefix: "copilot-tool")
-        let status = AgentRunSegment.Status(
-            rawValue: StructuredAgentOutputParserSupport.firstString(in: object, keys: ["status", "state"]),
-            eventType: type
-        )
-        let isCommand = command != nil || toolName?.lowercased().contains("shell") == true || toolName?.lowercased().contains("bash") == true
+        let segmentID = toolSegmentID(for: payload, object: object)
+        if let rawToolName {
+            toolNameByID[segmentID] = rawToolName
+        }
+        if let rawCommand {
+            commandByID[segmentID] = rawCommand
+        }
+        let toolName = rawToolName ?? toolNameByID[segmentID]
+        let command = rawCommand ?? commandByID[segmentID]
+        let status = toolStatus(for: normalizedType, payload: payload)
+        let isCommand = isCommandLike(toolName: toolName, command: command)
         let title = command ?? toolName ?? "Tool"
-        let detailCandidate = StructuredAgentOutputParserSupport.prettyPrintedString(from: toolInput)
-        let outputCandidate = StructuredAgentOutputParserSupport.prettyPrintedString(from: object["result"])
-            ?? StructuredAgentOutputParserSupport.prettyPrintedString(from: object["output"])
+        let subtitle: String?
+        if isCommand {
+            subtitle = toolName
+        } else {
+            subtitle = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["mcpServerName", "server", "intentionSummary"])
+        }
+
+        let result = StructuredAgentOutputParserSupport.nestedDictionary(in: payload, keys: ["result"])
+        let error = StructuredAgentOutputParserSupport.nestedDictionary(in: payload, keys: ["error"])
+        let partialOutput = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["partialOutput"])
+        let progressMessage = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["progressMessage"])
+        let outputCandidate = partialOutput
+            ?? StructuredAgentOutputParserSupport.firstString(in: result ?? [:], keys: ["detailedContent", "content"])
+            ?? StructuredAgentOutputParserSupport.prettyPrintedString(from: result?["contents"])
+            ?? StructuredAgentOutputParserSupport.prettyPrintedString(from: payload["output"])
+            ?? StructuredAgentOutputParserSupport.prettyPrintedString(from: payload["result"])
+        let detailCandidate = progressMessage
+            ?? StructuredAgentOutputParserSupport.prettyPrintedString(from: arguments)
+            ?? StructuredAgentOutputParserSupport.prettyPrintedString(from: error)
+            ?? (isCommand ? nil : outputCandidate)
         let aggregatedOutput = isCommand ? outputCandidate.flatMap { mergedText($0, for: segmentID, store: &aggregatedOutputByID) } : nil
-        let detailText = isCommand ? nil : detailCandidate.flatMap { mergedText($0, for: segmentID, store: &detailTextByID) }
+        let detailText = detailCandidate.flatMap { mergedText($0, for: segmentID, store: &detailTextByID) }
+
         let segment = makeSegment(
             id: segmentID,
             kind: isCommand ? .commandExecution : .toolCall,
             title: title,
-            subtitle: isCommand ? toolName : command,
+            subtitle: subtitle,
             status: status,
-            exitCode: object["exit_code"] as? Int,
-            detailText: detailText,
+            detailText: isCommand ? nil : detailText,
             aggregatedOutput: aggregatedOutput,
             groupID: toolName
         )
+
         let renderedTitle = isCommand ? "$ \(title)" : "Tool \(title)"
-        let rendered = status == .running ? "[copilot] \(renderedTitle)\n" : "[copilot] \(renderedTitle) \(status.displayText.lowercased())\n"
+        let rendered: String
+        switch normalizedType {
+        case "tool.execution_partial_result":
+            rendered = partialOutput ?? ""
+        case "tool.execution_progress":
+            rendered = progressMessage.map { "[copilot] \($0)\n" } ?? ""
+        case "tool.execution_start", "tool.user_requested", "tool.started":
+            rendered = "[copilot] \(renderedTitle)\n"
+        default:
+            rendered = "[copilot] \(renderedTitle) \(status.displayText.lowercased())\n"
+        }
+
         return StructuredAgentOutputChunk(renderedText: rendered, segments: [segment])
     }
 
     private func renderFileChangesIfNeeded(type: String, object: [String: Any]) -> StructuredAgentOutputChunk? {
         let normalizedType = type.lowercased()
-        let source = (object["fileChanges"] as? [Any])
-            ?? (object["changes"] as? [Any])
-            ?? (object["files"] as? [Any])
-            ?? (StructuredAgentOutputParserSupport.nestedDictionary(in: object, keys: ["patch", "diff"])?["files"] as? [Any])
+        let payload = eventPayload(from: object)
+
+        if normalizedType == "permission.requested",
+           let permissionRequest = StructuredAgentOutputParserSupport.nestedDictionary(in: payload, keys: ["permissionRequest"]),
+           StructuredAgentOutputParserSupport.firstString(in: permissionRequest, keys: ["kind"]) == "write",
+           let path = StructuredAgentOutputParserSupport.firstString(in: permissionRequest, keys: ["fileName"]) {
+            let kind = permissionRequest["newFileContents"] == nil ? AgentRunSegment.ChangedFile.Kind.updated : .added
+            let segment = makeSegment(
+                id: stableSegmentID(for: permissionRequest, fallbackPrefix: "copilot-files"),
+                kind: .fileChange,
+                title: "Changed files",
+                subtitle: path,
+                status: .pending,
+                detailText: StructuredAgentOutputParserSupport.firstString(in: permissionRequest, keys: ["diff", "intention"]),
+                fileChanges: [.init(path: path, kind: kind)],
+                groupID: StructuredAgentOutputParserSupport.firstString(in: permissionRequest, keys: ["toolCallId"])
+            )
+            return StructuredAgentOutputChunk(renderedText: "[copilot] File changes updated\n", segments: [segment])
+        }
+
+        if normalizedType == "session.workspace_file_changed",
+           let path = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["path"]) {
+            let kind = AgentRunSegment.ChangedFile.Kind(rawValue: StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["operation"]))
+            let segment = makeSegment(
+                id: stableSegmentID(for: payload, fallbackPrefix: "copilot-files"),
+                kind: .fileChange,
+                title: "Changed files",
+                subtitle: path,
+                status: .completed,
+                fileChanges: [.init(path: path, kind: kind)],
+                groupID: path
+            )
+            return StructuredAgentOutputChunk(renderedText: "[copilot] File changes updated\n", segments: [segment])
+        }
+
+        if normalizedType == "result",
+           let usage = StructuredAgentOutputParserSupport.nestedDictionary(in: object, keys: ["usage"]),
+           let codeChanges = StructuredAgentOutputParserSupport.nestedDictionary(in: usage, keys: ["codeChanges"]),
+           let files = codeChanges["filesModified"] as? [Any] {
+            let fileChanges = files.compactMap(parseFileChange(from:))
+            guard !fileChanges.isEmpty else { return nil }
+            let segment = makeSegment(
+                id: stableSegmentID(for: object, fallbackPrefix: "copilot-files"),
+                kind: .fileChange,
+                title: "Changed files",
+                subtitle: fileChanges.map(\.path).prefix(3).joined(separator: ", ").nonEmpty,
+                status: .completed,
+                fileChanges: fileChanges
+            )
+            return StructuredAgentOutputChunk(renderedText: "[copilot] File changes updated\n", segments: [segment])
+        }
+
+        let source = (payload["fileChanges"] as? [Any])
+            ?? (payload["changes"] as? [Any])
+            ?? (payload["files"] as? [Any])
+            ?? (StructuredAgentOutputParserSupport.nestedDictionary(in: payload, keys: ["patch", "diff"])?["files"] as? [Any])
         let fileChanges = (source ?? []).compactMap(parseFileChange(from:))
         guard !fileChanges.isEmpty || normalizedType.contains("patch") || normalizedType.contains("file") else {
             return nil
         }
         let summary = fileChanges.map(\.path).prefix(3).joined(separator: ", ")
         let segment = makeSegment(
-            id: stableSegmentID(for: object, fallbackPrefix: "copilot-files"),
+            id: stableSegmentID(for: payload.isEmpty ? object : payload, fallbackPrefix: "copilot-files"),
             kind: .fileChange,
             title: "Changed files",
             subtitle: summary.nonEmpty,
-            status: .init(rawValue: StructuredAgentOutputParserSupport.firstString(in: object, keys: ["status", "state"]), eventType: type),
-            detailText: fileChanges.isEmpty ? StructuredAgentOutputParserSupport.prettyPrintedString(from: object["patch"] ?? object["diff"]) : nil,
+            status: AgentRunSegment.Status(rawValue: StructuredAgentOutputParserSupport.firstString(in: payload.isEmpty ? object : payload, keys: ["status", "state"]), eventType: type),
+            detailText: fileChanges.isEmpty ? StructuredAgentOutputParserSupport.prettyPrintedString(from: payload["patch"] ?? payload["diff"]) : nil,
             fileChanges: fileChanges,
-            groupID: StructuredAgentOutputParserSupport.firstString(in: object, keys: ["operation_id", "tool_call_id"])
+            groupID: StructuredAgentOutputParserSupport.firstString(in: payload.isEmpty ? object : payload, keys: ["operation_id", "tool_call_id", "toolCallId"])
         )
         return StructuredAgentOutputChunk(renderedText: "[copilot] File changes updated\n", segments: [segment])
     }
 
     private func renderTodoIfNeeded(type: String, object: [String: Any]) -> StructuredAgentOutputChunk? {
         let normalizedType = type.lowercased()
-        let source = (object["todoItems"] as? [Any])
-            ?? (object["todos"] as? [Any])
-            ?? (object["plan"] as? [Any])
-            ?? (object["tasks"] as? [Any])
+        let payload = eventPayload(from: object)
+
+        if normalizedType == "exit_plan_mode.requested" {
+            let planContent = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["planContent"])
+            let summary = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["summary"])
+            let items = parsePlanContent(planContent) + parsePlanSummary(summary)
+            let deduplicatedItems = items.removingDuplicateTodoItems()
+            guard !deduplicatedItems.isEmpty else { return nil }
+            let fingerprint = fingerprint(for: deduplicatedItems)
+            guard fingerprint != lastTodoFingerprint else { return StructuredAgentOutputChunk() }
+            lastTodoFingerprint = fingerprint
+            let segment = makeSegment(
+                id: stableSegmentID(for: payload, fallbackPrefix: "copilot-todo"),
+                kind: .todoList,
+                title: "Plan",
+                subtitle: summary,
+                detailText: planContent,
+                todoItems: deduplicatedItems,
+                groupID: StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["requestId"])
+            )
+            return StructuredAgentOutputChunk(renderedText: "[copilot] Plan updated\n", segments: [segment])
+        }
+
+        let source = (payload["todoItems"] as? [Any])
+            ?? (payload["todos"] as? [Any])
+            ?? (payload["plan"] as? [Any])
+            ?? (payload["tasks"] as? [Any])
+            ?? (payload["items"] as? [Any])
         guard normalizedType.contains("todo") || normalizedType.contains("plan") || normalizedType.contains("task") || source != nil else {
             return nil
         }
         let items = (source ?? []).compactMap(parseTodoItem(from:))
         guard !items.isEmpty else { return nil }
-        let fingerprint = items.map { "\($0.isCompleted ? "[x]" : "[ ]") \($0.text)" }.joined(separator: "\n")
+        let fingerprint = fingerprint(for: items)
         guard fingerprint != lastTodoFingerprint else { return StructuredAgentOutputChunk() }
         lastTodoFingerprint = fingerprint
         let segment = makeSegment(
-            id: stableSegmentID(for: object, fallbackPrefix: "copilot-todo"),
+            id: stableSegmentID(for: payload.isEmpty ? object : payload, fallbackPrefix: "copilot-todo"),
             kind: .todoList,
             title: "Plan",
             subtitle: "Copilot progress",
             todoItems: items,
-            groupID: StructuredAgentOutputParserSupport.firstString(in: object, keys: ["conversation_id", "session_id"])
+            groupID: StructuredAgentOutputParserSupport.firstString(in: payload.isEmpty ? object : payload, keys: ["conversation_id", "session_id", "requestId"])
         )
         return StructuredAgentOutputChunk(renderedText: "[copilot] Plan updated\n", segments: [segment])
     }
 
     private func renderErrorIfNeeded(type: String, object: [String: Any]) -> StructuredAgentOutputChunk? {
         let normalizedType = type.lowercased()
-        let errorDictionary = StructuredAgentOutputParserSupport.nestedDictionary(in: object, keys: ["error"])
+        let payload = eventPayload(from: object)
+
+        if normalizedType == "tool.execution_complete" || normalizedType == "tool.completed" {
+            return nil
+        }
+
+        let errorDictionary = StructuredAgentOutputParserSupport.nestedDictionary(in: payload.isEmpty ? object : payload, keys: ["error"])
         let message = StructuredAgentOutputParserSupport.firstString(in: errorDictionary ?? [:], keys: ["message", "error"])
-            ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["error", "message"])
-        guard normalizedType.contains("error") || errorDictionary != nil || message != nil else { return nil }
+            ?? StructuredAgentOutputParserSupport.firstString(in: payload.isEmpty ? object : payload, keys: ["error", "message"])
+        guard normalizedType.contains("error") || normalizedType == "abort" || errorDictionary != nil || message != nil else { return nil }
         let text = message ?? "Copilot error"
         let segment = makeSegment(
-            id: stableSegmentID(for: object, fallbackPrefix: "copilot-error"),
+            id: stableSegmentID(for: payload.isEmpty ? object : payload, fallbackPrefix: "copilot-error"),
             kind: .error,
             title: "Copilot error",
             bodyText: text,
             status: .failed,
-            detailText: StructuredAgentOutputParserSupport.prettyPrintedString(from: errorDictionary ?? object)
+            detailText: StructuredAgentOutputParserSupport.prettyPrintedString(
+                from: errorDictionary ?? (payload.isEmpty ? object : payload)
+            )
         )
         return StructuredAgentOutputChunk(renderedText: "[copilot] Error: \(text)\n", segments: [segment])
     }
@@ -208,10 +417,22 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         )
     }
 
-    private func extractText(from object: [String: Any]) -> String? {
-        StructuredAgentOutputParserSupport.firstString(in: object, keys: ["text", "message", "content", "response"])
+    private func eventPayload(from object: [String: Any]) -> [String: Any] {
+        StructuredAgentOutputParserSupport.nestedDictionary(in: object, keys: ["data"]) ?? [:]
+    }
+
+    private func extractReasoningText(from object: [String: Any]) -> String? {
+        StructuredAgentOutputParserSupport.firstString(in: object, keys: ["content", "deltaContent", "reasoningText", "text"])
+            ?? StructuredAgentOutputParserSupport.joinedText(from: object["content"])
+    }
+
+    private func extractMessageText(from object: [String: Any], eventType: String) -> String? {
+        if eventType.contains("delta") {
+            return StructuredAgentOutputParserSupport.firstString(in: object, keys: ["deltaContent", "content", "text"])
+                ?? StructuredAgentOutputParserSupport.joinedText(from: object["delta"])
+        }
+        return StructuredAgentOutputParserSupport.firstString(in: object, keys: ["content", "text", "message", "response"])
             ?? StructuredAgentOutputParserSupport.joinedText(from: object["parts"])
-            ?? StructuredAgentOutputParserSupport.joinedText(from: object["delta"])
             ?? StructuredAgentOutputParserSupport.joinedText(from: object["message"])
     }
 
@@ -227,7 +448,7 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         guard let path = StructuredAgentOutputParserSupport.firstString(in: dictionary, keys: ["path", "file", "name"]) else {
             return nil
         }
-        let kind = AgentRunSegment.ChangedFile.Kind(rawValue: StructuredAgentOutputParserSupport.firstString(in: dictionary, keys: ["kind", "status", "change_type"]))
+        let kind = AgentRunSegment.ChangedFile.Kind(rawValue: StructuredAgentOutputParserSupport.firstString(in: dictionary, keys: ["kind", "status", "change_type", "operation"]))
         return AgentRunSegment.ChangedFile(path: path, kind: kind)
     }
 
@@ -245,13 +466,117 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         return AgentRunSegment.TodoItem(text: text, isCompleted: completed)
     }
 
+    private func parsePlanContent(_ content: String?) -> [AgentRunSegment.TodoItem] {
+        guard let content else { return [] }
+        return content
+            .components(separatedBy: .newlines)
+            .compactMap(parsePlanLine(_:))
+    }
+
+    private func parsePlanSummary(_ summary: String?) -> [AgentRunSegment.TodoItem] {
+        guard let summary = summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty else { return [] }
+        return [AgentRunSegment.TodoItem(text: summary, isCompleted: false)]
+    }
+
+    private func parsePlanLine(_ rawLine: String) -> AgentRunSegment.TodoItem? {
+        let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let item = parseChecklistLine(trimmed) {
+            return item
+        }
+
+        let strippedNumbering = trimmed.replacingOccurrences(
+            of: #"^\d+[\.)]\s+"#,
+            with: "",
+            options: .regularExpression
+        )
+        let strippedBullet = strippedNumbering.replacingOccurrences(
+            of: #"^[-*+]\s+"#,
+            with: "",
+            options: .regularExpression
+        )
+        let candidate = strippedBullet.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard candidate != trimmed || trimmed.first?.isNumber == true || ["-", "*", "+"].contains(trimmed.first.map(String.init) ?? "") else {
+            return nil
+        }
+        return AgentRunSegment.TodoItem(text: candidate, isCompleted: false)
+    }
+
+    private func parseChecklistLine(_ line: String) -> AgentRunSegment.TodoItem? {
+        let patterns: [(String, Bool)] = [
+            (#"^[-*+]\s*\[(x|X)\]\s+(.+)$"#, true),
+            (#"^[-*+]\s*\[\s\]\s+(.+)$"#, false),
+            (#"^\[(x|X)\]\s+(.+)$"#, true),
+            (#"^\[\s\]\s+(.+)$"#, false),
+        ]
+
+        for (pattern, completed) in patterns {
+            if let text = line.captures(matching: pattern)?.last?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                return AgentRunSegment.TodoItem(text: text, isCompleted: completed)
+            }
+        }
+        return nil
+    }
+
+    private func fingerprint(for items: [AgentRunSegment.TodoItem]) -> String {
+        items.map { "\($0.isCompleted ? "[x]" : "[ ]") \($0.text)" }.joined(separator: "\n")
+    }
+
+    private func isCommandLike(toolName: String?, command: String?) -> Bool {
+        guard command == nil else { return true }
+        let normalizedToolName = toolName?.lowercased() ?? ""
+        return normalizedToolName.contains("bash")
+            || normalizedToolName.contains("shell")
+            || normalizedToolName.contains("terminal")
+    }
+
+    private func toolStatus(for type: String, payload: [String: Any]) -> AgentRunSegment.Status {
+        if type == "tool.user_requested" {
+            return .pending
+        }
+        if type == "tool.execution_progress" || type == "tool.execution_partial_result" || type == "tool.execution_start" || type == "tool.started" {
+            return .running
+        }
+        if type == "tool.execution_complete" || type == "tool.completed" {
+            if let success = payload["success"] as? Bool {
+                return success ? .completed : .failed
+            }
+        }
+        return AgentRunSegment.Status(
+            rawValue: StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["status", "state"]),
+            eventType: type
+        )
+    }
+
+    private func messageSegmentID(for payload: [String: Any], object: [String: Any]) -> String {
+        StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["messageId", "id"])
+            ?? stableSegmentID(for: object, fallbackPrefix: "copilot-message")
+    }
+
+    private func reasoningSegmentID(for payload: [String: Any], object: [String: Any]) -> String {
+        StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["reasoningId"])
+            ?? StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["messageId"]).map { "\($0)-reasoning" }
+            ?? stableSegmentID(for: object, fallbackPrefix: "copilot-reasoning")
+    }
+
+    private func toolSegmentID(for payload: [String: Any], object: [String: Any]) -> String {
+        StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["toolCallId", "requestId", "id"])
+            ?? stableToolSegmentID(for: object, fallbackPrefix: "copilot-tool")
+    }
+
+    private func messageGroupID(for payload: [String: Any], object: [String: Any]) -> String? {
+        StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["interactionId", "parentToolCallId", "conversation_id", "session_id"])
+            ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["interactionId", "conversation_id", "session_id"])
+    }
+
     private func stableSegmentID(for object: [String: Any], fallbackPrefix: String) -> String {
-        StructuredAgentOutputParserSupport.firstString(in: object, keys: ["id", "message_id", "operation_id", "tool_call_id"])
+        StructuredAgentOutputParserSupport.firstString(in: object, keys: ["id", "message_id", "messageId", "operation_id", "operation", "tool_call_id", "toolCallId", "requestId", "path"])
             ?? nextTransientSegmentID(prefix: fallbackPrefix)
     }
 
     private func stableToolSegmentID(for object: [String: Any], fallbackPrefix: String) -> String {
-        StructuredAgentOutputParserSupport.firstString(in: object, keys: ["tool_call_id", "operation_id", "id"])
+        StructuredAgentOutputParserSupport.firstString(in: object, keys: ["toolCallId", "tool_call_id", "operation_id", "id"])
             ?? nextTransientSegmentID(prefix: fallbackPrefix)
     }
 
@@ -308,5 +633,30 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
             todoItems: todoItems,
             groupID: groupID
         )
+    }
+}
+
+private extension Array where Element == AgentRunSegment.TodoItem {
+    func removingDuplicateTodoItems() -> [Element] {
+        var seen: Set<String> = []
+        var result: [Element] = []
+        for item in self {
+            guard seen.insert("\(item.isCompleted)-\(item.text)").inserted else { continue }
+            result.append(item)
+        }
+        return result
+    }
+}
+
+private extension String {
+    func captures(matching pattern: String) -> [String]? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(startIndex..<endIndex, in: self)
+        guard let match = regex.firstMatch(in: self, range: range) else { return nil }
+        return (1..<match.numberOfRanges).compactMap { index in
+            let nsRange = match.range(at: index)
+            guard let range = Range(nsRange, in: self) else { return nil }
+            return String(self[range])
+        }
     }
 }

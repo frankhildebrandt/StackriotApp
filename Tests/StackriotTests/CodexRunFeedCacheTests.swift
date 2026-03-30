@@ -60,6 +60,36 @@ struct StructuredAgentOutputCacheTests {
     }
 
     @Test
+    func rehydratesStructuredSegmentsFromRealCopilotSessionEvents() {
+        let appModel = makeAppModel()
+        let run = RunRecord(
+            actionKind: .aiAgent,
+            title: "GitHub Copilot",
+            commandLine: "copilot -p",
+            outputText: """
+            $ copilot -p
+            {"type":"assistant.reasoning","data":{"reasoningId":"reason-1","content":"Inspecting the repo"}}
+            {"type":"assistant.message","data":{"messageId":"msg-1","content":"Done.","interactionId":"it-1","phase":"final_answer"}}
+            {"type":"tool.execution_complete","data":{"toolCallId":"tool-1","toolName":"bash","arguments":{"command":"git status"},"success":true,"result":{"detailedContent":"On branch main","content":"On branch main"}}}
+            """,
+            outputInterpreter: .copilotPromptJSONL,
+            status: .succeeded
+        )
+
+        appModel.ensureStructuredSegmentsLoaded(for: run)
+        let segments = appModel.structuredSegments(for: run)
+
+        #expect(segments.count == 4)
+        #expect(segments[1].sourceAgent == .githubCopilot)
+        #expect(segments[1].kind == .reasoning)
+        #expect(segments[1].bodyText == "Inspecting the repo")
+        #expect(segments[2].kind == .agentMessage)
+        #expect(segments[2].bodyText == "Done.")
+        #expect(segments[3].kind == .commandExecution)
+        #expect(segments[3].aggregatedOutput == "On branch main")
+    }
+
+    @Test
     func ignoresRunsWithoutStructuredInterpreterDuringRehydration() {
         let appModel = makeAppModel()
         let run = RunRecord(
