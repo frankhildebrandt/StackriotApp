@@ -92,6 +92,10 @@ final class AppModel: @unchecked Sendable {
     var storedModelContext: ModelContext?
     var autoRefreshTask: Task<Void, Never>?
     var nodeRuntimeRefreshTask: Task<Void, Never>?
+    @ObservationIgnored
+    var worktreeStatusPollingTask: Task<Void, Never>?
+    @ObservationIgnored
+    var lastWorktreeStatusPollAt: Date?
 
     init(
         services: AppServices = .production,
@@ -110,6 +114,7 @@ final class AppModel: @unchecked Sendable {
             migrateWorktreePrimaryContextsIfNeeded(in: modelContext)
             startAutoRefreshLoopIfNeeded()
             startNodeRuntimeRefreshLoopIfNeeded()
+            startWorktreeStatusPollingIfNeeded()
             Task {
                 nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
                 await services.nodeRuntimeManager.refreshDefaultRuntimeIfNeeded(force: false)

@@ -196,6 +196,15 @@ extension AppModel {
         }
         lastForegroundLightRefreshAt = now
         guard let repository = selectedRepository(), storedModelContext != nil else { return }
+
+        if AppPreferences.worktreeStatusPollingEnabled {
+            if let lastPoll = lastWorktreeStatusPollAt,
+               now.timeIntervalSince(lastPoll) < AppPreferences.worktreeStatusPollingInterval
+            {
+                return
+            }
+        }
+
         await refreshWorktreeStatuses(for: repository)
     }
 

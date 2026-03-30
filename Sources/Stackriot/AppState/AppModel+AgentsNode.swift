@@ -514,4 +514,23 @@ extension AppModel {
             }
         }
     }
+
+    func startWorktreeStatusPollingIfNeeded() {
+        guard worktreeStatusPollingTask == nil else { return }
+
+        worktreeStatusPollingTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                let interval = AppPreferences.worktreeStatusPollingInterval
+                try? await Task.sleep(for: .seconds(interval))
+                if Task.isCancelled {
+                    return
+                }
+                guard AppPreferences.worktreeStatusPollingEnabled else { continue }
+                guard let repository = self.selectedRepository(), self.storedModelContext != nil else { continue }
+                await self.refreshWorktreeStatuses(for: repository)
+                self.lastWorktreeStatusPollAt = Date.now
+            }
+        }
+    }
 }

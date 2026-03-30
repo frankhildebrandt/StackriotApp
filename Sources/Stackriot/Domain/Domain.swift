@@ -1152,8 +1152,12 @@ enum AppPreferences {
     static let selectedSettingsCategoryKey = "settings.selectedCategory"
     static let autoRefreshEnabledKey = "repositories.autoRefreshEnabled"
     static let autoRefreshIntervalKey = "repositories.autoRefreshIntervalSeconds"
+    static let worktreeStatusPollingEnabledKey = "repositories.worktreeStatusPollingEnabled"
+    static let worktreeStatusPollingIntervalKey = "repositories.worktreeStatusPollingIntervalSeconds"
     static let defaultAutoRefreshEnabled = true
     static let defaultAutoRefreshInterval: Double = 900
+    static let defaultWorktreeStatusPollingEnabled = true
+    static let defaultWorktreeStatusPollingInterval: Double = 120
     static let terminalTabRetentionModeKey = "terminal.tabs.retentionMode"
     static let nodeAutoUpdateEnabledKey = "node.autoUpdateEnabled"
     static let nodeAutoUpdateIntervalKey = "node.autoUpdateIntervalSeconds"
@@ -1190,6 +1194,20 @@ enum AppPreferences {
         let defaults = UserDefaults.standard
         let value = defaults.double(forKey: autoRefreshIntervalKey)
         return value > 0 ? value : defaultAutoRefreshInterval
+    }
+
+    static var worktreeStatusPollingEnabled: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: worktreeStatusPollingEnabledKey) == nil {
+            return defaultWorktreeStatusPollingEnabled
+        }
+        return defaults.bool(forKey: worktreeStatusPollingEnabledKey)
+    }
+
+    static var worktreeStatusPollingInterval: TimeInterval {
+        let defaults = UserDefaults.standard
+        let value = defaults.double(forKey: worktreeStatusPollingIntervalKey)
+        return value > 0 ? value : defaultWorktreeStatusPollingInterval
     }
 
     static var terminalTabRetentionMode: TerminalTabRetentionMode {
