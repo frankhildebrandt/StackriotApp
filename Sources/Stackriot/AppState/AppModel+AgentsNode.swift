@@ -265,7 +265,9 @@ extension AppModel {
                         stdinText: nil,
                         environment: [:],
                         usesTerminalSession: false,
-                        outputInterpreter: .codexExecJSONL
+                        outputInterpreter: .codexExecJSONL,
+                        agentTool: tool,
+                        initialPrompt: promptText
                     )
                 case .claudeCode:
                     descriptor = CommandExecutionDescriptor(
@@ -282,7 +284,9 @@ extension AppModel {
                         stdinText: nil,
                         environment: [:],
                         usesTerminalSession: false,
-                        outputInterpreter: .claudePrintStreamJSON
+                        outputInterpreter: .claudePrintStreamJSON,
+                        agentTool: tool,
+                        initialPrompt: promptText
                     )
                 case .githubCopilot:
                     descriptor = CommandExecutionDescriptor(
@@ -299,7 +303,9 @@ extension AppModel {
                         stdinText: nil,
                         environment: [:],
                         usesTerminalSession: false,
-                        outputInterpreter: .copilotPromptJSONL
+                        outputInterpreter: .copilotPromptJSONL,
+                        agentTool: tool,
+                        initialPrompt: promptText
                     )
                 case .cursorCLI:
                     descriptor = CommandExecutionDescriptor(
@@ -316,7 +322,9 @@ extension AppModel {
                         stdinText: nil,
                         environment: [:],
                         usesTerminalSession: false,
-                        outputInterpreter: .cursorAgentPrintJSON
+                        outputInterpreter: .cursorAgentPrintJSON,
+                        agentTool: tool,
+                        initialPrompt: promptText
                     )
                 default:
                     descriptor = nil
@@ -357,7 +365,9 @@ extension AppModel {
                 repositoryID: repository.id,
                 worktreeID: worktree.id,
                 runtimeRequirement: nil,
-                stdinText: stdinText
+                stdinText: stdinText,
+                agentTool: tool,
+                initialPrompt: promptText
             )
             let run = startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
             refreshRunningAgentWorktrees()

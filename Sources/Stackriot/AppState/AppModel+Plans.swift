@@ -167,12 +167,14 @@ extension AppModel {
             return
         }
 
-        let run = startTransientRun(
+        guard let run = startTransientRun(
             descriptor,
             repository: repository,
             worktree: worktree,
             isTransientPlanRun: true
-        )
+        ) else {
+            return
+        }
         agentPlanDraftsByWorktreeID[worktree.id] = AgentPlanDraft(
             tool: tool,
             worktreeID: worktree.id,
@@ -222,12 +224,14 @@ extension AppModel {
             return
         }
 
-        let run = startTransientRun(
+        guard let run = startTransientRun(
             descriptor,
             repository: repository,
             worktree: worktree,
             isTransientPlanRun: true
-        )
+        ) else {
+            return
+        }
         agentPlanDraftsByWorktreeID[worktreeID]?.run = run
         agentPlanDraftsByWorktreeID[worktreeID]?.latestQuestions = []
         agentPlanDraftsByWorktreeID[worktreeID]?.importErrorMessage = nil
@@ -438,7 +442,9 @@ extension AppModel {
                 stdinText: nil,
                 environment: [:],
                 usesTerminalSession: false,
-                outputInterpreter: .codexExecJSONL
+                outputInterpreter: .codexExecJSONL,
+                agentTool: tool,
+                initialPrompt: prompt
             )
         case .cursorCLI:
             return CommandExecutionDescriptor(
@@ -461,7 +467,9 @@ extension AppModel {
                 stdinText: nil,
                 environment: [:],
                 usesTerminalSession: false,
-                outputInterpreter: .cursorAgentPrintJSON
+                outputInterpreter: .cursorAgentPrintJSON,
+                agentTool: tool,
+                initialPrompt: prompt
             )
         default:
             return nil
@@ -502,7 +510,9 @@ extension AppModel {
                 stdinText: nil,
                 environment: [:],
                 usesTerminalSession: false,
-                outputInterpreter: .codexExecJSONL
+                outputInterpreter: .codexExecJSONL,
+                agentTool: tool,
+                initialPrompt: prompt
             )
         case .cursorCLI:
             return CommandExecutionDescriptor(
@@ -526,7 +536,9 @@ extension AppModel {
                 stdinText: nil,
                 environment: [:],
                 usesTerminalSession: false,
-                outputInterpreter: .cursorAgentPrintJSON
+                outputInterpreter: .cursorAgentPrintJSON,
+                agentTool: tool,
+                initialPrompt: prompt
             )
         default:
             return nil

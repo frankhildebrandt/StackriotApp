@@ -89,6 +89,7 @@ struct StackriotTests {
         #expect(AppPaths.npmCacheDirectory.path.hasPrefix(supportRoot))
         #expect(AppPaths.corepackCacheDirectory.path.hasPrefix(supportRoot))
         #expect(AppPaths.runtimeTemporaryDirectory.path.hasPrefix(supportRoot))
+        #expect(AppPaths.rawLogsDirectory.path.hasPrefix(supportRoot))
     }
 
     @Test
@@ -1885,6 +1886,135 @@ struct StackriotTests {
 
     @MainActor
     @Test
+    func aiAgentRunsCreateAppendAndFinalizeArchivedRawLogs() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let archiveRoot = try temporaryDirectory(named: "raw-log-archive")
+        let services = AppServices(
+            aiProviderService: AIProviderService(
+                configurationProvider: {
+                    AIProviderConfiguration(
+                        provider: .openAI,
+                        apiKey: "test-key",
+                        model: "gpt-5.4-mini",
+                        baseURL: "https://api.openai.com/v1"
+                    )
+                },
+                runSummaryGenerator: { title, _, _, exitCode, _ in
+                    AIRunSummary(title: title, summary: "Exit-Code \(exitCode ?? -1)")
+                }
+            ),
+            rawLogArchive: AgentRawLogArchiveService(rootDirectoryProvider: { archiveRoot })
+        )
+        let appModel = AppModel(services: services)
+        appModel.storedModelContext = modelContext
+
+        let project = RepositoryProject(name: "Archive")
+        let repository = makeRepository(name: "RawLogs", project: project)
+        let worktree = WorktreeRecord(branchName: "feature/raw-logs", path: archiveRoot.path, repository: repository)
+        repository.worktrees = [worktree]
+        modelContext.insert(project)
+        modelContext.insert(repository)
+        modelContext.insert(worktree)
+        try modelContext.save()
+
+        let descriptor = CommandExecutionDescriptor(
+            title: "Codex",
+            actionKind: .aiAgent,
+            showsAgentIndicator: true,
+            executable: "codex",
+            arguments: ["exec", "--full-auto", "Investigate failing tests"],
+            displayCommandLine: "codex exec --full-auto Investigate failing tests",
+            currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+            repositoryID: repository.id,
+            worktreeID: worktree.id,
+            usesTerminalSession: false,
+            outputInterpreter: .codexExecJSONL,
+            agentTool: .codex,
+            initialPrompt: "Investigate failing tests"
+        )
+
+        let run = try #require(appModel.startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext))
+        appModel.handleRunOutput(runID: run.id, chunk: "{\"event\":\"delta\"}\n")
+        appModel.handleRunOutput(runID: run.id, chunk: "{\"event\":\"done\"}\n")
+        appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
+
+        let records = try modelContext.fetch(FetchDescriptor<AgentRawLogRecord>())
+        #expect(records.count == 1)
+        let record = try #require(records.first)
+        #expect(record.runID == run.id)
+        #expect(record.projectName == "Archive")
+        #expect(record.repositoryName == "RawLogs")
+        #expect(record.worktreeBranchName == "feature/raw-logs")
+        #expect(record.promptText == "Investigate failing tests")
+        #expect(record.status == .succeeded)
+        #expect(record.endedAt != nil)
+        #expect((record.durationSeconds ?? -1) >= 0)
+        #expect(record.fileSize > 0)
+
+        let archivedText = try String(contentsOf: record.logFileURL, encoding: .utf8)
+        #expect(archivedText.contains("$ codex exec --full-auto Investigate failing tests"))
+        #expect(archivedText.contains("{\"event\":\"delta\"}"))
+        #expect(archivedText.contains("{\"event\":\"done\"}"))
+    }
+
+    @MainActor
+    @Test
+    func deletingArchivedRawLogsRemovesMetadataAndFile() throws {
+        let modelContext = try makeInMemoryModelContext()
+        let archiveRoot = try temporaryDirectory(named: "raw-log-delete")
+        let services = AppServices(rawLogArchive: AgentRawLogArchiveService(rootDirectoryProvider: { archiveRoot }))
+        let appModel = AppModel(services: services)
+        appModel.storedModelContext = modelContext
+
+        let repository = makeRepository(name: "DeleteLogs")
+        modelContext.insert(repository)
+        let logDirectory = archiveRoot.appendingPathComponent("entry", isDirectory: true)
+        try FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
+        let logURL = logDirectory.appendingPathComponent("raw.log")
+        try "hello".write(to: logURL, atomically: true, encoding: .utf8)
+
+        let record = AgentRawLogRecord(
+            runID: UUID(),
+            repositoryID: repository.id,
+            repositoryName: repository.displayName,
+            agentTool: .githubCopilot,
+            title: "Copilot",
+            promptText: "Summarize",
+            startedAt: .now,
+            endedAt: .now,
+            durationSeconds: 1,
+            logFilePath: logURL.path,
+            fileSize: 5,
+            status: .failed
+        )
+        modelContext.insert(record)
+        try modelContext.save()
+
+        appModel.deleteRawLog(record, in: modelContext)
+
+        #expect(!FileManager.default.fileExists(atPath: logURL.path))
+        #expect(!FileManager.default.fileExists(atPath: logDirectory.path))
+        let records = try modelContext.fetch(FetchDescriptor<AgentRawLogRecord>())
+        #expect(records.isEmpty)
+    }
+
+    @Test
+    func archivedRawLogsRenderMissingProjectAndWorktreeMetadataSafely() {
+        let record = AgentRawLogRecord(
+            agentTool: .claudeCode,
+            title: "Claude Code",
+            promptText: nil,
+            startedAt: .now,
+            logFilePath: "/tmp/raw.log"
+        )
+
+        #expect(record.displayProjectName == "Ohne Projekt")
+        #expect(record.displayRepositoryName == "Ohne Repository")
+        #expect(record.displayWorktreeName == "Ohne Worktree")
+    }
+
+    @MainActor
+    @Test
     func gitHubIssueReadinessTracksMissingRemoteCliAndAuth() async {
         let repository = makeRepository(name: "GitHub")
         let origin = RepositoryRemote(
@@ -2910,6 +3040,7 @@ struct StackriotTests {
             WorktreeRecord.self,
             ActionTemplateRecord.self,
             RunRecord.self,
+            AgentRawLogRecord.self,
             configurations: configuration
         )
         return ModelContext(container)

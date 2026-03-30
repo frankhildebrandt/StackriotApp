@@ -31,5 +31,12 @@ struct StackriotApp: App {
         Window("About Stackriot", id: "about") {
             AboutView()
         }
+
+        Window("RAW Logs", id: "raw-logs") {
+            RawLogBrowserWindow()
+                .environment(appModel)
+        }
+        .defaultSize(width: 1480, height: 920)
+        .modelContainer(for: StackriotModelContainer.persistentModelTypes)
     }
 }

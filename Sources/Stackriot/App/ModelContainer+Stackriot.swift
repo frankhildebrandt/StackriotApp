@@ -10,5 +10,6 @@ enum StackriotModelContainer {
         WorktreeRecord.self,
         ActionTemplateRecord.self,
         RunRecord.self,
+        AgentRawLogRecord.self,
     ]
 }

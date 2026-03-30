@@ -112,6 +112,10 @@
 		E0000000000000000000006D /* MCPToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000006D /* MCPToolRegistry.swift */; };
 		E0000000000000000000006E /* MCPServerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000006E /* MCPServerManager.swift */; };
 		E0000000000000000000006F /* MCPSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000006F /* MCPSettingsView.swift */; };
+		E00000000000000000000070 /* AppModel+RawLogs.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000070 /* AppModel+RawLogs.swift */; };
+		E00000000000000000000071 /* RawLogBrowserWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000071 /* RawLogBrowserWindow.swift */; };
+		E00000000000000000000072 /* AgentRawLogRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000072 /* AgentRawLogRecord.swift */; };
+		E00000000000000000000073 /* AgentRawLogArchiveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000073 /* AgentRawLogArchiveService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -220,6 +224,10 @@
 		D0000000000000000000006D /* MCPToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPToolRegistry.swift; sourceTree = "<group>"; };
 		D0000000000000000000006E /* MCPServerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerManager.swift; sourceTree = "<group>"; };
 		D0000000000000000000006F /* MCPSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPSettingsView.swift; sourceTree = "<group>"; };
+		D00000000000000000000070 /* AppModel+RawLogs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+RawLogs.swift"; sourceTree = "<group>"; };
+		D00000000000000000000071 /* RawLogBrowserWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawLogBrowserWindow.swift; sourceTree = "<group>"; };
+		D00000000000000000000072 /* AgentRawLogRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRawLogRecord.swift; sourceTree = "<group>"; };
+		D00000000000000000000073 /* AgentRawLogArchiveService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRawLogArchiveService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -285,6 +293,7 @@
 				D00000000000000000000005 /* AppModel+Persistence.swift */,
 				D0000000000000000000003F /* AppModel+Plans.swift */,
 				D00000000000000000000065 /* AppModel+PullRequests.swift */,
+				D00000000000000000000070 /* AppModel+RawLogs.swift */,
 				D00000000000000000000006 /* AppModel+RemotesSSH.swift */,
 				D00000000000000000000007 /* AppModel+Repositories.swift */,
 				D00000000000000000000008 /* AppModel+Runs.swift */,
@@ -310,6 +319,7 @@
 		F00000000000000000000005 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				F00000000000000000000011 /* Logs */,
 				F0000000000000000000000A /* Repository */,
 				F0000000000000000000000B /* Root */,
 				F0000000000000000000000C /* Runs */,
@@ -325,6 +335,7 @@
 			isa = PBXGroup;
 			children = (
 				D00000000000000000000020 /* ActionTemplateRecord.swift */,
+				D00000000000000000000072 /* AgentRawLogRecord.swift */,
 				D00000000000000000000021 /* ManagedRepository.swift */,
 				D0000000000000000000003B /* RepositoryNamespace.swift */,
 				D0000000000000000000003C /* RepositoryProject.swift */,
@@ -348,6 +359,7 @@
 			isa = PBXGroup;
 			children = (
 				D00000000000000000000042 /* AIProviderService.swift */,
+				D00000000000000000000073 /* AgentRawLogArchiveService.swift */,
 				D00000000000000000000027 /* AIAgentManager.swift */,
 				D00000000000000000000052 /* ClaudePrintStreamJSONParser.swift */,
 				D00000000000000000000049 /* CodexExecJSONLParser.swift */,
@@ -481,6 +493,14 @@
 			path = Settings;
 			sourceTree = "<group>";
 		};
+		F00000000000000000000011 /* Logs */ = {
+			isa = PBXGroup;
+			children = (
+				D00000000000000000000071 /* RawLogBrowserWindow.swift */,
+			);
+			path = Logs;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -568,6 +588,7 @@
 				E00000000000000000000006 /* AppModel+RemotesSSH.swift in Sources */,
 				E00000000000000000000007 /* AppModel+Repositories.swift in Sources */,
 				E00000000000000000000008 /* AppModel+Runs.swift in Sources */,
+				E00000000000000000000070 /* AppModel+RawLogs.swift in Sources */,
 				E00000000000000000000009 /* AppModel+Worktrees.swift in Sources */,
 				E0000000000000000000003F /* AppModel+Plans.swift in Sources */,
 				E00000000000000000000065 /* AppModel+PullRequests.swift in Sources */,
@@ -595,7 +616,8 @@
 					E00000000000000000000011 /* RepositoryDetailView.swift in Sources */,
 					E00000000000000000000047 /* WorkspaceDiffFileList.swift in Sources */,
 					E00000000000000000000036 /* WorktreeActionBar.swift in Sources */,
-					E00000000000000000000012 /* RootView.swift in Sources */,
+				E00000000000000000000012 /* RootView.swift in Sources */,
+				E00000000000000000000071 /* RawLogBrowserWindow.swift in Sources */,
 				E00000000000000000000013 /* RunConsoleColumn.swift in Sources */,
 				E00000000000000000000014 /* RunConsoleView.swift in Sources */,
 				E00000000000000000000050 /* CodexRunFeedView.swift in Sources */,
@@ -621,6 +643,7 @@
 				E0000000000000000000001E /* RemoteManagementSheet.swift in Sources */,
 				E0000000000000000000001F /* SidebarView.swift in Sources */,
 				E00000000000000000000020 /* ActionTemplateRecord.swift in Sources */,
+				E00000000000000000000072 /* AgentRawLogRecord.swift in Sources */,
 				E00000000000000000000021 /* ManagedRepository.swift in Sources */,
 				E0000000000000000000003B /* RepositoryNamespace.swift in Sources */,
 				E0000000000000000000003C /* RepositoryProject.swift in Sources */,
@@ -652,6 +675,7 @@
 				E00000000000000000000034 /* WorktreeStatusService.swift in Sources */,
 				E00000000000000000000035 /* TerminalSessions.swift in Sources */,
 				E00000000000000000000042 /* AIProviderService.swift in Sources */,
+				E00000000000000000000073 /* AgentRawLogArchiveService.swift in Sources */,
 				E00000000000000000000043 /* AgentRunSummaryWindow.swift in Sources */,
 				E00000000000000000000052 /* ClaudePrintStreamJSONParser.swift in Sources */,
 				E00000000000000000000053 /* CopilotPromptJSONLParser.swift in Sources */,
