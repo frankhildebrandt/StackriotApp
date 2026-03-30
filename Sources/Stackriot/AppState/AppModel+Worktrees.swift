@@ -519,62 +519,56 @@ extension AppModel {
     // MARK: - PR Monitoring
 
     func startPRMonitoring(
-        for worktree: WorktreeRecord,
-        repository: ManagedRepository,
-        in modelContext: ModelContext
+        for _: WorktreeRecord,
+        repository _: ManagedRepository,
+        in _: ModelContext
     ) {
-        let worktreeID = worktree.id
-        stopPRMonitoring(for: worktreeID)
-
-        let task = Task { [self] in
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: .seconds(60))
-                } catch {
-                    break
-                }
-                guard !Task.isCancelled else { break }
-                guard let record = self.worktreeRecord(with: worktreeID),
-                      let repository = record.repository,
-                      let prNumber = record.resolvedPrimaryContext?.prNumber ?? record.prNumber
-                else { break }
-
-                do {
-                    let pr = try await services.gitHubCLIService.loadPullRequest(number: prNumber, in: repository)
-                    if pr.status == .merged {
-                        record.lifecycleState = .merged
-                        self.save(modelContext)
-                        if record.shouldDeleteOnMerge {
-                            await self.removeWorktree(record, in: modelContext)
-                        }
-                        break
-                    }
-                } catch {
-                    // Netzwerk- oder CLI-Fehler — nächsten Zyklus erneut versuchen
-                }
-            }
-            self.prMonitoringTasks.removeValue(forKey: worktreeID)
-        }
-
-        prMonitoringTasks[worktreeID] = task
+        ensurePRMonitoringCoordinatorIfNeeded()
     }
 
     func stopPRMonitoring(for worktreeID: UUID) {
-        prMonitoringTasks[worktreeID]?.cancel()
-        prMonitoringTasks.removeValue(forKey: worktreeID)
+        // A single coordinator loop reads state from SwiftData each cycle; nothing to cancel per worktree.
     }
 
-    func restoreAllPRMonitoring(in modelContext: ModelContext) {
+    func ensurePRMonitoringCoordinatorIfNeeded() {
+        guard prMonitoringCoordinatorTask == nil else { return }
+        prMonitoringCoordinatorTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard !Task.isCancelled else { break }
+                await self.runPRMonitoringCycle()
+            }
+        }
+    }
+
+    private func runPRMonitoringCycle() async {
+        guard let modelContext = storedModelContext else { return }
         let descriptor = FetchDescriptor<WorktreeRecord>()
         let allWorktrees = (try? modelContext.fetch(descriptor)) ?? []
         for worktree in allWorktrees {
-            if let repository = worktree.repository,
-               worktree.prNumber != nil,
-               worktree.lifecycleState != .merged
-            {
-                startPRMonitoring(for: worktree, repository: repository, in: modelContext)
+            guard worktree.prNumber != nil, worktree.lifecycleState != .merged else { continue }
+            guard let repository = worktree.repository,
+                  let prNumber = worktree.resolvedPrimaryContext?.prNumber ?? worktree.prNumber
+            else { continue }
+
+            do {
+                let pr = try await services.gitHubCLIService.loadPullRequest(number: prNumber, in: repository)
+                if pr.status == .merged {
+                    worktree.lifecycleState = .merged
+                    save(modelContext)
+                    if worktree.shouldDeleteOnMerge {
+                        await removeWorktree(worktree, in: modelContext)
+                    }
+                }
+            } catch {
+                // Netzwerk- oder CLI-Fehler — nächsten Zyklus erneut versuchen
             }
         }
+    }
+
+    func restoreAllPRMonitoring(in modelContext: ModelContext) {
+        ensurePRMonitoringCoordinatorIfNeeded()
     }
 
     func loadDiff(for worktree: WorktreeRecord) async -> WorkspaceDiffSnapshot {

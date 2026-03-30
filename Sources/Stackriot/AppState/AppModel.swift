@@ -68,7 +68,17 @@ final class AppModel: @unchecked Sendable {
     @ObservationIgnored
     var delegatedAgentRunIDs: Set<UUID> = []
     @ObservationIgnored
-    var prMonitoringTasks: [UUID: Task<Void, Never>] = [:]
+    var prMonitoringCoordinatorTask: Task<Void, Never>?
+    @ObservationIgnored
+    var lastForegroundLightRefreshAt: Date?
+    @ObservationIgnored
+    var pendingRunOutputBuffer: [UUID: String] = [:]
+    @ObservationIgnored
+    var runOutputFlushTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored
+    var rawLogDiskBuffer: [UUID: String] = [:]
+    @ObservationIgnored
+    var rawLogFlushTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored
     var structuredOutputParsersByRunID: [UUID: any StructuredAgentOutputParsing] = [:]
     @ObservationIgnored

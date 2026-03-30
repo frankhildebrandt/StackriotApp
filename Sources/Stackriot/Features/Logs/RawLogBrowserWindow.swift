@@ -4,7 +4,10 @@ import SwiftUI
 struct RawLogBrowserWindow: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \AgentRawLogRecord.startedAt, order: .reverse) private var rawLogs: [AgentRawLogRecord]
+
+    @State private var rawLogs: [AgentRawLogRecord] = []
+    @State private var fetchLimit = 500
+    @State private var canLoadMore = false
 
     @State private var searchText = ""
     @State private var selectedAgent: AIAgentTool?
@@ -86,9 +89,14 @@ struct RawLogBrowserWindow: View {
                 )
             }
         }
-        .task(id: filteredLogs.map(\.id)) {
-            ensureSelection()
+        .task {
+            await reloadRawLogsFromStore()
         }
+        .onChange(of: searchText) { _, _ in ensureSelection() }
+        .onChange(of: selectedProject) { _, _ in ensureSelection() }
+        .onChange(of: selectedRepository) { _, _ in ensureSelection() }
+        .onChange(of: selectedAgent) { _, _ in ensureSelection() }
+        .onChange(of: rawLogs.count) { _, _ in ensureSelection() }
         .task(id: selectedRecord?.id) {
             await reloadSelectedLog()
         }
@@ -98,6 +106,9 @@ struct RawLogBrowserWindow: View {
                 appModel.deleteRawLog(record, in: modelContext)
                 if selectedLogID == deletedID {
                     selectedLogID = filteredLogs.first(where: { $0.id != deletedID })?.id
+                }
+                Task {
+                    await reloadRawLogsFromStore()
                 }
             }
             Button("Abbrechen", role: .cancel) {}
@@ -196,9 +207,21 @@ struct RawLogBrowserWindow: View {
                 .frame(width: 200)
             }
 
-            Text("\(filteredLogs.count) archivierte Logs")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("\(filteredLogs.count) archivierte Logs (max. \(fetchLimit) geladen)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if canLoadMore {
+                    Button("Weitere laden") {
+                        fetchLimit += 500
+                        Task {
+                            await reloadRawLogsFromStore()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
         }
         .padding(14)
     }
@@ -324,6 +347,14 @@ struct RawLogBrowserWindow: View {
             return
         }
         selectedLogID = filteredLogs.first?.id
+    }
+
+    @MainActor
+    private func reloadRawLogsFromStore() async {
+        var descriptor = FetchDescriptor<AgentRawLogRecord>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
+        descriptor.fetchLimit = fetchLimit
+        rawLogs = (try? modelContext.fetch(descriptor)) ?? []
+        canLoadMore = rawLogs.count == fetchLimit
     }
 
     @MainActor
