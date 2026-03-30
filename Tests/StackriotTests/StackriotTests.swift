@@ -163,7 +163,7 @@ struct StackriotTests {
         #expect(copilot.contains(prompt.shellEscaped))
 
         let cursor = AIAgentTool.cursorCLI.launchCommandWithPrompt(prompt, in: path)
-        #expect(cursor.contains("cursor-agent --print --output-format json --trust --force"))
+        #expect(cursor.contains("cursor-agent --print --output-format stream-json --stream-partial-output --trust --force"))
         #expect(cursor.contains(prompt.shellEscaped))
     }
 
@@ -2678,23 +2678,59 @@ struct StackriotTests {
     @Test
     func cursorPrintedResponseParserExtractsSessionAndStructuredResult() {
         let parser = CursorAgentPrintJSONParser()
-        let innerResult = "{\"status\":\"ready\",\"summary\":\"Plan is ready.\",\"questions\":null,\"plan_markdown\":\"# Cursor Plan\\n- Inspect workspace\"}"
-        let responseText = String(
+        let innerResult = """
+        Got it. I will inspect the repository first.
+        {"status":"ready","summary":"Plan is ready.","questions":null,"plan_markdown":"# Cursor Plan\\n- Inspect workspace"}
+        """
+        let firstEvent = String(
             data: try! JSONSerialization.data(withJSONObject: [
+                "type": "message.delta",
+                "session_id": "chat-123",
+                "text": "Got it. ",
+            ]),
+            encoding: .utf8
+        )! + "\n"
+        let secondEvent = String(
+            data: try! JSONSerialization.data(withJSONObject: [
+                "type": "result",
                 "result": innerResult,
                 "session_id": "chat-123",
             ]),
             encoding: .utf8
-        )!
+        )! + "\n"
 
-        _ = parser.consume(responseText)
-        let chunk = parser.finish()
+        _ = parser.consume(firstEvent)
+        let streamedChunk = parser.consume(secondEvent)
+        let finalChunk = parser.finish()
         let structuredResponse = AppModel.parseAgentPlanResponse(from: parser.latestResultText ?? "")
 
         #expect(parser.currentSessionID == "chat-123")
         #expect(parser.latestResultText?.contains("\"status\":\"ready\"") == true)
-        #expect(chunk.segments.first?.sourceAgent == .cursorCLI)
+        #expect(streamedChunk.segments.contains(where: { $0.sourceAgent == .cursorCLI }))
+        #expect(streamedChunk.renderedText.contains("Got it."))
+        #expect(finalChunk.renderedText.contains("cursor-agent --resume chat-123"))
         #expect(structuredResponse?.planMarkdown == "# Cursor Plan\n- Inspect workspace")
+    }
+
+    @Test
+    func cursorPlanResponseParserExtractsEmbeddedStructuredJSON() {
+        let structuredResponse = AppModel.parseAgentPlanResponse(from: """
+        Got it. I'll scan the worktree and then return the plan.
+
+        {
+          "status": "ready",
+          "summary": "Plan is ready.",
+          "questions": null,
+          "plan_markdown": "# Embedded Cursor Plan\\n- Inspect workspace\\n- Update plan tab"
+        }
+        """)
+
+        #expect(structuredResponse?.summary == "Plan is ready.")
+        #expect(structuredResponse?.planMarkdown == """
+        # Embedded Cursor Plan
+        - Inspect workspace
+        - Update plan tab
+        """)
     }
 
     @MainActor
@@ -2728,7 +2764,7 @@ struct StackriotTests {
         let run = RunRecord(
             actionKind: .aiAgent,
             title: "Cursor Plan",
-            commandLine: "cursor-agent --print --output-format json",
+            commandLine: "cursor-agent --print --output-format stream-json --stream-partial-output",
             outputText: "Noise only\n",
             status: .succeeded,
             worktreeID: worktree.id,

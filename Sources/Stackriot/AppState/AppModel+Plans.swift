@@ -454,12 +454,13 @@ extension AppModel {
                 executable: "cursor-agent",
                 arguments: [
                     "--print",
-                    "--output-format", "json",
+                    "--output-format", "stream-json",
+                    "--stream-partial-output",
                     "--trust",
                     "--plan",
                     prompt,
                 ],
-                displayCommandLine: "cursor-agent --print --output-format json --trust --plan <prompt>",
+                displayCommandLine: "cursor-agent --print --output-format stream-json --stream-partial-output --trust --plan <prompt>",
                 currentDirectoryURL: URL(fileURLWithPath: worktree.path),
                 repositoryID: repositoryID,
                 worktreeID: worktree.id,
@@ -523,12 +524,13 @@ extension AppModel {
                 arguments: [
                     "--resume", sessionID,
                     "--print",
-                    "--output-format", "json",
+                    "--output-format", "stream-json",
+                    "--stream-partial-output",
                     "--trust",
                     "--plan",
                     prompt,
                 ],
-                displayCommandLine: "cursor-agent --resume \(sessionID.shellEscaped) --print --output-format json --trust --plan <reply>",
+                displayCommandLine: "cursor-agent --resume \(sessionID.shellEscaped) --print --output-format stream-json --stream-partial-output --trust --plan <reply>",
                 currentDirectoryURL: URL(fileURLWithPath: worktree.path),
                 repositoryID: repositoryID,
                 worktreeID: worktree.id,
@@ -591,11 +593,14 @@ extension AppModel {
 
     nonisolated static func parseAgentPlanResponse(from text: String) -> AgentPlanResponse? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let data = trimmed.data(using: .utf8) else { return nil }
-        guard let response = try? JSONDecoder().decode(AgentPlanResponse.self, from: data) else {
+        guard !trimmed.isEmpty else { return nil }
+        if let response = decodeAgentPlanResponse(from: trimmed) {
+            return response
+        }
+        guard let embeddedObject = extractLastJSONObject(from: trimmed) else {
             return nil
         }
-        return validatedAgentPlanResponse(response)
+        return decodeAgentPlanResponse(from: embeddedObject)
     }
 
     private nonisolated static func validatedAgentPlanResponse(_ response: AgentPlanResponse) -> AgentPlanResponse? {
@@ -618,6 +623,59 @@ extension AppModel {
         }
 
         return response
+    }
+
+    private nonisolated static func decodeAgentPlanResponse(from text: String) -> AgentPlanResponse? {
+        guard let data = text.data(using: .utf8) else { return nil }
+        guard let response = try? JSONDecoder().decode(AgentPlanResponse.self, from: data) else {
+            return nil
+        }
+        return validatedAgentPlanResponse(response)
+    }
+
+    private nonisolated static func extractLastJSONObject(from text: String) -> String? {
+        var startIndex: String.Index?
+        var depth = 0
+        var isInsideString = false
+        var isEscaping = false
+        var lastObject: String?
+
+        for index in text.indices {
+            let character = text[index]
+
+            if isEscaping {
+                isEscaping = false
+                continue
+            }
+
+            if character == "\\" {
+                isEscaping = true
+                continue
+            }
+
+            if character == "\"" {
+                isInsideString.toggle()
+                continue
+            }
+
+            guard !isInsideString else { continue }
+
+            if character == "{" {
+                if depth == 0 {
+                    startIndex = index
+                }
+                depth += 1
+                continue
+            }
+
+            guard character == "}", depth > 0 else { continue }
+            depth -= 1
+            if depth == 0, let startIndex {
+                lastObject = String(text[startIndex...index])
+            }
+        }
+
+        return lastObject?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
     }
 
     private nonisolated static func readAgentPlanResponse(from path: String?) -> AgentPlanResponse? {
