@@ -39,6 +39,14 @@ struct AIProviderService {
         return try await runSummaryGenerator(title, commandLine, output, exitCode, configuration)
     }
 
+    func generateCommitMessage(diff: String) async throws -> AIRunSummary {
+        let configuration = configurationProvider()
+        guard configuration.isConfigured else {
+            throw StackriotError.commandFailed("KI-Provider nicht konfiguriert. Bitte in den Einstellungen einen AI-Provider einrichten.")
+        }
+        return try await Self.liveCommitMessageSummary(diff: diff, configuration: configuration)
+    }
+
     func fallbackWorktreeNameSuggestion(for issue: GitHubIssueDetails) -> AIWorktreeNameSuggestion {
         Self.fallbackWorktreeNameSuggestion(for: issue)
     }
@@ -50,6 +58,48 @@ struct AIProviderService {
         exitCode: Int?
     ) -> AIRunSummary {
         Self.fallbackRunSummary(title: title, commandLine: commandLine, output: output, exitCode: exitCode)
+    }
+
+    private static func liveCommitMessageSummary(
+        diff: String,
+        configuration: AIProviderConfiguration
+    ) async throws -> AIRunSummary {
+        let trimmedDiff = String(diff.suffix(14_000))
+        let prompt = """
+        Analysiere den folgenden Git-Diff und erzeuge eine strukturierte Commit-Nachricht auf Deutsch. Antworte nur mit JSON.
+
+        Regeln:
+        - `title` ist die Betreffzeile des Commits: maximal 7 Woerter, beschreibt die wichtigste Aenderung.
+        - `summary` besteht aus 2 bis 5 kurzen Saetzen, die die wesentlichen Aenderungen als Aufzaehlung mit `-` beschreiben.
+        - Beschreibe konkret was geaendert wurde (neue Funktionen, Bugfixes, Umstrukturierungen).
+        - Vermeide vage Formulierungen wie "diverse Aenderungen".
+
+        JSON-Schema:
+        {
+          "title": "Kurzer Betreff",
+          "summary": "- Erste Aenderung\\n- Zweite Aenderung\\n- Dritte Aenderung"
+        }
+
+        Git-Diff:
+        \(trimmedDiff)
+        """
+
+        let response = try await generateText(
+            configuration: configuration,
+            systemPrompt: "Du erzeugst praezise, konventionelle Commit-Nachrichten aus Git-Diffs.",
+            userPrompt: prompt
+        )
+        guard let data = extractFirstJSONObject(from: response)?.data(using: .utf8) else {
+            throw StackriotError.commandFailed("AI-Antwort enthielt kein gueltiges JSON fuer die Commit-Nachricht.")
+        }
+        let decoded = try JSONDecoder().decode(RunSummaryPayload.self, from: data)
+        guard
+            let summaryTitle = decoded.title.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty,
+            let summaryText = decoded.summary.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        else {
+            throw StackriotError.commandFailed("AI-Antwort fuer Commit-Nachricht war unvollstaendig.")
+        }
+        return AIRunSummary(title: summaryTitle, summary: summaryText)
     }
 
     private static func liveWorktreeNameSuggestion(
