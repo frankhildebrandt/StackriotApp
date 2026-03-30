@@ -7,6 +7,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     case aiProvider
     case browserSessions
     case jira
+    case mcp
     case sshKeys
     case about
 
@@ -28,6 +29,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
             "Browser Sessions"
         case .jira:
             "Jira Cloud"
+        case .mcp:
+            "MCP Server"
         case .sshKeys:
             "SSH Keys"
         case .about:
@@ -49,6 +52,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
             "globe"
         case .jira:
             "link.badge.plus"
+        case .mcp:
+            "server.rack"
         case .sshKeys:
             "key"
         case .about:
@@ -70,6 +75,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
             "Persistent embedded-browser sessions for GitHub and Jira contexts."
         case .jira:
             "Cloud URL, Atlassian account, and API token used for ticket-backed worktrees."
+        case .mcp:
+            "Local MCP endpoint, diagnostics, and copy-paste client configuration."
         case .sshKeys:
             "Import, generate, and manage SSH keys used across remotes."
         case .about:

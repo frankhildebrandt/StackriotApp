@@ -25,6 +25,8 @@ struct SettingsRootView: View {
                 BrowserSessionsSettingsView()
             case .jira:
                 JiraSettingsView()
+            case .mcp:
+                MCPSettingsView()
             case .sshKeys:
                 SSHKeysSettingsView()
             case .about:

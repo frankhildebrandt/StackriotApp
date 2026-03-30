@@ -4,6 +4,8 @@ import Security
 enum KeychainSecretStore {
     static let jiraService = "Stackriot.Jira"
     static let jiraTokenAccount = "api-token"
+    static let mcpService = "Stackriot.MCP"
+    static let mcpTokenAccount = "api-token"
 
     static func storeString(_ value: String, service: String, account: String) throws {
         try store(Data(value.utf8), service: service, account: account)
