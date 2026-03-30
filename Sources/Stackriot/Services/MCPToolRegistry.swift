@@ -41,7 +41,7 @@ struct MCPToolRegistry: Sendable {
             ),
             MCPToolDefinition(
                 name: "get_worktree_context",
-                description: "Load the assigned agent, primary context, plan text, and latest runs for a worktree.",
+                description: "Load the assigned agent, primary context, intent text, implementation plan text, and latest runs for a worktree.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -77,7 +77,7 @@ struct MCPToolRegistry: Sendable {
             ),
             MCPToolDefinition(
                 name: "open_plan",
-                description: "Return the current plan markdown for a worktree.",
+                description: "Return the implementation plan markdown and intent draft for a worktree (`planText` is the agent-written plan to execute).",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([

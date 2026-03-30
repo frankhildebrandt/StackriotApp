@@ -243,7 +243,7 @@ extension AppModel {
         try modelContext.save()
 
         if let initialPlanText {
-            try writePlan(initialPlanText, for: worktree.id)
+            try writeIntent(initialPlanText, for: worktree.id)
         }
 
         return worktree

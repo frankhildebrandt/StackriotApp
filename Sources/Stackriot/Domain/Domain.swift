@@ -975,10 +975,24 @@ enum WorktreeIntegrationResult: Sendable {
 struct TerminalTabBookkeeping: Sendable {
     private(set) var tabs: [UUID: TerminalTabState] = [:]
     private(set) var selectedRunIDsByWorktree: [UUID: UUID] = [:]
+    /// Historically “plan tab”; means “primary context column” (Intent / Plan / Browser / README) is active instead of a run tab.
     private(set) var planTabSelectedWorktrees: Set<UUID> = []
+    private(set) var primaryPaneByWorktree: [UUID: WorktreePrimaryPaneKind] = [:]
 
     mutating func selectPlanTab(for worktreeID: UUID) {
         planTabSelectedWorktrees.insert(worktreeID)
+        if primaryPaneByWorktree[worktreeID] == nil {
+            primaryPaneByWorktree[worktreeID] = .intent
+        }
+    }
+
+    mutating func selectPrimaryPane(_ pane: WorktreePrimaryPaneKind, for worktreeID: UUID) {
+        planTabSelectedWorktrees.insert(worktreeID)
+        primaryPaneByWorktree[worktreeID] = pane
+    }
+
+    func primaryPane(for worktreeID: UUID) -> WorktreePrimaryPaneKind {
+        primaryPaneByWorktree[worktreeID] ?? .intent
     }
 
     mutating func deselectPlanTab(for worktreeID: UUID) {
@@ -1027,6 +1041,7 @@ struct TerminalTabBookkeeping: Sendable {
         tabs = tabs.filter { $0.value.worktreeID != worktreeID }
         selectedRunIDsByWorktree.removeValue(forKey: worktreeID)
         planTabSelectedWorktrees.remove(worktreeID)
+        primaryPaneByWorktree.removeValue(forKey: worktreeID)
     }
 
     func tabState(for runID: UUID) -> TerminalTabState? {

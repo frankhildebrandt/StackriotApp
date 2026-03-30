@@ -29,6 +29,13 @@ enum WorktreePrimaryContextTabKind: String, Codable, Sendable {
     case browser
 }
 
+/// Which primary pane is shown when the terminal column is in “primary context” mode (not a run tab).
+enum WorktreePrimaryPaneKind: String, Codable, Sendable, Hashable {
+    case intent
+    case implementationPlan
+    case browser
+}
+
 struct WorktreePrimaryContext: Sendable, Equatable {
     let kind: WorktreePrimaryContextKind
     let canonicalURL: String

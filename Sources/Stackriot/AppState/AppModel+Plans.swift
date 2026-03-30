@@ -40,22 +40,94 @@ extension AppModel {
         isPrimaryContextTabSelected(for: worktree)
     }
 
-    // MARK: - Plan File I/O
+    func primaryPane(for worktree: WorktreeRecord) -> WorktreePrimaryPaneKind {
+        terminalTabs.primaryPane(for: worktree.id)
+    }
 
-    func loadPlan(for worktreeID: UUID) -> String {
-        let url = AppPaths.planFile(for: worktreeID)
+    func selectPrimaryPane(_ pane: WorktreePrimaryPaneKind, for worktree: WorktreeRecord, in repository: ManagedRepository) {
+        selectedWorktreeIDsByRepository[repository.id] = worktree.id
+        terminalTabs.selectPrimaryPane(pane, for: worktree.id)
+    }
+
+    // MARK: - Intent & implementation plan file I/O
+
+    /// Legacy `Plans/{uuid}.md` is migrated once into `intentFile` when the intent file is missing (see `ensureLegacyPlanMigrationIfNeeded`).
+    func loadIntent(for worktreeID: UUID) -> String {
+        ensureLegacyPlanMigrationIfNeeded(for: worktreeID)
+        let url = AppPaths.intentFile(for: worktreeID)
         return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     }
 
-    func writePlan(_ text: String, for worktreeID: UUID) throws {
-        let url = AppPaths.planFile(for: worktreeID)
+    func writeIntent(_ text: String, for worktreeID: UUID) throws {
+        ensureLegacyPlanMigrationIfNeeded(for: worktreeID)
+        let url = AppPaths.intentFile(for: worktreeID)
         try FileManager.default.createDirectory(at: AppPaths.plansDirectory, withIntermediateDirectories: true)
         try text.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    func savePlan(_ text: String, for worktreeID: UUID) {
+    func saveIntent(_ text: String, for worktreeID: UUID) {
         do {
-            try writePlan(text, for: worktreeID)
+            try writeIntent(text, for: worktreeID)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func loadImplementationPlan(for worktreeID: UUID) -> String {
+        ensureLegacyPlanMigrationIfNeeded(for: worktreeID)
+        let url = AppPaths.implementationPlanFile(for: worktreeID)
+        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    }
+
+    func writeImplementationPlan(_ text: String, for worktreeID: UUID) throws {
+        ensureLegacyPlanMigrationIfNeeded(for: worktreeID)
+        let url = AppPaths.implementationPlanFile(for: worktreeID)
+        try FileManager.default.createDirectory(at: AppPaths.plansDirectory, withIntermediateDirectories: true)
+        try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    func saveImplementationPlan(_ text: String, for worktreeID: UUID) {
+        do {
+            try writeImplementationPlan(text, for: worktreeID)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func hasImplementationPlanContent(for worktreeID: UUID) -> Bool {
+        loadImplementationPlan(for: worktreeID).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    func intentContentVersion(for worktreeID: UUID) -> Int {
+        intentContentVersionsByWorktreeID[worktreeID] ?? 0
+    }
+
+    func implementationPlanContentVersion(for worktreeID: UUID) -> Int {
+        implementationPlanContentVersionsByWorktreeID[worktreeID] ?? 0
+    }
+
+    func bumpIntentContentVersion(for worktreeID: UUID) {
+        intentContentVersionsByWorktreeID[worktreeID, default: 0] += 1
+    }
+
+    /// Copies legacy `Plans/{uuid}.md` into `intentFile` once, then renames the legacy file to `.md.pre-split-backup` so data is not lost.
+    private func ensureLegacyPlanMigrationIfNeeded(for worktreeID: UUID) {
+        let legacy = AppPaths.planFile(for: worktreeID)
+        let intentURL = AppPaths.intentFile(for: worktreeID)
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: legacy.path) else { return }
+        guard !fm.fileExists(atPath: intentURL.path) else { return }
+        guard let data = try? Data(contentsOf: legacy),
+              let text = String(data: data, encoding: .utf8) else { return }
+        do {
+            try fm.createDirectory(at: AppPaths.plansDirectory, withIntermediateDirectories: true)
+            try text.write(to: intentURL, atomically: true, encoding: .utf8)
+            let backup = legacy.deletingPathExtension().appendingPathExtension("md.pre-split-backup")
+            if fm.fileExists(atPath: backup.path) {
+                try fm.removeItem(at: backup)
+            }
+            try fm.moveItem(at: legacy, to: backup)
+            bumpIntentContentVersion(for: worktreeID)
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
@@ -95,13 +167,15 @@ extension AppModel {
     // MARK: - Agent Dispatch with Plan
 
     func launchAgentWithPlan(_ tool: AIAgentTool, for worktree: WorktreeRecord, in modelContext: ModelContext) {
-        let planText = loadPlan(for: worktree.id)
+        let promptText: String
+        switch terminalTabs.primaryPane(for: worktree.id) {
+        case .implementationPlan:
+            promptText = loadImplementationPlan(for: worktree.id)
+        case .intent, .browser:
+            promptText = loadIntent(for: worktree.id)
+        }
         terminalTabs.deselectPlanTab(for: worktree.id)
-        launchAgent(tool, for: worktree, in: modelContext, initialPrompt: planText)
-    }
-
-    func planContentVersion(for worktreeID: UUID) -> Int {
-        planContentVersionsByWorktreeID[worktreeID] ?? 0
+        launchAgent(tool, for: worktree, in: modelContext, initialPrompt: promptText)
     }
 
     func availablePlanningAgents() -> [AIAgentTool] {
@@ -127,7 +201,7 @@ extension AppModel {
         using tool: AIAgentTool,
         for worktree: WorktreeRecord,
         in repository: ManagedRepository,
-        currentPlanText: String,
+        currentIntentText: String,
         modelContext _: ModelContext
     ) {
         guard !worktree.isDefaultBranchWorkspace else { return }
@@ -156,11 +230,15 @@ extension AppModel {
             return
         }
 
+        let existingImplementation = loadImplementationPlan(for: worktree.id)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty
         guard let descriptor = Self.makePlanDraftDescriptor(
             for: tool,
             worktree: worktree,
             repositoryID: repository.id,
-            currentPlanText: currentPlanText,
+            currentIntentText: currentIntentText,
+            existingImplementationPlan: existingImplementation,
             artifactURLs: artifactURLs
         ) else {
             pendingErrorMessage = "\(tool.displayName) planning is not configured."
@@ -362,8 +440,9 @@ extension AppModel {
 
     private func importAgentPlan(_ proposedPlan: String, for worktreeID: UUID, runID: UUID, tool: AIAgentTool) {
         do {
-            try writePlan(proposedPlan, for: worktreeID)
-            planContentVersionsByWorktreeID[worktreeID, default: 0] += 1
+            try writeImplementationPlan(proposedPlan, for: worktreeID)
+            implementationPlanContentVersionsByWorktreeID[worktreeID, default: 0] += 1
+            terminalTabs.selectPrimaryPane(.implementationPlan, for: worktreeID)
             agentPlanDraftsByWorktreeID[worktreeID]?.didImportPlan = true
             agentPlanDraftsByWorktreeID[worktreeID]?.importErrorMessage = nil
             agentPlanDraftsByWorktreeID[worktreeID]?.latestQuestions = []
@@ -414,10 +493,16 @@ extension AppModel {
         for tool: AIAgentTool,
         worktree: WorktreeRecord,
         repositoryID: UUID,
-        currentPlanText: String,
+        currentIntentText: String,
+        existingImplementationPlan: String?,
         artifactURLs: (schema: URL, response: URL)
     ) -> CommandExecutionDescriptor? {
-        let prompt = agentPlanPrompt(for: tool, worktree: worktree, currentPlanText: currentPlanText)
+        let prompt = agentPlanPrompt(
+            for: tool,
+            worktree: worktree,
+            currentIntentText: currentIntentText,
+            existingImplementationPlan: existingImplementationPlan
+        )
         switch tool {
         case .codex:
             return CommandExecutionDescriptor(
@@ -547,7 +632,12 @@ extension AppModel {
         }
     }
 
-    private nonisolated static func agentPlanPrompt(for tool: AIAgentTool, worktree: WorktreeRecord, currentPlanText: String) -> String {
+    private nonisolated static func agentPlanPrompt(
+        for tool: AIAgentTool,
+        worktree: WorktreeRecord,
+        currentIntentText: String,
+        existingImplementationPlan: String?
+    ) -> String {
         let issueContext = worktree.issueContext?.nonEmpty ?? worktree.branchName
         var lines = [
             "Help me create or refine an implementation plan for this worktree.",
@@ -558,7 +648,7 @@ extension AppModel {
             "",
             "Inspect the codebase before deciding on the plan.",
             "If you need more context from the user, do not produce the plan yet. Return only a JSON object with status `needs_user_input`, a short summary, and 1-4 concrete questions.",
-            "If you have enough information, return only a JSON object with status `ready`, a short summary, and `plan_markdown` containing the final Markdown plan that should replace the plan page.",
+            "If you have enough information, return only a JSON object with status `ready`, a short summary, and `plan_markdown` containing the final Markdown plan that should be written to the implementation plan file (not the intent draft).",
             "Never wrap the final response in Markdown fences.",
         ]
 
@@ -566,11 +656,19 @@ extension AppModel {
             lines.append("When using \(tool.displayName), ensure the `result` payload is valid JSON matching that schema exactly.")
         }
 
-        if let existingPlan = currentPlanText.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty {
+        if let intentDraft = currentIntentText.nonEmpty {
             lines.append("")
-            lines.append("Current plan draft to refine:")
+            lines.append("Current intent / draft description (primary input):")
             lines.append("```md")
-            lines.append(existingPlan)
+            lines.append(intentDraft)
+            lines.append("```")
+        }
+
+        if let existingImplementationPlan {
+            lines.append("")
+            lines.append("Existing implementation plan from a prior run (optional context; may be revised or replaced):")
+            lines.append("```md")
+            lines.append(existingImplementationPlan)
             lines.append("```")
         }
 
@@ -583,7 +681,7 @@ extension AppModel {
             "Continue working in the same repository context.",
             "Planning agent: \(tool.displayName)",
             "If you still need more information, return only a JSON object with status `needs_user_input`, a short summary, and 1-4 concrete questions.",
-            "If you are ready, return only a JSON object with status `ready`, a short summary, and `plan_markdown` containing the final Markdown plan that should replace the plan page.",
+            "If you are ready, return only a JSON object with status `ready`, a short summary, and `plan_markdown` containing the final Markdown implementation plan.",
             "Never wrap the final response in Markdown fences.",
             "",
             "User reply:",
@@ -750,10 +848,10 @@ extension AppModel {
     func startCodexPlanDraft(
         for worktree: WorktreeRecord,
         in repository: ManagedRepository,
-        currentPlanText: String,
+        currentIntentText: String,
         modelContext: ModelContext
     ) {
-        startAgentPlanDraft(using: .codex, for: worktree, in: repository, currentPlanText: currentPlanText, modelContext: modelContext)
+        startAgentPlanDraft(using: .codex, for: worktree, in: repository, currentIntentText: currentIntentText, modelContext: modelContext)
     }
 
     func sendCodexPlanReply(_ reply: String, for worktreeID: UUID) {

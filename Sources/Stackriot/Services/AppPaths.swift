@@ -57,8 +57,17 @@ enum AppPaths {
         agentPlanArtifactsDirectory(for: .codex)
     }
 
+    /// Legacy single-file plan before Intent vs. implementation split; migration copies into `intentFile`.
     static func planFile(for worktreeID: UUID) -> URL {
         plansDirectory.appendingPathComponent("\(worktreeID.uuidString).md", isDirectory: false)
+    }
+
+    static func intentFile(for worktreeID: UUID) -> URL {
+        plansDirectory.appendingPathComponent("\(worktreeID.uuidString).intent.md", isDirectory: false)
+    }
+
+    static func implementationPlanFile(for worktreeID: UUID) -> URL {
+        plansDirectory.appendingPathComponent("\(worktreeID.uuidString).plan.md", isDirectory: false)
     }
 
     static func agentPlanArtifactsDirectory(for tool: AIAgentTool) -> URL {

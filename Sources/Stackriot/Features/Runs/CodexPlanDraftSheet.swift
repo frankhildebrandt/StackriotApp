@@ -34,6 +34,9 @@ struct AgentPlanDraftSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Create Plan with \(draft.tool.displayName)")
                     .font(.title3.weight(.semibold))
+                Text("Planner output is written to the Implementation Plan page; Intent is the input.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text(draft.branchName)
                     .font(.subheadline.weight(.medium))
                 Text(draft.issueContext)

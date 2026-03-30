@@ -3,6 +3,8 @@ import SwiftUI
 import WebKit
 
 struct WorktreePrimaryContextView: View {
+    @Environment(AppModel.self) private var appModel
+
     let worktree: WorktreeRecord
     let repository: ManagedRepository
 
@@ -14,20 +16,33 @@ struct WorktreePrimaryContextView: View {
             case .readme:
                 ReadmeView(worktreePath: worktree.path)
             case .plan:
-                PlanEditorView(worktree: worktree, repository: repository)
+                primaryPaneContent(browserAvailable: false)
             case .browser:
-                if let context = worktree.resolvedPrimaryContext {
-                    EmbeddedBrowserPageView(
-                        context: context,
-                        onReauthenticate: { authProvider = context.provider }
-                    )
-                } else {
-                    PlanEditorView(worktree: worktree, repository: repository)
-                }
+                primaryPaneContent(browserAvailable: worktree.resolvedPrimaryContext != nil)
             }
         }
         .sheet(item: $authProvider) { provider in
             EmbeddedBrowserAuthenticationSheet(provider: provider)
+        }
+    }
+
+    @ViewBuilder
+    private func primaryPaneContent(browserAvailable: Bool) -> some View {
+        let pane = appModel.primaryPane(for: worktree)
+        switch pane {
+        case .intent:
+            PlanEditorView(role: .intent, worktree: worktree, repository: repository)
+        case .implementationPlan:
+            PlanEditorView(role: .implementationPlan, worktree: worktree, repository: repository)
+        case .browser:
+            if browserAvailable, let context = worktree.resolvedPrimaryContext {
+                EmbeddedBrowserPageView(
+                    context: context,
+                    onReauthenticate: { authProvider = context.provider }
+                )
+            } else {
+                PlanEditorView(role: .intent, worktree: worktree, repository: repository)
+            }
         }
     }
 }

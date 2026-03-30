@@ -3,22 +3,30 @@ import SwiftData
 import SwiftUI
 
 struct PlanEditorView: View {
+    enum Role {
+        case intent
+        case implementationPlan
+    }
+
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
 
+    let role: Role
     let worktree: WorktreeRecord
     let repository: ManagedRepository
 
-    @State private var planText: String = ""
+    @State private var bodyText: String = ""
     @State private var saveTask: Task<Void, Never>?
     @State private var hasLoaded = false
 
     var body: some View {
-        let planContentVersion = appModel.planContentVersion(for: worktree.id)
+        let contentVersion = role == .intent
+            ? appModel.intentContentVersion(for: worktree.id)
+            : appModel.implementationPlanContentVersion(for: worktree.id)
         VStack(spacing: 0) {
             toolbar
             Divider()
-            TextEditor(text: $planText)
+            TextEditor(text: $bodyText)
                 .font(.system(.body, design: .monospaced))
                 .scrollContentBackground(.hidden)
                 .padding(16)
@@ -27,42 +35,78 @@ struct PlanEditorView: View {
         .background(Color(nsColor: .textBackgroundColor))
         .onAppear {
             if !hasLoaded {
-                planText = appModel.loadPlan(for: worktree.id)
+                bodyText = loadFromDisk()
                 hasLoaded = true
             }
         }
         .onChange(of: worktree.id) { _, _ in
             saveTask?.cancel()
-            planText = appModel.loadPlan(for: worktree.id)
+            bodyText = loadFromDisk()
         }
-        .onChange(of: planText) { _, newValue in
+        .onChange(of: bodyText) { _, newValue in
             saveTask?.cancel()
             let id = worktree.id
             saveTask = Task { [weak appModel] in
                 try? await Task.sleep(for: .milliseconds(400))
                 guard !Task.isCancelled else { return }
-                await MainActor.run { appModel?.savePlan(newValue, for: id) }
+                await MainActor.run {
+                    switch role {
+                    case .intent:
+                        appModel?.saveIntent(newValue, for: id)
+                    case .implementationPlan:
+                        appModel?.saveImplementationPlan(newValue, for: id)
+                    }
+                }
             }
         }
-        .onChange(of: planContentVersion) { _, _ in
+        .onChange(of: contentVersion) { _, _ in
             saveTask?.cancel()
-            planText = appModel.loadPlan(for: worktree.id)
+            bodyText = loadFromDisk()
+        }
+    }
+
+    private func loadFromDisk() -> String {
+        switch role {
+        case .intent:
+            appModel.loadIntent(for: worktree.id)
+        case .implementationPlan:
+            appModel.loadImplementationPlan(for: worktree.id)
         }
     }
 
     private var toolbar: some View {
         HStack(spacing: 8) {
-            Image(systemName: "doc.text")
+            Image(systemName: toolbarIcon)
                 .foregroundStyle(.secondary)
-            Text("Plan")
+            Text(toolbarTitle)
                 .font(.subheadline.weight(.semibold))
             Spacer()
-            createPlanButton
+            if role == .intent {
+                createPlanButton
+            }
             agentDispatchMenu
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.thinMaterial)
+    }
+
+    private var toolbarIcon: String {
+        switch role {
+        case .intent:
+            "text.alignleft"
+        case .implementationPlan:
+            "doc.text"
+        }
+    }
+
+    private var toolbarTitle: String {
+        switch role {
+        case .intent:
+            "Intent"
+        case .implementationPlan:
+            "Implementation Plan"
+        }
     }
 
     private var createPlanButton: some View {
@@ -74,12 +118,12 @@ struct PlanEditorView: View {
                 ForEach(planningAgents) { tool in
                     Button {
                         saveTask?.cancel()
-                        appModel.savePlan(planText, for: worktree.id)
+                        appModel.saveIntent(bodyText, for: worktree.id)
                         appModel.startAgentPlanDraft(
                             using: tool,
                             for: worktree,
                             in: repository,
-                            currentPlanText: planText,
+                            currentIntentText: bodyText,
                             modelContext: modelContext
                         )
                     } label: {
@@ -92,7 +136,7 @@ struct PlanEditorView: View {
         }
         .buttonStyle(.borderedProminent)
         .disabled(!canCreatePlan)
-        .help("Interaktiven Planlauf mit einem unterstützten Agenten starten")
+        .help("Interaktiven Planlauf mit einem unterstützten Agenten starten (Intent als Eingabe)")
     }
 
     private var agentDispatchMenu: some View {
@@ -110,8 +154,17 @@ struct PlanEditorView: View {
         } label: {
             Label("Execute with Agent", systemImage: "sparkles")
         }
-        .disabled(agents.isEmpty || planText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        .help("Plan mit AI-Agent ausführen")
+        .disabled(agents.isEmpty || bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .help(executeHelp)
+    }
+
+    private var executeHelp: String {
+        switch role {
+        case .intent:
+            "Intent mit AI-Agent ausführen"
+        case .implementationPlan:
+            "Implementierungsplan mit AI-Agent ausführen"
+        }
     }
 
     private var availableAgents: [AIAgentTool] {

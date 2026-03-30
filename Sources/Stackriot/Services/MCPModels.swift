@@ -187,12 +187,16 @@ struct MCPPlanPayload: Codable, Sendable, Equatable {
     let worktreeID: String
     let branchName: String
     let path: String
+    /// Agent-produced implementation plan markdown (executable plan).
     let planText: String
+    /// Editable intent / draft description (prompt foundation).
+    let intentText: String
     let lastModifiedAt: Date?
 }
 
 struct MCPWorktreeContextPayload: Codable, Sendable, Equatable {
     let worktree: MCPWorktreeSummary
+    let intentText: String
     let planText: String
     let latestRuns: [MCPRunSummary]
 }
