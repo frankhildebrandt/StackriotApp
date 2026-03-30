@@ -32,6 +32,7 @@ struct ProjectEditorSheet: View {
                     appModel.dismissProjectEditor()
                     dismiss()
                 }
+                .keyboardShortcut(.cancelAction)
                 Button(draft.mode == .create ? "Create" : "Save") {
                     guard let namespace else {
                         appModel.pendingErrorMessage = "The selected namespace could not be found."
@@ -41,6 +42,7 @@ struct ProjectEditorSheet: View {
                     appModel.saveProject(name: name, in: namespace, editing: project, modelContext: modelContext)
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || namespace == nil)
             }
         }

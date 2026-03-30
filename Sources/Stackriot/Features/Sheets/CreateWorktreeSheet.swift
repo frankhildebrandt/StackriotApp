@@ -204,6 +204,11 @@ struct CreateWorktreeSheet: View {
                                 TextField(selectedProvider?.searchPrompt ?? "Ticket-Key oder Titel", text: $appModel.worktreeDraft.ticketSearchText)
                                     .textFieldStyle(.roundedBorder)
                                     .disabled(isCreating || status?.isAvailable != true)
+                                    .onSubmit {
+                                        guard !isCreating, status?.isAvailable == true else { return }
+                                        guard !draft.ticketSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                                        triggerImmediateSearch()
+                                    }
 
                                 Button("Suchen") {
                                     triggerImmediateSearch()
@@ -319,6 +324,7 @@ struct CreateWorktreeSheet: View {
                     pendingCreationConfirmation = true
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(!canCreate)
             }
         }
