@@ -16,6 +16,7 @@ struct AppServices {
     let worktreeStatusService: WorktreeStatusService
     let devToolDiscovery: DevToolDiscoveryService
     let runConfigurationDiscovery: RunConfigurationDiscoveryService
+    let mcpServerManager: MCPServerManager
 
     init(
         repositoryManager: RepositoryManager = RepositoryManager(),
@@ -31,7 +32,8 @@ struct AppServices {
         makeTooling: MakeToolingService = MakeToolingService(),
         worktreeStatusService: WorktreeStatusService = WorktreeStatusService(),
         devToolDiscovery: DevToolDiscoveryService = DevToolDiscoveryService(),
-        runConfigurationDiscovery: RunConfigurationDiscoveryService = RunConfigurationDiscoveryService()
+        runConfigurationDiscovery: RunConfigurationDiscoveryService = RunConfigurationDiscoveryService(),
+        mcpServerManager: MCPServerManager = MCPServerManager()
     ) {
         self.repositoryManager = repositoryManager
         self.worktreeManager = worktreeManager
@@ -47,6 +49,7 @@ struct AppServices {
         self.worktreeStatusService = worktreeStatusService
         self.devToolDiscovery = devToolDiscovery
         self.runConfigurationDiscovery = runConfigurationDiscovery
+        self.mcpServerManager = mcpServerManager
     }
 
     static let production = AppServices(
@@ -63,7 +66,8 @@ struct AppServices {
         makeTooling: MakeToolingService(),
         worktreeStatusService: WorktreeStatusService(),
         devToolDiscovery: DevToolDiscoveryService(),
-        runConfigurationDiscovery: RunConfigurationDiscoveryService()
+        runConfigurationDiscovery: RunConfigurationDiscoveryService(),
+        mcpServerManager: MCPServerManager()
     )
 }
 

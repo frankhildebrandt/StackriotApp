@@ -106,6 +106,12 @@
 		E00000000000000000000067 /* CheckoutPullRequestSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000067 /* CheckoutPullRequestSheet.swift */; };
 		E00000000000000000000068 /* BrowserSessionsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000068 /* BrowserSessionsSettingsView.swift */; };
 		E00000000000000000000069 /* EmbeddedBrowserSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000069 /* EmbeddedBrowserSessionStore.swift */; };
+		E0000000000000000000006A /* AppModel+MCP.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000006A /* AppModel+MCP.swift */; };
+		E0000000000000000000006B /* MCPDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000006B /* MCPDomain.swift */; };
+		E0000000000000000000006C /* MCPModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000006C /* MCPModels.swift */; };
+		E0000000000000000000006D /* MCPToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000006D /* MCPToolRegistry.swift */; };
+		E0000000000000000000006E /* MCPServerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000006E /* MCPServerManager.swift */; };
+		E0000000000000000000006F /* MCPSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000006F /* MCPSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -208,6 +214,12 @@
 		D00000000000000000000067 /* CheckoutPullRequestSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckoutPullRequestSheet.swift; sourceTree = "<group>"; };
 		D00000000000000000000068 /* BrowserSessionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserSessionsSettingsView.swift; sourceTree = "<group>"; };
 		D00000000000000000000069 /* EmbeddedBrowserSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedBrowserSessionStore.swift; sourceTree = "<group>"; };
+		D0000000000000000000006A /* AppModel+MCP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+MCP.swift"; sourceTree = "<group>"; };
+		D0000000000000000000006B /* MCPDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPDomain.swift; sourceTree = "<group>"; };
+		D0000000000000000000006C /* MCPModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPModels.swift; sourceTree = "<group>"; };
+		D0000000000000000000006D /* MCPToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPToolRegistry.swift; sourceTree = "<group>"; };
+		D0000000000000000000006E /* MCPServerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerManager.swift; sourceTree = "<group>"; };
+		D0000000000000000000006F /* MCPSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -269,6 +281,7 @@
 			children = (
 				D00000000000000000000004 /* AppModel+AgentsNode.swift */,
 				D00000000000000000000038 /* AppModel+Namespaces.swift */,
+				D0000000000000000000006A /* AppModel+MCP.swift */,
 				D00000000000000000000005 /* AppModel+Persistence.swift */,
 				D0000000000000000000003F /* AppModel+Plans.swift */,
 				D00000000000000000000065 /* AppModel+PullRequests.swift */,
@@ -288,6 +301,7 @@
 			children = (
 				D0000000000000000000000E /* Domain.swift */,
 				D00000000000000000000048 /* GeneratedCommitMessage.swift */,
+				D0000000000000000000006B /* MCPDomain.swift */,
 				D00000000000000000000064 /* WorktreeContext.swift */,
 			);
 			path = Domain;
@@ -343,6 +357,9 @@
 				D00000000000000000000069 /* EmbeddedBrowserSessionStore.swift */,
 				D0000000000000000000003D /* GitHubCLIService.swift */,
 				D00000000000000000000061 /* JiraCloudService.swift */,
+				D0000000000000000000006C /* MCPModels.swift */,
+				D0000000000000000000006E /* MCPServerManager.swift */,
+				D0000000000000000000006D /* MCPToolRegistry.swift */,
 				D00000000000000000000028 /* AppPaths.swift */,
 				D00000000000000000000029 /* CommandRunner.swift */,
 				D0000000000000000000002A /* StackriotError.swift */,
@@ -452,6 +469,7 @@
 				D00000000000000000000057 /* AIProviderSettingsView.swift */,
 				D00000000000000000000068 /* BrowserSessionsSettingsView.swift */,
 				D00000000000000000000060 /* JiraSettingsView.swift */,
+				D0000000000000000000006F /* MCPSettingsView.swift */,
 				D00000000000000000000058 /* NodeSettingsView.swift */,
 				D00000000000000000000059 /* RepositoriesSettingsView.swift */,
 				D0000000000000000000005A /* SettingsCategory.swift */,
@@ -545,6 +563,7 @@
 				E00000000000000000000003 /* ModelContainer+Stackriot.swift in Sources */,
 				E00000000000000000000004 /* AppModel+AgentsNode.swift in Sources */,
 				E00000000000000000000038 /* AppModel+Namespaces.swift in Sources */,
+				E0000000000000000000006A /* AppModel+MCP.swift in Sources */,
 				E00000000000000000000005 /* AppModel+Persistence.swift in Sources */,
 				E00000000000000000000006 /* AppModel+RemotesSSH.swift in Sources */,
 				E00000000000000000000007 /* AppModel+Repositories.swift in Sources */,
@@ -556,11 +575,13 @@
 				E0000000000000000000000B /* AppServices.swift in Sources */,
 				E0000000000000000000000C /* Drafts.swift in Sources */,
 				E0000000000000000000000E /* Domain.swift in Sources */,
+				E0000000000000000000006B /* MCPDomain.swift in Sources */,
 				E00000000000000000000064 /* WorktreeContext.swift in Sources */,
 				E00000000000000000000056 /* AboutSettingsView.swift in Sources */,
 				E00000000000000000000057 /* AIProviderSettingsView.swift in Sources */,
 				E00000000000000000000068 /* BrowserSessionsSettingsView.swift in Sources */,
 				E00000000000000000000060 /* JiraSettingsView.swift in Sources */,
+				E0000000000000000000006F /* MCPSettingsView.swift in Sources */,
 				E00000000000000000000058 /* NodeSettingsView.swift in Sources */,
 				E00000000000000000000059 /* RepositoriesSettingsView.swift in Sources */,
 				E0000000000000000000005A /* SettingsCategory.swift in Sources */,
@@ -611,6 +632,9 @@
 				E00000000000000000000027 /* AIAgentManager.swift in Sources */,
 				E0000000000000000000003D /* GitHubCLIService.swift in Sources */,
 				E00000000000000000000061 /* JiraCloudService.swift in Sources */,
+				E0000000000000000000006C /* MCPModels.swift in Sources */,
+				E0000000000000000000006E /* MCPServerManager.swift in Sources */,
+				E0000000000000000000006D /* MCPToolRegistry.swift in Sources */,
 				E00000000000000000000028 /* AppPaths.swift in Sources */,
 				E00000000000000000000029 /* CommandRunner.swift in Sources */,
 				E0000000000000000000002A /* StackriotError.swift in Sources */,

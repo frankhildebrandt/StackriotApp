@@ -1128,11 +1128,19 @@ enum AppPreferences {
     static let aiModelKey = "ai.model"
     static let jiraBaseURLKey = "jira.baseURL"
     static let jiraUserEmailKey = "jira.userEmail"
+    static let mcpEnabledKey = "mcp.enabled"
+    static let mcpListenAddressKey = "mcp.listenAddress"
+    static let mcpPortKey = "mcp.port"
+    static let mcpExposeReadOnlyToolsOnlyKey = "mcp.readOnlyOnly"
     static let defaultNodeAutoUpdateEnabled = true
     static let defaultNodeAutoUpdateInterval: Double = 21_600
     static let defaultNodeVersionSpec = "lts/*"
     static let defaultTerminalTabRetentionMode = TerminalTabRetentionMode.shortRetain
     static let defaultAIProvider = AIProviderKind.openAI
+    static let defaultMCPEnabled = false
+    static let defaultMCPListenAddress = "127.0.0.1"
+    static let defaultMCPPort = 8765
+    static let defaultMCPExposeReadOnlyToolsOnly = true
 
     static var autoRefreshEnabled: Bool {
         let defaults = UserDefaults.standard
@@ -1243,6 +1251,54 @@ enum AppPreferences {
             baseURL: jiraBaseURL,
             userEmail: jiraUserEmail,
             apiToken: jiraAPIToken
+        )
+    }
+
+    static var mcpEnabled: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: mcpEnabledKey) == nil {
+            return defaultMCPEnabled
+        }
+        return defaults.bool(forKey: mcpEnabledKey)
+    }
+
+    static var mcpListenAddress: String {
+        let defaults = UserDefaults.standard
+        return defaults.string(forKey: mcpListenAddressKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty ?? defaultMCPListenAddress
+    }
+
+    static var mcpPort: Int {
+        let defaults = UserDefaults.standard
+        let value = defaults.integer(forKey: mcpPortKey)
+        return (1 ... 65_535).contains(value) ? value : defaultMCPPort
+    }
+
+    static var mcpAPIToken: String? {
+        try? KeychainSecretStore.loadString(
+            service: KeychainSecretStore.mcpService,
+            account: KeychainSecretStore.mcpTokenAccount
+        )
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .nonEmpty
+    }
+
+    static var mcpExposeReadOnlyToolsOnly: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: mcpExposeReadOnlyToolsOnlyKey) == nil {
+            return defaultMCPExposeReadOnlyToolsOnly
+        }
+        return defaults.bool(forKey: mcpExposeReadOnlyToolsOnlyKey)
+    }
+
+    static var mcpConfiguration: MCPServerConfiguration {
+        MCPServerConfiguration(
+            enabled: mcpEnabled,
+            listenAddress: mcpListenAddress,
+            port: mcpPort,
+            apiToken: mcpAPIToken,
+            exposeReadOnlyToolsOnly: mcpExposeReadOnlyToolsOnly
         )
     }
 }

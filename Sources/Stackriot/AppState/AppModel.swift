@@ -54,6 +54,8 @@ final class AppModel: @unchecked Sendable {
     var pendingRunFixesByAgentRunID: [UUID: RunFixRequest] = [:]
     var activeAgentPlanDraftWorktreeID: UUID?
     var planContentVersionsByWorktreeID: [UUID: Int] = [:]
+    var mcpServerStatus = MCPServerStatus.idle()
+    var mcpLogEntries: [MCPLogEntry] = []
 
     let services: AppServices
     var runningProcesses: [UUID: RunningProcess] = [:]
@@ -97,6 +99,7 @@ final class AppModel: @unchecked Sendable {
                 nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
                 await refreshAllRepositories(force: false)
                 restoreAllPRMonitoring(in: modelContext)
+                await configureMCPServer()
             }
         }
     }
