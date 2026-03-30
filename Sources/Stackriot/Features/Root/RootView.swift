@@ -144,6 +144,19 @@ struct RootView: View {
                     .environment(appModel)
             }
         }
+        .sheet(isPresented: Binding(
+            get: { appModel.activeCodexPlanDraftWorktreeID != nil },
+            set: { newValue in
+                if !newValue {
+                    appModel.dismissPresentedCodexPlanDraft()
+                }
+            }
+        )) {
+            if let worktreeID = appModel.activeCodexPlanDraftWorktreeID {
+                CodexPlanDraftSheet(worktreeID: worktreeID)
+                    .environment(appModel)
+            }
+        }
         .confirmationDialog("Delete repository?", isPresented: Binding(
             get: { appModel.pendingRepositoryDeletionID != nil },
             set: { newValue in

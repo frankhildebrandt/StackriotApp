@@ -18,6 +18,7 @@ final class RunRecord {
     var worktreeID: UUID?
     var repository: ManagedRepository?
     var worktree: WorktreeRecord?
+    @Transient var isTransientPlanRun = false
 
     init(
         id: UUID = UUID(),

@@ -11,6 +11,10 @@ extension AppModel {
     }
 
     func runRecord(with id: UUID) -> RunRecord? {
+        if let draftRun = codexPlanDraftsByWorktreeID.values.first(where: { $0.run.id == id })?.run {
+            return draftRun
+        }
+
         guard let modelContext = storedModelContext else { return nil }
         let descriptor = FetchDescriptor<RunRecord>(predicate: #Predicate { $0.id == id })
         return try? modelContext.fetch(descriptor).first

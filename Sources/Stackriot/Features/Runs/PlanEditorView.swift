@@ -13,6 +13,7 @@ struct PlanEditorView: View {
     @State private var hasLoaded = false
 
     var body: some View {
+        let planContentVersion = appModel.planContentVersion(for: worktree.id)
         VStack(spacing: 0) {
             toolbar
             Divider()
@@ -42,6 +43,10 @@ struct PlanEditorView: View {
                 await MainActor.run { appModel?.savePlan(newValue, for: id) }
             }
         }
+        .onChange(of: planContentVersion) { _, _ in
+            saveTask?.cancel()
+            planText = appModel.loadPlan(for: worktree.id)
+        }
     }
 
     // MARK: - Toolbar
@@ -53,11 +58,30 @@ struct PlanEditorView: View {
             Text("Plan")
                 .font(.subheadline.weight(.semibold))
             Spacer()
+            createPlanWithCodexButton
             agentDispatchMenu
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.thinMaterial)
+    }
+
+    private var createPlanWithCodexButton: some View {
+        Button {
+            saveTask?.cancel()
+            appModel.savePlan(planText, for: worktree.id)
+            appModel.startCodexPlanDraft(
+                for: worktree,
+                in: repository,
+                currentPlanText: planText,
+                modelContext: modelContext
+            )
+        } label: {
+            Label("Create Plan with Codex", systemImage: "sparkles.rectangle.stack")
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(!canCreatePlanWithCodex)
+        .help("Interaktiven Codex-Planlauf im Sheet starten")
     }
 
     private var agentDispatchMenu: some View {
@@ -83,5 +107,9 @@ struct PlanEditorView: View {
 
     private var availableAgents: [AIAgentTool] {
         AIAgentTool.allCases.filter { $0 != .none && appModel.availableAgents.contains($0) }
+    }
+
+    private var canCreatePlanWithCodex: Bool {
+        !worktree.isDefaultBranchWorkspace && appModel.availableAgents.contains(.codex)
     }
 }
