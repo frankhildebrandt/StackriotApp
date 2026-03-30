@@ -416,7 +416,32 @@ extension AppModel {
     nonisolated static func parseCodexPlanResponse(from text: String) -> CodexPlanResponse? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let data = trimmed.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(CodexPlanResponse.self, from: data)
+        guard let response = try? JSONDecoder().decode(CodexPlanResponse.self, from: data) else {
+            return nil
+        }
+        return validatedCodexPlanResponse(response)
+    }
+
+    private nonisolated static func validatedCodexPlanResponse(_ response: CodexPlanResponse) -> CodexPlanResponse? {
+        guard response.summary?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty != nil else {
+            return nil
+        }
+
+        switch response.status {
+        case .needsUserInput:
+            guard let questions = response.questions?
+                .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+                .compactMap(\.nonEmpty),
+                (1...4).contains(questions.count) else {
+                return nil
+            }
+        case .ready:
+            guard response.planMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty != nil else {
+                return nil
+            }
+        }
+
+        return response
     }
 
     private nonisolated static func readCodexPlanResponse(from path: String?) -> CodexPlanResponse? {
@@ -458,51 +483,21 @@ extension AppModel {
               "enum": ["needs_user_input", "ready"]
             },
             "summary": {
-              "type": "string"
+              "type": ["string", "null"]
             },
             "questions": {
-              "type": "array",
+              "type": ["array", "null"],
               "items": {
                 "type": "string"
-              }
+              },
+              "minItems": 1,
+              "maxItems": 4
             },
             "plan_markdown": {
-              "type": "string"
+              "type": ["string", "null"]
             }
           },
-          "required": ["status", "summary"],
-          "allOf": [
-            {
-              "if": {
-                "properties": {
-                  "status": {
-                    "const": "needs_user_input"
-                  }
-                }
-              },
-              "then": {
-                "required": ["questions"],
-                "properties": {
-                  "questions": {
-                    "minItems": 1,
-                    "maxItems": 4
-                  }
-                }
-              }
-            },
-            {
-              "if": {
-                "properties": {
-                  "status": {
-                    "const": "ready"
-                  }
-                }
-              },
-              "then": {
-                "required": ["plan_markdown"]
-              }
-            }
-          ]
+          "required": ["status", "summary", "questions", "plan_markdown"]
         }
         """
     }
