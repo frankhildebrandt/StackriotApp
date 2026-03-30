@@ -28,6 +28,10 @@ extension AppModel {
     }
 
     func cancelRun(_ run: RunRecord, in modelContext: ModelContext) {
+        if run.isTransientPlanRun, let worktreeID = run.worktree?.id {
+            cancelCodexPlanDraft(for: worktreeID)
+            return
+        }
         if let session = terminalSessions[run.id] {
             session.terminate()
             return
@@ -97,13 +101,65 @@ extension AppModel {
         }
     }
 
+    @discardableResult
+    func startTransientRun(
+        _ descriptor: CommandExecutionDescriptor,
+        repository: ManagedRepository,
+        worktree: WorktreeRecord?,
+        isTransientPlanRun: Bool = false
+    ) -> RunRecord {
+        let commandLine = descriptor.displayCommandLine ?? ([descriptor.executable] + descriptor.arguments).joined(separator: " ")
+        let run = RunRecord(
+            actionKind: descriptor.actionKind,
+            title: descriptor.title,
+            commandLine: commandLine,
+            outputInterpreter: descriptor.outputInterpreter,
+            status: .running,
+            worktreeID: worktree?.id,
+            repository: repository,
+            worktree: worktree
+        )
+        run.isTransientPlanRun = isTransientPlanRun
+        run.outputText = "$ \(commandLine)\n"
+
+        if descriptor.outputInterpreter == .codexExecJSONL {
+            let parser = CodexExecJSONLParser()
+            structuredOutputParsersByRunID[run.id] = parser
+            applyStructuredParsedChunk(parser.consume(run.outputText), to: run.id)
+        }
+
+        let runID = run.id
+        activeRunIDs.insert(runID)
+        if descriptor.actionKind == .aiAgent {
+            if descriptor.showsAgentIndicator {
+                delegatedAgentRunIDs.insert(runID)
+            } else {
+                delegatedAgentRunIDs.remove(runID)
+            }
+            refreshRunningAgentWorktrees()
+        }
+
+        Task { [weak self] in
+            await self?.launchRun(runID: runID, descriptor: descriptor)
+        }
+
+        return run
+    }
+
     func handleRunOutput(runID: UUID, chunk: String) {
         guard let run = runRecord(with: runID) else { return }
         if let parser = structuredOutputParsersByRunID[runID] {
             run.outputText += chunk
             applyStructuredParsedChunk(parser.consume(chunk), to: runID)
+            if run.isTransientPlanRun {
+                syncCodexPlanSessionID(forRunID: runID)
+            }
         } else {
             run.outputText += chunk
+        }
+        if run.isTransientPlanRun {
+            importCompletedCodexPlanIfAvailable(forRunID: runID)
+            return
         }
         guard
             run.actionKind == .aiAgent,
@@ -121,6 +177,9 @@ extension AppModel {
     func handleRunTermination(runID: UUID, exitCode: Int32, wasCancelled: Bool) {
         guard let run = runRecord(with: runID), let modelContext = storedModelContext else { return }
         flushBufferedRunOutputIfNeeded(runID: runID)
+        if run.isTransientPlanRun {
+            syncCodexPlanSessionID(forRunID: runID)
+        }
         run.endedAt = .now
         run.exitCode = Int(exitCode)
         run.status = wasCancelled ? .cancelled : (exitCode == 0 ? .succeeded : .failed)
@@ -128,9 +187,20 @@ extension AppModel {
         delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
         structuredOutputParsersByRunID.removeValue(forKey: runID)
+        refreshRunningAgentWorktrees()
+
+        if run.isTransientPlanRun {
+            importCompletedCodexPlanIfAvailable(forRunID: runID)
+            if let (worktreeID, draft) = codexPlanDraftEntry(forRunID: runID),
+               draft.didImportPlan || draft.requestedSessionTermination {
+                cleanupCodexPlanDraft(for: worktreeID)
+            } else {
+                terminalSessions[runID] = nil
+            }
+            return
+        }
         terminalTabs.markCompleted(runID: runID)
         scheduleAutoHideIfNeeded(for: runID)
-        refreshRunningAgentWorktrees()
         if run.actionKind == .gitOperation, let repository = run.repository {
             Task { [weak self] in
                 await self?.refreshWorktreeStatuses(for: repository)
@@ -151,6 +221,9 @@ extension AppModel {
         if let parser = structuredOutputParsersByRunID[runID] {
             run.outputText += renderedMessage
             applyStructuredParsedChunk(parser.consume(renderedMessage), to: runID)
+            if run.isTransientPlanRun {
+                syncCodexPlanSessionID(forRunID: runID)
+            }
         } else {
             run.outputText += renderedMessage
         }
@@ -161,9 +234,19 @@ extension AppModel {
         delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
         structuredOutputParsersByRunID.removeValue(forKey: runID)
+        refreshRunningAgentWorktrees()
+
+        if run.isTransientPlanRun {
+            if let (worktreeID, draft) = codexPlanDraftEntry(forRunID: runID),
+               draft.requestedSessionTermination {
+                cleanupCodexPlanDraft(for: worktreeID)
+            } else {
+                terminalSessions[runID] = nil
+            }
+            return
+        }
         terminalTabs.markCompleted(runID: runID)
         scheduleAutoHideIfNeeded(for: runID)
-        refreshRunningAgentWorktrees()
         save(modelContext)
         if run.actionKind == .aiAgent {
             summarizeAgentRun(runID: runID)

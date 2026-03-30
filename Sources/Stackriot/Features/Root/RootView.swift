@@ -14,6 +14,10 @@ struct RootView: View {
         let visibleRepositories = appModel.visibleRepositories(from: repositories, in: selectedNamespace)
         let selectedRepository = appModel.repository(for: visibleRepositories)
         let selectedWorktree = selectedRepository.flatMap { appModel.selectedWorktree(for: $0) }
+        let editProject: (RepositoryProject) -> Void = { project in
+            guard let namespace = project.namespace else { return }
+            appModel.presentProjectEditor(in: namespace, project: project)
+        }
 
         NavigationSplitView {
             SidebarView(
@@ -34,11 +38,7 @@ struct RootView: View {
                 onCreateProject: { namespace in
                     appModel.presentProjectEditor(in: namespace)
                 },
-                onEditProject: { project in
-                    if let namespace = project.namespace {
-                        appModel.presentProjectEditor(in: namespace, project: project)
-                    }
-                },
+                onEditProject: editProject,
                 onMoveProject: { project, namespace in
                     appModel.moveProject(project, to: namespace, in: modelContext)
                 },
@@ -141,6 +141,19 @@ struct RootView: View {
                 let worktree = appModel.worktreeRecord(with: worktreeID)
             {
                 PublishBranchSheet(repository: repository, worktree: worktree)
+                    .environment(appModel)
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { appModel.activeCodexPlanDraftWorktreeID != nil },
+            set: { newValue in
+                if !newValue {
+                    appModel.dismissPresentedCodexPlanDraft()
+                }
+            }
+        )) {
+            if let worktreeID = appModel.activeCodexPlanDraftWorktreeID {
+                CodexPlanDraftSheet(worktreeID: worktreeID)
                     .environment(appModel)
             }
         }

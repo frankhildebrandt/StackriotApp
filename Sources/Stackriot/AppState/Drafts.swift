@@ -92,6 +92,25 @@ struct ProjectEditorDraft: Identifiable {
     var name = ""
 }
 
+struct CodexPlanDraft: Identifiable {
+    let worktreeID: UUID
+    let repositoryID: UUID
+    let branchName: String
+    let issueContext: String
+    var run: RunRecord
+    var sessionID: String?
+    var latestSummary: String?
+    var latestQuestions: [String] = []
+    var responseFilePath: String?
+    var schemaFilePath: String?
+    var didImportPlan = false
+    var importErrorMessage: String?
+    var requestedSessionTermination = false
+
+    var id: UUID { worktreeID }
+    var runID: UUID { run.id }
+}
+
 extension String {
     var nilIfBlank: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)

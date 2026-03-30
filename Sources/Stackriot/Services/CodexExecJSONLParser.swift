@@ -7,6 +7,10 @@ final class CodexExecJSONLParser: StructuredAgentOutputParsing {
     private var nextTransientSegmentIndex = 0
     private var segmentRevisions: [String: Int] = [:]
 
+    var currentThreadID: String? {
+        threadID
+    }
+
     func consume(_ chunk: String) -> StructuredAgentOutputChunk {
         bufferedLine += chunk
 

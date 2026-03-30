@@ -1951,6 +1951,244 @@ struct StackriotTests {
         try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
     }
 
+    @Test
+    func codexPlanExtractorPrefersLastCompleteProposedPlanBlock() {
+        let output = """
+        Intro
+        <proposed_plan>
+        # First
+        </proposed_plan>
+        More output
+        <proposed_plan>
+        # Final
+        - Step 1
+        </proposed_plan>
+        <proposed_plan>
+        incomplete
+        """
+
+        let extracted = AppModel.extractLatestProposedPlanMarkdown(from: output)
+
+        #expect(extracted == """
+        # Final
+        - Step 1
+        """)
+    }
+
+    @Test
+    func codexPlanResponseParserDecodesStructuredQuestions() {
+        let response = AppModel.parseCodexPlanResponse(from: """
+        {
+          "status": "needs_user_input",
+          "summary": "Need product clarification before planning.",
+          "questions": [
+            "Should the generated plan replace the current draft immediately?",
+            "Do you want implementation details or only milestones?"
+          ]
+        }
+        """)
+
+        #expect(response?.status == .needsUserInput)
+        #expect(response?.summary == "Need product clarification before planning.")
+        #expect(response?.questions == [
+            "Should the generated plan replace the current draft immediately?",
+            "Do you want implementation details or only milestones?",
+        ])
+        #expect(response?.planMarkdown == nil)
+    }
+
+    @Test
+    func codexPlanResponseParserRejectsNeedsUserInputWithoutQuestions() {
+        let response = AppModel.parseCodexPlanResponse(from: """
+        {
+          "status": "needs_user_input",
+          "summary": "Need product clarification before planning."
+        }
+        """)
+
+        #expect(response == nil)
+    }
+
+    @Test
+    func codexPlanResponseParserRejectsReadyWithoutPlanMarkdown() {
+        let response = AppModel.parseCodexPlanResponse(from: """
+        {
+          "status": "ready",
+          "summary": "Plan is ready."
+        }
+        """)
+
+        #expect(response == nil)
+    }
+
+    @MainActor
+    @Test
+    func codexPlanImportReplacesPersistedPlanWithExtractedMarkdown() throws {
+        let defaults = try makeUserDefaultsSuite()
+        let appModel = AppModel(userDefaults: defaults)
+        let repository = makeRepository(name: "CodexPlanImport")
+        let worktree = WorktreeRecord(
+            branchName: "feature/codex-plan",
+            issueContext: "Create the feature plan",
+            path: "/tmp/codex-plan-import",
+            repository: repository
+        )
+        repository.worktrees = [worktree]
+        try appModel.writePlan("Original plan", for: worktree.id)
+        defer {
+            try? FileManager.default.removeItem(at: AppPaths.planFile(for: worktree.id))
+        }
+
+        let run = RunRecord(
+            actionKind: .aiAgent,
+            title: "Codex Plan",
+            commandLine: "codex",
+            outputText: """
+            Noise
+            <proposed_plan>
+            # Imported Plan
+            - Build the sheet
+            - Replace the plan file
+            </proposed_plan>
+            """,
+            status: .succeeded,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        run.isTransientPlanRun = true
+        appModel.codexPlanDraftsByWorktreeID[worktree.id] = CodexPlanDraft(
+            worktreeID: worktree.id,
+            repositoryID: repository.id,
+            branchName: worktree.branchName,
+            issueContext: worktree.issueContext ?? "",
+            run: run
+        )
+        appModel.activeCodexPlanDraftWorktreeID = worktree.id
+
+        appModel.importCompletedCodexPlanIfAvailable(forRunID: run.id)
+
+        let importedPlan = try String(contentsOf: AppPaths.planFile(for: worktree.id), encoding: .utf8)
+        #expect(importedPlan == """
+        # Imported Plan
+        - Build the sheet
+        - Replace the plan file
+        """)
+        #expect(appModel.planContentVersion(for: worktree.id) == 1)
+        #expect(appModel.codexPlanDraft(for: worktree.id) == nil)
+        #expect(appModel.activeCodexPlanDraftWorktreeID == nil)
+    }
+
+    @MainActor
+    @Test
+    func codexPlanImportPrefersStructuredResponseFile() throws {
+        let defaults = try makeUserDefaultsSuite()
+        let appModel = AppModel(userDefaults: defaults)
+        let repository = makeRepository(name: "CodexPlanStructuredImport")
+        let worktree = WorktreeRecord(
+            branchName: "feature/structured-plan",
+            issueContext: "Create the feature plan",
+            path: "/tmp/codex-plan-structured-import",
+            repository: repository
+        )
+        repository.worktrees = [worktree]
+        try appModel.writePlan("Original plan", for: worktree.id)
+        let responseURL = URL(fileURLWithPath: "/tmp/codex-plan-response-\(UUID().uuidString).json")
+        try """
+        {
+          "status": "ready",
+          "summary": "Plan is ready.",
+          "plan_markdown": "# Structured Plan\\n- Inspect flow\\n- Replace plan page"
+        }
+        """.write(to: responseURL, atomically: true, encoding: .utf8)
+        defer {
+            try? FileManager.default.removeItem(at: AppPaths.planFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: responseURL)
+        }
+
+        let run = RunRecord(
+            actionKind: .aiAgent,
+            title: "Codex Plan",
+            commandLine: "codex exec --json",
+            outputText: "Noise only\n",
+            status: .succeeded,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        run.isTransientPlanRun = true
+        appModel.codexPlanDraftsByWorktreeID[worktree.id] = CodexPlanDraft(
+            worktreeID: worktree.id,
+            repositoryID: repository.id,
+            branchName: worktree.branchName,
+            issueContext: worktree.issueContext ?? "",
+            run: run,
+            responseFilePath: responseURL.path
+        )
+        appModel.activeCodexPlanDraftWorktreeID = worktree.id
+
+        appModel.importCompletedCodexPlanIfAvailable(forRunID: run.id)
+
+        let importedPlan = try String(contentsOf: AppPaths.planFile(for: worktree.id), encoding: .utf8)
+        #expect(importedPlan == """
+        # Structured Plan
+        - Inspect flow
+        - Replace plan page
+        """)
+        #expect(appModel.codexPlanDraft(for: worktree.id) == nil)
+    }
+
+    @MainActor
+    @Test
+    func codexPlanImportKeepsExistingPlanWhenNoCompleteBlockExists() throws {
+        let defaults = try makeUserDefaultsSuite()
+        let appModel = AppModel(userDefaults: defaults)
+        let repository = makeRepository(name: "CodexPlanNoImport")
+        let worktree = WorktreeRecord(
+            branchName: "feature/no-import",
+            issueContext: "Keep the current plan",
+            path: "/tmp/codex-plan-no-import",
+            repository: repository
+        )
+        repository.worktrees = [worktree]
+        try appModel.writePlan("Existing plan", for: worktree.id)
+        defer {
+            try? FileManager.default.removeItem(at: AppPaths.planFile(for: worktree.id))
+        }
+
+        let run = RunRecord(
+            actionKind: .aiAgent,
+            title: "Codex Plan",
+            commandLine: "codex",
+            outputText: """
+            Codex is still thinking.
+            <proposed_plan>
+            # Incomplete
+            """,
+            status: .running,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        run.isTransientPlanRun = true
+        appModel.codexPlanDraftsByWorktreeID[worktree.id] = CodexPlanDraft(
+            worktreeID: worktree.id,
+            repositoryID: repository.id,
+            branchName: worktree.branchName,
+            issueContext: worktree.issueContext ?? "",
+            run: run
+        )
+        appModel.activeCodexPlanDraftWorktreeID = worktree.id
+
+        appModel.importCompletedCodexPlanIfAvailable(forRunID: run.id)
+
+        let persistedPlan = try String(contentsOf: AppPaths.planFile(for: worktree.id), encoding: .utf8)
+        #expect(persistedPlan == "Existing plan")
+        #expect(appModel.planContentVersion(for: worktree.id) == 0)
+        #expect(appModel.codexPlanDraft(for: worktree.id)?.runID == run.id)
+        #expect(appModel.activeCodexPlanDraftWorktreeID == worktree.id)
+    }
+
     @MainActor
     @Test
     func moveWorktreeUpdatesPersistedPath() async throws {
