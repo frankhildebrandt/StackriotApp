@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 private enum AgentRunContentMode: String, CaseIterable, Identifiable {
@@ -29,24 +30,54 @@ struct AgentRunFeedView: View {
 
     @State private var selectedMode: AgentRunContentMode = .feed
 
+    private var isCursorStreamInterpreter: Bool {
+        run.outputInterpreter == .cursorAgentPrintJSON
+    }
+
     private var segments: [AgentRunSegment] {
         appModel.structuredSegments(for: run)
     }
 
+    /// Cursor `stream-json` assistant output is only shown in `cursorAssistantDrawer`, not in the main feed.
+    private var feedSegments: [AgentRunSegment] {
+        guard isCursorStreamInterpreter else { return segments }
+        return segments.filter { $0.kind != .agentMessage }
+    }
+
+    private var cursorAssistantSegments: [AgentRunSegment] {
+        guard isCursorStreamInterpreter else { return [] }
+        return segments.filter { $0.kind == .agentMessage }
+    }
+
+    private var cursorAssistantText: String {
+        cursorAssistantSegments
+            .map { $0.bodyText ?? "" }
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n")
+    }
+
     private var rows: [AgentRunFeedRow] {
-        AgentRunFeedLayout.rows(from: segments)
+        AgentRunFeedLayout.rows(from: feedSegments)
     }
 
     private var bottomAnchorID: String {
         "agent-run-feed-bottom-\(run.id.uuidString)"
     }
 
+    private var cursorAssistantBottomID: String {
+        "agent-run-cursor-assistant-bottom-\(run.id.uuidString)"
+    }
+
     private var scrollTrigger: AgentFeedScrollTrigger {
         AgentFeedScrollTrigger(
-            count: segments.count,
-            lastSegmentID: segments.last?.id,
-            lastRevision: segments.last?.revision ?? 0
+            count: feedSegments.count,
+            lastSegmentID: feedSegments.last?.id,
+            lastRevision: feedSegments.last?.revision ?? 0
         )
+    }
+
+    private var showFeedEmptyPlaceholder: Bool {
+        rows.isEmpty && (!isCursorStreamInterpreter || cursorAssistantText.isEmpty)
     }
 
     var body: some View {
@@ -71,46 +102,52 @@ struct AgentRunFeedView: View {
     }
 
     private var feedView: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if rows.isEmpty {
-                        ContentUnavailableView(
-                            "Noch kein Feed",
-                            systemImage: "bubble.left.and.text.bubble.right",
-                            description: Text("Sobald strukturierte Agent-Events eintreffen, erscheinen sie hier. Rohdaten bleiben jederzeit im Raw Log sichtbar.")
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 240)
-                    } else {
-                        ForEach(rows) { row in
-                            AgentRunFeedRowView(row: row)
-                                .id(row.id)
+        VStack(alignment: .leading, spacing: 10) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        if showFeedEmptyPlaceholder {
+                            ContentUnavailableView(
+                                "Noch kein Feed",
+                                systemImage: "bubble.left.and.text.bubble.right",
+                                description: Text("Sobald strukturierte Agent-Events eintreffen, erscheinen sie hier. Rohdaten bleiben jederzeit im Raw Log sichtbar.")
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 240)
+                        } else {
+                            ForEach(rows) { row in
+                                AgentRunFeedRowView(row: row)
+                                    .id(row.id)
+                            }
                         }
-                    }
 
-                    Color.clear
-                        .frame(height: 1)
-                        .id(bottomAnchorID)
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomAnchorID)
+                    }
+                    .padding(16)
                 }
-                .padding(16)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+                .onAppear {
+                    scrollToLatest(using: proxy)
+                }
+                .onChange(of: scrollTrigger) { _, _ in
+                    scrollToLatest(using: proxy)
+                }
             }
-            .background(Color(nsColor: .textBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-            )
-            .onAppear {
-                scrollToLatest(using: proxy)
-            }
-            .onChange(of: scrollTrigger) { _, _ in
-                scrollToLatest(using: proxy)
+
+            if isCursorStreamInterpreter {
+                cursorAssistantDrawer
             }
         }
     }
 
     private var rawLogView: some View {
-        TextEditor(text: .constant(run.outputText))
+        TextEditor(text: .constant(rawLogDisplayText))
             .font(.system(.body, design: .monospaced))
             .scrollContentBackground(.hidden)
             .padding(12)
@@ -119,10 +156,81 @@ struct AgentRunFeedView: View {
             .foregroundStyle(.white)
     }
 
+    /// Full JSONL is stored on the run; for Cursor we hide `assistant` lines here so the reply stays only in the drawer.
+    private var rawLogDisplayText: String {
+        guard isCursorStreamInterpreter else { return run.outputText }
+        return Self.jsonLRemovingEventTypes(run.outputText, removedTypes: ["assistant"])
+    }
+
+    private static func jsonLRemovingEventTypes(_ text: String, removedTypes: Set<String>) -> String {
+        let lowered = Set(removedTypes.map { $0.lowercased() })
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let kept = lines.filter { line in
+            let string = String(line)
+            guard let data = string.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = object["type"] as? String
+            else {
+                return true
+            }
+            return !lowered.contains(type.lowercased())
+        }
+        return kept.joined(separator: "\n")
+    }
+
     private func scrollToLatest(using proxy: ScrollViewProxy) {
         DispatchQueue.main.async {
             withAnimation(.easeOut(duration: 0.15)) {
                 proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+            }
+        }
+    }
+
+    private var cursorAssistantDrawer: some View {
+        ScrollViewReader { proxy in
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Antwort", systemImage: "bubble.left.and.bubble.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ScrollView {
+                    Group {
+                        if cursorAssistantText.isEmpty {
+                            Text("Warte auf Antwort…")
+                                .font(.subheadline)
+                                .foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            AgentRichTextFlow(text: cursorAssistantText)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(cursorAssistantBottomID)
+                }
+                .frame(minHeight: 120, maxHeight: 220)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.accentColor.opacity(0.12), lineWidth: 1)
+            )
+            .onChange(of: cursorAssistantText.count) { _, _ in
+                scrollAssistantDrawerToBottom(using: proxy)
+            }
+            .onAppear {
+                scrollAssistantDrawerToBottom(using: proxy)
+            }
+        }
+    }
+
+    private func scrollAssistantDrawerToBottom(using proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.12)) {
+                proxy.scrollTo(cursorAssistantBottomID, anchor: .bottom)
             }
         }
     }
