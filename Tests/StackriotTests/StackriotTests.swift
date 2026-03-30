@@ -2152,6 +2152,97 @@ struct StackriotTests {
 
     @MainActor
     @Test
+    func jiraSearchTicketsUsesSearchJQLEndpointAndPreservesDecodedFields() async throws {
+        let repository = makeRepository(name: "Jira Search")
+        let service = JiraCloudService(
+            configurationProvider: {
+                JiraConfiguration(
+                    baseURL: "https://example.atlassian.net",
+                    userEmail: "user@example.com",
+                    apiToken: "token"
+                )
+            },
+            performRequest: { request in
+                let url = try #require(request.url)
+                #expect(request.httpMethod == "GET")
+                #expect(url.path == "/rest/api/3/search/jql")
+                let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+                let queryItems = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+                #expect(queryItems["jql"] == #"summary ~ "Import Jira tickets" ORDER BY updated DESC"#)
+                #expect(queryItems["maxResults"] == "20")
+                #expect(queryItems["fields"] == "summary,status")
+                #expect(request.value(forHTTPHeaderField: "Authorization")?.hasPrefix("Basic ") == true)
+
+                let response = HTTPURLResponse(
+                    url: url,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                let data = Data(
+                    """
+                    {
+                      "issues": [
+                        {
+                          "key": "ABC-123",
+                          "fields": {
+                            "summary": "Import Jira tickets",
+                            "status": { "name": "In Progress" }
+                          }
+                        }
+                      ]
+                    }
+                    """.utf8
+                )
+                return (data, response)
+            }
+        )
+
+        let results = try await service.searchTickets(query: "Import Jira tickets", in: repository)
+        #expect(results == [
+            TicketSearchResult(
+                reference: TicketReference(provider: .jira, id: "ABC-123", displayID: "ABC-123"),
+                title: "Import Jira tickets",
+                url: "https://example.atlassian.net/browse/ABC-123",
+                status: "In Progress"
+            )
+        ])
+    }
+
+    @MainActor
+    @Test
+    func jiraSearchTicketsPropagatesAPIErrors() async {
+        let repository = makeRepository(name: "Jira Search Error")
+        let service = JiraCloudService(
+            configurationProvider: {
+                JiraConfiguration(
+                    baseURL: "https://example.atlassian.net",
+                    userEmail: "user@example.com",
+                    apiToken: "token"
+                )
+            },
+            performRequest: { request in
+                let response = HTTPURLResponse(
+                    url: try #require(request.url),
+                    statusCode: 403,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                let data = Data(#"{"errorMessages":["JQL is not permitted"],"errors":{}}"#.utf8)
+                return (data, response)
+            }
+        )
+
+        do {
+            _ = try await service.searchTickets(query: "ABC-123", in: repository)
+            Issue.record("Expected Jira search to fail")
+        } catch {
+            #expect(error.localizedDescription.contains("JQL is not permitted"))
+        }
+    }
+
+    @MainActor
+    @Test
     func initialPlanIncludesProviderNeutralJiraTicketDetails() {
         let appModel = AppModel()
         let ticket = TicketDetails(

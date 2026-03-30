@@ -63,16 +63,8 @@ struct JiraCloudService: TicketProviderService {
         guard !trimmedQuery.isEmpty else { return [] }
 
         let configuration = configurationProvider()
-        let jql = Self.searchJQL(for: trimmedQuery)
-        let data = try await request(
-            path: "/rest/api/3/search",
-            queryItems: [
-                URLQueryItem(name: "jql", value: jql),
-                URLQueryItem(name: "maxResults", value: "20"),
-                URLQueryItem(name: "fields", value: "summary,status"),
-            ],
-            configuration: configuration
-        )
+        let searchRequest = try Self.makeSearchRequest(query: trimmedQuery, configuration: configuration)
+        let data = try await request(searchRequest)
         return try decodeSearchResults(from: data, baseURL: configuration.trimmedBaseURL)
     }
 
@@ -129,10 +121,27 @@ struct JiraCloudService: TicketProviderService {
         queryItems: [URLQueryItem] = [],
         configuration: JiraConfiguration
     ) async throws -> Data {
-        let request = try Self.makeRequest(path: path, queryItems: queryItems, configuration: configuration)
+        let urlRequest = try Self.makeRequest(path: path, queryItems: queryItems, configuration: configuration)
+        return try await request(urlRequest)
+    }
+
+    private func request(_ request: URLRequest) async throws -> Data {
         let (data, response) = try await performRequest(request)
         try Self.ensureSuccess(response: response, data: data)
         return data
+    }
+
+    private static func makeSearchRequest(query: String, configuration: JiraConfiguration) throws -> URLRequest {
+        let jql = searchJQL(for: query)
+        return try makeRequest(
+            path: "/rest/api/3/search/jql",
+            queryItems: [
+                URLQueryItem(name: "jql", value: jql),
+                URLQueryItem(name: "maxResults", value: "20"),
+                URLQueryItem(name: "fields", value: "summary,status"),
+            ],
+            configuration: configuration
+        )
     }
 
     private static func makeRequest(
