@@ -1,9 +1,11 @@
 import Foundation
 
 /// Service fuer GitHub CLI (`gh`) Operationen — Issue-Lesen, PR erstellen und Status abrufen.
-struct GitHubCLIService {
+struct GitHubCLIService: TicketProviderService {
     typealias CommandExecutor = @Sendable (_ executable: String, _ arguments: [String], _ currentDirectoryURL: URL?, _ environment: [String: String]) async throws -> CommandResult
     typealias EnvironmentProvider = @Sendable () async -> [String: String]
+
+    let kind: TicketProviderKind = .github
 
     struct PRInfo: Sendable {
         let number: Int
@@ -50,7 +52,7 @@ struct GitHubCLIService {
     }
 
     @MainActor
-    func issueReadiness(for repository: ManagedRepository) async -> TicketProviderStatus {
+    func readiness(for repository: ManagedRepository) async -> TicketProviderStatus {
         guard repositoryTarget(for: repository) != nil else {
             return TicketProviderStatus(
                 provider: .github,
@@ -82,6 +84,11 @@ struct GitHubCLIService {
         )
     }
 
+    @MainActor
+    func issueReadiness(for repository: ManagedRepository) async -> TicketProviderStatus {
+        await readiness(for: repository)
+    }
+
     // MARK: - Remote Check
 
     /// Gibt zurueck, ob die Remote-URL zu GitHub gehoert.
@@ -92,16 +99,16 @@ struct GitHubCLIService {
     // MARK: - Issue Operations
 
     @MainActor
-    func searchIssues(query: String, in repository: ManagedRepository) async throws -> [GitHubIssueSearchResult] {
+    func searchTickets(query: String, in repository: ManagedRepository) async throws -> [TicketSearchResult] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return [] }
 
         let target = try repositoryTargetOrThrow(for: repository)
         let environment = await commandEnvironment()
-        var results: [GitHubIssueSearchResult] = []
+        var results: [TicketSearchResult] = []
 
         if let issueNumber = Self.issueNumber(from: trimmedQuery),
-           let exactMatch = try await loadIssueSearchResult(number: issueNumber, repositoryTarget: target, environment: environment)
+           let exactMatch = try await loadTicketSearchResult(number: issueNumber, repositoryTarget: target, environment: environment)
         {
             results.append(exactMatch)
         }
@@ -131,7 +138,15 @@ struct GitHubCLIService {
     }
 
     @MainActor
-    func loadIssue(number: Int, in repository: ManagedRepository) async throws -> GitHubIssueDetails {
+    func searchIssues(query: String, in repository: ManagedRepository) async throws -> [TicketSearchResult] {
+        try await searchTickets(query: query, in: repository)
+    }
+
+    @MainActor
+    func loadTicket(id: String, in repository: ManagedRepository) async throws -> TicketDetails {
+        guard let number = Int(id) else {
+            throw StackriotError.commandFailed("GitHub-Issue-ID ist ungueltig: \(id)")
+        }
         let target = try repositoryTargetOrThrow(for: repository)
         let environment = await commandEnvironment()
         let result = try await runCommand(
@@ -152,23 +167,33 @@ struct GitHubCLIService {
         return try decodeIssueDetails(from: Data(result.stdout.utf8))
     }
 
-    func decodeIssueSearchResults(from data: Data) throws -> [GitHubIssueSearchResult] {
+    @MainActor
+    func loadIssue(number: Int, in repository: ManagedRepository) async throws -> TicketDetails {
+        try await loadTicket(id: String(number), in: repository)
+    }
+
+    func decodeIssueSearchResults(from data: Data) throws -> [TicketSearchResult] {
         let decoded = try Self.jsonDecoder.decode([IssueSearchResultPayload].self, from: data)
         return decoded.map {
-            GitHubIssueSearchResult(number: $0.number, title: $0.title, url: $0.url, state: $0.state)
+            TicketSearchResult(
+                reference: TicketReference(provider: .github, id: String($0.number), displayID: "#\($0.number)"),
+                title: $0.title,
+                url: $0.url,
+                status: $0.state
+            )
         }
     }
 
-    func decodeIssueDetails(from data: Data) throws -> GitHubIssueDetails {
+    func decodeIssueDetails(from data: Data) throws -> TicketDetails {
         let decoded = try Self.jsonDecoder.decode(IssueDetailsPayload.self, from: data)
-        return GitHubIssueDetails(
-            number: decoded.number,
+        return TicketDetails(
+            reference: TicketReference(provider: .github, id: String(decoded.number), displayID: "#\(decoded.number)"),
             title: decoded.title,
             body: decoded.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
             url: decoded.url,
             labels: (decoded.labels ?? []).map(\.name),
             comments: (decoded.comments ?? []).map {
-                GitHubIssueComment(
+                TicketComment(
                     author: $0.author?.login?.nilIfBlank ?? "unknown",
                     body: $0.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
                     createdAt: $0.createdAt,
@@ -270,11 +295,11 @@ struct GitHubCLIService {
         ["PATH": await ShellEnvironment.loginShellPath()]
     }
 
-    private func loadIssueSearchResult(
+    private func loadTicketSearchResult(
         number: Int,
         repositoryTarget: String,
         environment: [String: String]
-    ) async throws -> GitHubIssueSearchResult? {
+    ) async throws -> TicketSearchResult? {
         let result = try await runCommand(
             "gh",
             [

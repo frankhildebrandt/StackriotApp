@@ -53,27 +53,29 @@ extension AppModel {
         }
     }
 
-    func initialPlan(from issue: GitHubIssueDetails) -> String {
-        let labels = issue.labels.isEmpty ? "_none_" : issue.labels.joined(separator: ", ")
+    func initialPlan(from ticket: TicketDetails) -> String {
+        let labels = ticket.labels.isEmpty ? "_none_" : ticket.labels.joined(separator: ", ")
+        let ticketLineLabel = ticket.provider == .github ? "Issue" : "Ticket"
         var lines = [
-            "# \(issue.title)",
+            "# \(ticket.title)",
             "",
-            "- Issue: #\(issue.number)",
-            "- URL: \(issue.url)",
+            "- Provider: \(ticket.provider.displayName)",
+            "- \(ticketLineLabel): \(ticket.reference.displayID)",
+            "- URL: \(ticket.url)",
             "- Labels: \(labels)",
             "",
             "## Beschreibung",
-            issue.body.nilIfBlank ?? "Keine Beschreibung.",
+            ticket.body.nilIfBlank ?? "Keine Beschreibung.",
             "",
             "## Kommentare",
         ]
 
-        if issue.comments.isEmpty {
+        if ticket.comments.isEmpty {
             lines.append("Keine Kommentare.")
             return lines.joined(separator: "\n")
         }
 
-        for comment in issue.comments.sorted(by: { $0.createdAt < $1.createdAt }) {
+        for comment in ticket.comments.sorted(by: { $0.createdAt < $1.createdAt }) {
             lines.append("")
             lines.append("### \(comment.author) - \(Self.planTimestampFormatter.string(from: comment.createdAt))")
             lines.append(comment.body.nilIfBlank ?? "_Kein Kommentartext._")

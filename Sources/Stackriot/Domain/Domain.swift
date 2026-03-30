@@ -108,6 +108,26 @@ struct AIProviderConfiguration: Sendable, Equatable {
     }
 }
 
+struct JiraConfiguration: Sendable, Equatable {
+    let baseURL: String
+    let userEmail: String
+    let apiToken: String?
+
+    var trimmedBaseURL: String {
+        baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedUserEmail: String {
+        userEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var isConfigured: Bool {
+        trimmedBaseURL.nonEmpty != nil
+            && trimmedUserEmail.nonEmpty != nil
+            && apiToken?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty != nil
+    }
+}
+
 enum WorktreeIssueKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case bug
     case feature
@@ -123,9 +143,24 @@ enum WorktreeIssueKind: String, Codable, CaseIterable, Identifiable, Sendable {
 
 struct AIWorktreeNameSuggestion: Sendable, Equatable {
     let kind: WorktreeIssueKind
-    let ticketNumber: Int?
+    let ticketIdentifier: String?
     let shortSummary: String
     let branchName: String
+}
+
+extension AIWorktreeNameSuggestion {
+    init(kind: WorktreeIssueKind, ticketNumber: Int?, shortSummary: String, branchName: String) {
+        self.init(
+            kind: kind,
+            ticketIdentifier: ticketNumber.map(String.init),
+            shortSummary: shortSummary,
+            branchName: branchName
+        )
+    }
+
+    var ticketNumber: Int? {
+        ticketIdentifier.flatMap(Int.init)
+    }
 }
 
 struct AIRunSummary: Sendable, Equatable {
@@ -547,8 +582,45 @@ enum WorktreeCardColor: String, Codable, CaseIterable, Identifiable, Sendable {
 
 enum TicketProviderKind: String, Codable, CaseIterable, Identifiable {
     case github
+    case jira
 
     var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .github:
+            "GitHub"
+        case .jira:
+            "Jira Cloud"
+        }
+    }
+
+    var ticketLabel: String {
+        switch self {
+        case .github:
+            "Issue"
+        case .jira:
+            "Ticket"
+        }
+    }
+
+    var searchPrompt: String {
+        switch self {
+        case .github:
+            "Issue # oder Titel"
+        case .jira:
+            "Jira-Key oder Titel"
+        }
+    }
+
+    var searchHint: String {
+        switch self {
+        case .github:
+            "Suche nach einer Issue-Nummer oder einem Titel, um optional Kontext fuer diesen Worktree zu uebernehmen."
+        case .jira:
+            "Suche nach einem Jira-Key wie ABC-123 oder nach Begriffen aus dem Summary, um optional Kontext fuer diesen Worktree zu uebernehmen."
+        }
+    }
 }
 
 struct TicketProviderStatus: Sendable, Equatable {
@@ -557,16 +629,39 @@ struct TicketProviderStatus: Sendable, Equatable {
     let message: String
 }
 
-struct GitHubIssueSearchResult: Identifiable, Sendable, Equatable {
-    let number: Int
-    let title: String
-    let url: String
-    let state: String
-
-    var id: Int { number }
+struct TicketReference: Sendable, Equatable, Codable {
+    let provider: TicketProviderKind
+    let id: String
+    let displayID: String
 }
 
-struct GitHubIssueComment: Identifiable, Sendable, Equatable {
+struct TicketSearchResult: Identifiable, Sendable, Equatable {
+    let reference: TicketReference
+    let title: String
+    let url: String
+    let status: String
+
+    var id: String { "\(reference.provider.rawValue):\(reference.id)" }
+}
+
+extension TicketSearchResult {
+    init(number: Int, title: String, url: String, state: String) {
+        self.init(
+            reference: TicketReference(provider: .github, id: String(number), displayID: "#\(number)"),
+            title: title,
+            url: url,
+            status: state
+        )
+    }
+
+    var number: Int {
+        Int(reference.id) ?? 0
+    }
+
+    var state: String { status }
+}
+
+struct TicketComment: Identifiable, Sendable, Equatable {
     let author: String
     let body: String
     let createdAt: Date
@@ -575,14 +670,37 @@ struct GitHubIssueComment: Identifiable, Sendable, Equatable {
     var id: String { url ?? "\(author)-\(createdAt.timeIntervalSince1970)" }
 }
 
-struct GitHubIssueDetails: Sendable, Equatable {
-    let number: Int
+struct TicketDetails: Sendable, Equatable {
+    let reference: TicketReference
     let title: String
     let body: String
     let url: String
     let labels: [String]
-    let comments: [GitHubIssueComment]
+    let comments: [TicketComment]
+
+    var provider: TicketProviderKind { reference.provider }
 }
+
+extension TicketDetails {
+    init(number: Int, title: String, body: String, url: String, labels: [String], comments: [TicketComment]) {
+        self.init(
+            reference: TicketReference(provider: .github, id: String(number), displayID: "#\(number)"),
+            title: title,
+            body: body,
+            url: url,
+            labels: labels,
+            comments: comments
+        )
+    }
+
+    var number: Int {
+        Int(reference.id) ?? 0
+    }
+}
+
+typealias GitHubIssueSearchResult = TicketSearchResult
+typealias GitHubIssueComment = TicketComment
+typealias GitHubIssueDetails = TicketDetails
 
 enum SSHKeyKind: String, Codable, CaseIterable, Identifiable {
     case imported
@@ -1008,6 +1126,8 @@ enum AppPreferences {
     static let aiAPIKeyKey = "ai.apiKey"
     static let aiBaseURLKey = "ai.baseURL"
     static let aiModelKey = "ai.model"
+    static let jiraBaseURLKey = "jira.baseURL"
+    static let jiraUserEmailKey = "jira.userEmail"
     static let defaultNodeAutoUpdateEnabled = true
     static let defaultNodeAutoUpdateInterval: Double = 21_600
     static let defaultNodeVersionSpec = "lts/*"
@@ -1094,6 +1214,35 @@ enum AppPreferences {
             apiKey: aiAPIKey,
             model: aiModel,
             baseURL: aiBaseURL
+        )
+    }
+
+    static var jiraBaseURL: String {
+        let defaults = UserDefaults.standard
+        return defaults.string(forKey: jiraBaseURLKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    static var jiraUserEmail: String {
+        let defaults = UserDefaults.standard
+        return defaults.string(forKey: jiraUserEmailKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    static var jiraAPIToken: String? {
+        try? KeychainSecretStore.loadString(
+            service: KeychainSecretStore.jiraService,
+            account: KeychainSecretStore.jiraTokenAccount
+        )
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .nonEmpty
+    }
+
+    static var jiraConfiguration: JiraConfiguration {
+        JiraConfiguration(
+            baseURL: jiraBaseURL,
+            userEmail: jiraUserEmail,
+            apiToken: jiraAPIToken
         )
     }
 }

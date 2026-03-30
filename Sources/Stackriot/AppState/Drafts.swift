@@ -11,12 +11,12 @@ struct WorktreeDraft {
     var sourceBranch = ""
     var destinationRootPath: String?
     var ticketSearchText = ""
-    var selectedTicket: GitHubIssueSearchResult?
-    var selectedIssueDetails: GitHubIssueDetails?
+    var selectedTicket: TicketSearchResult?
+    var selectedIssueDetails: TicketDetails?
     var isTicketLoading = false
-    var ticketSearchResults: [GitHubIssueSearchResult] = []
+    var ticketSearchResults: [TicketSearchResult] = []
     var ticketProvider: TicketProviderKind?
-    var ticketProviderStatus: TicketProviderStatus?
+    var ticketProviderStatuses: [TicketProviderStatus] = []
     var hasConfirmedTicket = false
     var isGeneratingSuggestedName = false
     var isTicketSectionExpanded = false
@@ -32,6 +32,20 @@ struct WorktreeDraft {
     var destinationRootURL: URL? {
         guard let destinationRootPath = destinationRootPath?.nilIfBlank else { return nil }
         return URL(fileURLWithPath: destinationRootPath, isDirectory: true)
+    }
+
+    var availableTicketProviders: [TicketProviderKind] {
+        ticketProviderStatuses.filter(\.isAvailable).map(\.provider)
+    }
+
+    var selectedTicketProviderStatus: TicketProviderStatus? {
+        guard let ticketProvider else { return ticketProviderStatuses.first }
+        return ticketProviderStatuses.first(where: { $0.provider == ticketProvider }) ?? ticketProviderStatuses.first
+    }
+
+    var ticketProviderStatus: TicketProviderStatus? {
+        get { selectedTicketProviderStatus }
+        set { ticketProviderStatuses = newValue.map { [$0] } ?? [] }
     }
 }
 

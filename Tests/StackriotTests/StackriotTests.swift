@@ -1356,6 +1356,33 @@ struct StackriotTests {
         #expect(suggestion.branchName == "bug/3-grosses-fenster-kaputt")
     }
 
+    @Test
+    func aiWorktreeSuggestionFallsBackToJiraKeyBranchName() async throws {
+        let service = AIProviderService(
+            configurationProvider: {
+                AIProviderConfiguration(
+                    provider: .openAI,
+                    apiKey: nil,
+                    model: "gpt-5.4-mini",
+                    baseURL: "https://api.openai.com/v1"
+                )
+            }
+        )
+        let ticket = TicketDetails(
+            reference: TicketReference(provider: .jira, id: "ABC-123", displayID: "ABC-123"),
+            title: "Bug: Jira issue import kaputt",
+            body: "Jira Tickets sollen im Worktree-Flow erscheinen.",
+            url: "https://example.atlassian.net/browse/ABC-123",
+            labels: ["bug"],
+            comments: []
+        )
+
+        let suggestion = try await service.suggestWorktreeName(for: ticket)
+        #expect(suggestion.kind == .bug)
+        #expect(suggestion.branchName == "bug/abc-123-jira-import-kaputt")
+        #expect(suggestion.ticketIdentifier == "ABC-123")
+    }
+
     @MainActor
     @Test
     func confirmedTicketCanPopulateSuggestedWorktreeNameFromAIService() async throws {
@@ -1992,6 +2019,166 @@ struct StackriotTests {
 
     @MainActor
     @Test
+    func jiraReadinessRequiresConfigurationAndReportsAuthFailures() async {
+        let repository = makeRepository(name: "Jira")
+
+        let missingConfiguration = JiraCloudService(
+            configurationProvider: { JiraConfiguration(baseURL: "", userEmail: "", apiToken: nil) },
+            performRequest: { _ in
+                Issue.record("Unexpected request")
+                return (Data(), URLResponse())
+            }
+        )
+        let missingConfigurationStatus = await missingConfiguration.readiness(for: repository)
+        #expect(!missingConfigurationStatus.isAvailable)
+        #expect(missingConfigurationStatus.message.contains("Jira Cloud"))
+
+        let failingService = JiraCloudService(
+            configurationProvider: {
+                JiraConfiguration(
+                    baseURL: "https://example.atlassian.net",
+                    userEmail: "user@example.com",
+                    apiToken: "token"
+                )
+            },
+            performRequest: { request in
+                #expect(request.value(forHTTPHeaderField: "Authorization")?.hasPrefix("Basic ") == true)
+                let response = HTTPURLResponse(
+                    url: try #require(request.url),
+                    statusCode: 401,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                let data = Data(#"{"errorMessages":["Unauthorized"],"errors":{}}"#.utf8)
+                return (data, response)
+            }
+        )
+        let failingStatus = await failingService.readiness(for: repository)
+        #expect(!failingStatus.isAvailable)
+        #expect(failingStatus.message.contains("Unauthorized") || failingStatus.message.contains("Authentifizierung"))
+    }
+
+    @Test
+    func jiraSearchResultsAndDetailsDecodeFromJSON() throws {
+        let service = JiraCloudService(
+            configurationProvider: {
+                JiraConfiguration(
+                    baseURL: "https://example.atlassian.net",
+                    userEmail: "user@example.com",
+                    apiToken: "token"
+                )
+            },
+            performRequest: { _ in
+                Issue.record("Unexpected request")
+                return (Data(), URLResponse())
+            }
+        )
+        let searchData = Data(
+            """
+            {
+              "issues": [
+                {
+                  "key": "ABC-123",
+                  "fields": {
+                    "summary": "Import Jira tickets",
+                    "status": { "name": "In Progress" }
+                  }
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let searchResults = try service.decodeSearchResults(from: searchData, baseURL: "https://example.atlassian.net")
+        #expect(searchResults == [
+            TicketSearchResult(
+                reference: TicketReference(provider: .jira, id: "ABC-123", displayID: "ABC-123"),
+                title: "Import Jira tickets",
+                url: "https://example.atlassian.net/browse/ABC-123",
+                status: "In Progress"
+            )
+        ])
+
+        let detailsData = Data(
+            """
+            {
+              "key": "ABC-123",
+              "fields": {
+                "summary": "Import Jira tickets",
+                "description": {
+                  "type": "doc",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        { "type": "text", "text": "Beschreibung aus Jira." }
+                      ]
+                    }
+                  ]
+                },
+                "labels": ["ios", "feature"],
+                "comment": {
+                  "comments": [
+                    {
+                      "author": { "displayName": "Alice", "accountId": "abc" },
+                      "created": "2026-03-30T07:00:00Z",
+                      "body": {
+                        "type": "doc",
+                        "content": [
+                          {
+                            "type": "paragraph",
+                            "content": [
+                              { "type": "text", "text": "Bitte in Plan uebernehmen." }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+            """.utf8
+        )
+
+        let details = try service.decodeTicketDetails(from: detailsData, baseURL: "https://example.atlassian.net")
+        #expect(details.reference.displayID == "ABC-123")
+        #expect(details.body == "Beschreibung aus Jira.")
+        #expect(details.labels == ["ios", "feature"])
+        #expect(details.comments.count == 1)
+        #expect(details.comments.first?.author == "Alice")
+        #expect(details.comments.first?.body == "Bitte in Plan uebernehmen.")
+    }
+
+    @MainActor
+    @Test
+    func initialPlanIncludesProviderNeutralJiraTicketDetails() {
+        let appModel = AppModel()
+        let ticket = TicketDetails(
+            reference: TicketReference(provider: .jira, id: "ABC-123", displayID: "ABC-123"),
+            title: "Jira Plan",
+            body: "Beschreibung aus Jira.",
+            url: "https://example.atlassian.net/browse/ABC-123",
+            labels: ["ios"],
+            comments: [
+                TicketComment(
+                    author: "Alice",
+                    body: "Kommentar aus Jira.",
+                    createdAt: Date(timeIntervalSince1970: 1_743_318_000),
+                    url: nil
+                )
+            ]
+        )
+
+        let plan = appModel.initialPlan(from: ticket)
+        #expect(plan.contains("- Provider: Jira Cloud"))
+        #expect(plan.contains("- Ticket: ABC-123"))
+        #expect(plan.contains("Beschreibung aus Jira."))
+        #expect(plan.contains("Kommentar aus Jira."))
+    }
+
+    @MainActor
+    @Test
     func ticketWorktreeCreationNormalizesBranchSetsIssueContextAndWritesPlan() async throws {
         let remote = try await createSeededRemote(named: "ticket-worktree")
         let cloneInfo = try await RepositoryManager().cloneBareRepository(
@@ -2049,14 +2236,93 @@ struct StackriotTests {
 
         #expect(worktree.branchName == "Feature-A")
         #expect(worktree.issueContext == "#123 Ticket backed worktree")
+        #expect(worktree.ticketProvider == .github)
+        #expect(worktree.ticketIdentifier == "123")
+        #expect(worktree.ticketURL == "https://github.com/octo/example/issues/123")
 
         let planURL = AppPaths.planFile(for: worktree.id)
         let plan = try String(contentsOf: planURL, encoding: .utf8)
         #expect(plan.contains("# Ticket backed worktree"))
+        #expect(plan.contains("- Provider: GitHub"))
         #expect(plan.contains("- Issue: #123"))
         #expect(plan.contains("## Beschreibung"))
         #expect(plan.contains("## Kommentare"))
         #expect(plan.contains("### alice - 2025-03-29T12:00:00Z"))
+
+        try? FileManager.default.removeItem(at: planURL)
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: worktree.path))
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
+    @MainActor
+    @Test
+    func jiraTicketWorktreeCreationStoresProviderMetadataAndWritesPlan() async throws {
+        let remote = try await createSeededRemote(named: "jira-ticket-worktree")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Jira-Ticket-Worktree-\(UUID().uuidString)"
+        )
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: cloneInfo.displayName,
+            remoteURL: remote.remote.absoluteString,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath.path,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        let appModel = AppModel()
+        appModel.storedModelContext = modelContext
+        appModel.worktreeDraft = WorktreeDraft(sourceBranch: cloneInfo.defaultBranch)
+        appModel.worktreeDraft.branchName = "feature/abc-123-import-jira"
+        appModel.worktreeDraft.ticketProvider = .jira
+        appModel.worktreeDraft.ticketProviderStatuses = [
+            TicketProviderStatus(provider: .jira, isAvailable: true, message: "ready"),
+        ]
+        appModel.worktreeDraft.selectedTicket = TicketSearchResult(
+            reference: TicketReference(provider: .jira, id: "ABC-123", displayID: "ABC-123"),
+            title: "Import Jira tickets",
+            url: "https://example.atlassian.net/browse/ABC-123",
+            status: "In Progress"
+        )
+        appModel.worktreeDraft.selectedIssueDetails = TicketDetails(
+            reference: TicketReference(provider: .jira, id: "ABC-123", displayID: "ABC-123"),
+            title: "Import Jira tickets",
+            body: "Beschreibung aus Jira.",
+            url: "https://example.atlassian.net/browse/ABC-123",
+            labels: ["ios", "feature"],
+            comments: [
+                TicketComment(
+                    author: "alice",
+                    body: "Kommentar aus Jira.",
+                    createdAt: Date(timeIntervalSince1970: 1_743_249_600),
+                    url: nil
+                )
+            ]
+        )
+        appModel.worktreeDraft.hasConfirmedTicket = true
+
+        await appModel.createWorktreeFromTicket(for: repository, in: modelContext)
+
+        #expect(appModel.pendingErrorMessage == nil)
+        #expect(repository.worktrees.count == 1)
+
+        guard let worktree = repository.worktrees.first else {
+            Issue.record("Expected created Jira worktree record")
+            return
+        }
+
+        #expect(worktree.issueContext == "ABC-123 Import Jira tickets")
+        #expect(worktree.ticketProvider == .jira)
+        #expect(worktree.ticketIdentifier == "ABC-123")
+        #expect(worktree.ticketURL == "https://example.atlassian.net/browse/ABC-123")
+
+        let planURL = AppPaths.planFile(for: worktree.id)
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        #expect(plan.contains("- Provider: Jira Cloud"))
+        #expect(plan.contains("- Ticket: ABC-123"))
+        #expect(plan.contains("Kommentar aus Jira."))
 
         try? FileManager.default.removeItem(at: planURL)
         try? FileManager.default.removeItem(at: URL(fileURLWithPath: worktree.path))

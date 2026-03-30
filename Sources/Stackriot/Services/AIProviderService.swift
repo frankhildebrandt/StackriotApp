@@ -1,7 +1,7 @@
 import Foundation
 
 struct AIProviderService {
-    typealias WorktreeNameGenerator = @Sendable (_ issue: GitHubIssueDetails, _ configuration: AIProviderConfiguration) async throws -> AIWorktreeNameSuggestion
+    typealias WorktreeNameGenerator = @Sendable (_ ticket: TicketDetails, _ configuration: AIProviderConfiguration) async throws -> AIWorktreeNameSuggestion
     typealias RunSummaryGenerator = @Sendable (_ title: String, _ commandLine: String, _ output: String, _ exitCode: Int?, _ configuration: AIProviderConfiguration) async throws -> AIRunSummary
 
     private let configurationProvider: @Sendable () -> AIProviderConfiguration
@@ -18,12 +18,12 @@ struct AIProviderService {
         self.runSummaryGenerator = runSummaryGenerator
     }
 
-    func suggestWorktreeName(for issue: GitHubIssueDetails) async throws -> AIWorktreeNameSuggestion {
+    func suggestWorktreeName(for ticket: TicketDetails) async throws -> AIWorktreeNameSuggestion {
         let configuration = configurationProvider()
         guard configuration.isConfigured else {
-            return fallbackWorktreeNameSuggestion(for: issue)
+            return fallbackWorktreeNameSuggestion(for: ticket)
         }
-        return try await worktreeNameGenerator(issue, configuration)
+        return try await worktreeNameGenerator(ticket, configuration)
     }
 
     func summarizeAgentRun(
@@ -47,8 +47,8 @@ struct AIProviderService {
         return try await Self.liveCommitMessageSummary(diff: diff, configuration: configuration)
     }
 
-    func fallbackWorktreeNameSuggestion(for issue: GitHubIssueDetails) -> AIWorktreeNameSuggestion {
-        Self.fallbackWorktreeNameSuggestion(for: issue)
+    func fallbackWorktreeNameSuggestion(for ticket: TicketDetails) -> AIWorktreeNameSuggestion {
+        Self.fallbackWorktreeNameSuggestion(for: ticket)
     }
 
     func fallbackRunSummary(
@@ -103,38 +103,39 @@ struct AIProviderService {
     }
 
     private static func liveWorktreeNameSuggestion(
-        issue: GitHubIssueDetails,
+        ticket: TicketDetails,
         configuration: AIProviderConfiguration
     ) async throws -> AIWorktreeNameSuggestion {
         let prompt = """
-        Analysiere die folgende Issue und antworte nur mit JSON.
+        Analysiere das folgende Ticket und antworte nur mit JSON.
 
         Regeln:
         - `kind` muss genau eines von `bug`, `feature`, `refactor`, `chore` sein.
-        - `ticketNumber` muss die Issue-Nummer sein oder `null`.
+        - `ticketIdentifier` muss der Ticket-Key bzw. die Nummer ohne fuehrendes `#` sein oder `null`.
         - `shortSummary` muss maximal 4 Woerter enthalten.
-        - `branchName` muss das Format `prefix/nummer-zusammenfassung` oder `prefix/zusammenfassung` haben.
+        - `branchName` muss das Format `prefix/ticket-zusammenfassung` oder `prefix/zusammenfassung` haben.
         - `branchName` muss nur Kleinbuchstaben, Zahlen, `-`, `_`, `.`, und `/` enthalten.
         - Umlaute und `ß` muessen ASCII-normalisiert werden.
 
         JSON-Schema:
         {
           "kind": "bug|feature|refactor|chore",
-          "ticketNumber": 123,
+          "ticketIdentifier": "abc-123",
           "shortSummary": "grosses fenster kaputt",
-          "branchName": "bug/123-grosses-fenster-kaputt"
+          "branchName": "bug/abc-123-grosses-fenster-kaputt"
         }
 
-        Issue:
-        #\(issue.number) \(issue.title)
+        Ticket:
+        \(ticket.reference.displayID) \(ticket.title)
+        Provider: \(ticket.reference.provider.displayName)
 
-        Labels: \(issue.labels.joined(separator: ", "))
+        Labels: \(ticket.labels.joined(separator: ", "))
 
         Body:
-        \(issue.body)
+        \(ticket.body)
 
         Kommentare:
-        \(issue.comments.map { "\($0.author): \($0.body)" }.joined(separator: "\n"))
+        \(ticket.comments.map { "\($0.author): \($0.body)" }.joined(separator: "\n"))
         """
 
         let response = try await generateText(
@@ -157,7 +158,7 @@ struct AIProviderService {
         }
         return AIWorktreeNameSuggestion(
             kind: kind,
-            ticketNumber: decoded.ticketNumber,
+            ticketIdentifier: decoded.ticketIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty,
             shortSummary: normalizedSummary,
             branchName: branchName
         )
@@ -347,8 +348,8 @@ struct AIProviderService {
         }
     }
 
-    static func fallbackWorktreeNameSuggestion(for issue: GitHubIssueDetails) -> AIWorktreeNameSuggestion {
-        let haystack = ([issue.title, issue.body] + issue.labels).joined(separator: " ").lowercased()
+    static func fallbackWorktreeNameSuggestion(for ticket: TicketDetails) -> AIWorktreeNameSuggestion {
+        let haystack = ([ticket.title, ticket.body] + ticket.labels).joined(separator: " ").lowercased()
         let kind: WorktreeIssueKind
         if haystack.contains(anyOf: ["bug", "fix", "broken", "error", "crash", "kaputt", "defekt"]) {
             kind = .bug
@@ -360,17 +361,21 @@ struct AIProviderService {
             kind = .feature
         }
 
-        let summary = slugSummary(from: issue.title)
+        let summary = slugSummary(from: ticket.title)
         let branchName: String
-        if issue.number > 0 {
-            branchName = "\(kind.branchPrefix)/\(issue.number)-\(summary)"
+        if let ticketIdentifier = ticket.reference.id
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty?
+            .lowercased()
+        {
+            branchName = "\(kind.branchPrefix)/\(ticketIdentifier)-\(summary)"
         } else {
             branchName = "\(kind.branchPrefix)/\(summary)"
         }
 
         return AIWorktreeNameSuggestion(
             kind: kind,
-            ticketNumber: issue.number > 0 ? issue.number : nil,
+            ticketIdentifier: ticket.reference.id.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty,
             shortSummary: summary.replacingOccurrences(of: "-", with: " "),
             branchName: WorktreeManager.normalizedWorktreeName(from: branchName)
         )
@@ -464,7 +469,7 @@ struct AIProviderService {
 
 private struct WorktreeSuggestionPayload: Decodable {
     let kind: String
-    let ticketNumber: Int?
+    let ticketIdentifier: String?
     let shortSummary: String
     let branchName: String
 }

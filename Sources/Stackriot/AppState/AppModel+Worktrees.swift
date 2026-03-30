@@ -54,12 +54,33 @@ extension AppModel {
     }
 
     func refreshTicketProviderStatus(for repository: ManagedRepository) async {
-        worktreeDraft.ticketProvider = .github
-        worktreeDraft.ticketProviderStatus = await services.gitHubCLIService.issueReadiness(for: repository)
-        if worktreeDraft.ticketProviderStatus?.isAvailable != true {
+        let githubStatus = await services.gitHubCLIService.readiness(for: repository)
+        let jiraStatus = await services.jiraCloudService.readiness(for: repository)
+        let statuses = [githubStatus, jiraStatus]
+        worktreeDraft.ticketProviderStatuses = statuses
+
+        let availableProviders = statuses.filter(\.isAvailable).map(\.provider)
+        if let currentProvider = worktreeDraft.ticketProvider, availableProviders.contains(currentProvider) {
+            // keep explicit selection
+        } else if availableProviders.count == 1 {
+            worktreeDraft.ticketProvider = availableProviders[0]
+        } else if let firstAvailable = availableProviders.first {
+            worktreeDraft.ticketProvider = firstAvailable
+        } else {
+            worktreeDraft.ticketProvider = statuses.first?.provider
+        }
+
+        if worktreeDraft.selectedTicketProviderStatus?.isAvailable != true {
             clearWorktreeTicketSelection()
             worktreeDraft.ticketSearchResults = []
         }
+    }
+
+    func setWorktreeTicketProvider(_ provider: TicketProviderKind?) {
+        guard worktreeDraft.ticketProvider != provider else { return }
+        worktreeDraft.ticketProvider = provider
+        clearWorktreeTicketSelection()
+        worktreeDraft.ticketSearchResults = []
     }
 
     func clearWorktreeTicketSelection() {
@@ -67,13 +88,16 @@ extension AppModel {
         worktreeDraft.selectedIssueDetails = nil
         worktreeDraft.hasConfirmedTicket = false
         worktreeDraft.isGeneratingSuggestedName = false
-        if worktreeDraft.ticketProviderStatus?.isAvailable == true {
+        if worktreeDraft.selectedTicketProviderStatus?.isAvailable == true {
             worktreeDraft.issueContext = ""
         }
     }
 
     func searchWorktreeTickets(for repository: ManagedRepository) async {
-        guard worktreeDraft.ticketProviderStatus?.isAvailable == true else {
+        guard
+            let provider = worktreeDraft.ticketProvider,
+            worktreeDraft.selectedTicketProviderStatus?.isAvailable == true
+        else {
             worktreeDraft.ticketSearchResults = []
             worktreeDraft.isTicketLoading = false
             return
@@ -89,7 +113,8 @@ extension AppModel {
         worktreeDraft.isTicketLoading = true
         clearWorktreeTicketSelection()
         do {
-            worktreeDraft.ticketSearchResults = try await services.gitHubCLIService.searchIssues(query: query, in: repository)
+            let service = services.ticketProviderService(for: provider)
+            worktreeDraft.ticketSearchResults = try await service.searchTickets(query: query, in: repository)
         } catch {
             worktreeDraft.ticketSearchResults = []
             pendingErrorMessage = error.localizedDescription
@@ -97,12 +122,14 @@ extension AppModel {
         worktreeDraft.isTicketLoading = false
     }
 
-    func confirmWorktreeTicket(_ issue: GitHubIssueSearchResult, for repository: ManagedRepository) async {
+    func confirmWorktreeTicket(_ ticket: TicketSearchResult, for repository: ManagedRepository) async {
         worktreeDraft.isTicketLoading = true
         do {
-            let details = try await services.gitHubCLIService.loadIssue(number: issue.number, in: repository)
-            worktreeDraft.selectedTicket = issue
+            let service = services.ticketProviderService(for: ticket.reference.provider)
+            let details = try await service.loadTicket(id: ticket.reference.id, in: repository)
+            worktreeDraft.selectedTicket = ticket
             worktreeDraft.selectedIssueDetails = details
+            worktreeDraft.ticketProvider = ticket.reference.provider
             worktreeDraft.hasConfirmedTicket = true
             worktreeDraft.issueContext = compactIssueContext(for: details)
             await populateSuggestedWorktreeName(from: details)
@@ -136,6 +163,7 @@ extension AppModel {
             let worktree = try persistCreatedWorktree(
                 from: info,
                 repository: repository,
+                ticketDetails: createFromConfirmedTicket ? worktreeDraft.selectedIssueDetails : nil,
                 issueContext: issueContext,
                 initialPlanText: initialPlanText,
                 in: modelContext
@@ -156,23 +184,23 @@ extension AppModel {
         return sourceBranch.isEmpty ? repository.defaultBranch : sourceBranch
     }
 
-    private func compactIssueContext(for issue: GitHubIssueDetails) -> String {
-        let title = issue.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func compactIssueContext(for ticket: TicketDetails) -> String {
+        let title = ticket.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if title.isEmpty {
-            return "#\(issue.number)"
+            return ticket.reference.displayID
         }
-        return "#\(issue.number) \(title)"
+        return "\(ticket.reference.displayID) \(title)"
     }
 
-    func populateSuggestedWorktreeName(from issue: GitHubIssueDetails) async {
+    func populateSuggestedWorktreeName(from ticket: TicketDetails) async {
         worktreeDraft.isGeneratingSuggestedName = true
         defer { worktreeDraft.isGeneratingSuggestedName = false }
 
         do {
-            let suggestion = try await services.aiProviderService.suggestWorktreeName(for: issue)
+            let suggestion = try await services.aiProviderService.suggestWorktreeName(for: ticket)
             worktreeDraft.branchName = suggestion.branchName
         } catch {
-            let fallback = services.aiProviderService.fallbackWorktreeNameSuggestion(for: issue)
+            let fallback = services.aiProviderService.fallbackWorktreeNameSuggestion(for: ticket)
             worktreeDraft.branchName = fallback.branchName
             pendingErrorMessage = "AI worktree suggestion failed: \(error.localizedDescription)"
         }
@@ -181,6 +209,7 @@ extension AppModel {
     private func persistCreatedWorktree(
         from info: CreatedWorktreeInfo,
         repository: ManagedRepository,
+        ticketDetails: TicketDetails?,
         issueContext: String?,
         initialPlanText: String?,
         in modelContext: ModelContext
@@ -188,6 +217,9 @@ extension AppModel {
         let worktree = WorktreeRecord(
             branchName: info.branchName,
             issueContext: issueContext,
+            ticketProvider: ticketDetails?.provider,
+            ticketIdentifier: ticketDetails?.reference.id,
+            ticketURL: ticketDetails?.url,
             path: info.path.path,
             repository: repository
         )

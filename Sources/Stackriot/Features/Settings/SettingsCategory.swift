@@ -5,6 +5,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     case terminal
     case node
     case aiProvider
+    case jira
     case sshKeys
     case about
 
@@ -22,6 +23,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
             "Node"
         case .aiProvider:
             "AI & Providers"
+        case .jira:
+            "Jira Cloud"
         case .sshKeys:
             "SSH Keys"
         case .about:
@@ -39,6 +42,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
             "cpu"
         case .aiProvider:
             "sparkles"
+        case .jira:
+            "link.badge.plus"
         case .sshKeys:
             "key"
         case .about:
@@ -56,6 +61,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
             "Managed runtime defaults, status, and maintenance actions."
         case .aiProvider:
             "Provider selection, authentication, and effective model settings."
+        case .jira:
+            "Cloud URL, Atlassian account, and API token used for ticket-backed worktrees."
         case .sshKeys:
             "Import, generate, and manage SSH keys used across remotes."
         case .about:

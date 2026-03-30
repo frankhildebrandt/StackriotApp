@@ -9,6 +9,9 @@ final class WorktreeRecord {
     var isPinnedRaw: Bool?
     var cardColorRaw: String?
     var issueContext: String?
+    var ticketProviderRaw: String?
+    var ticketIdentifier: String?
+    var ticketURL: String?
     var path: String
     @Transient var assignedAgentRawValue: String = AIAgentTool.none.rawValue
     var createdAt: Date
@@ -28,6 +31,9 @@ final class WorktreeRecord {
         isPinned: Bool = false,
         cardColor: WorktreeCardColor = .none,
         issueContext: String? = nil,
+        ticketProvider: TicketProviderKind? = nil,
+        ticketIdentifier: String? = nil,
+        ticketURL: String? = nil,
         path: String,
         assignedAgentRawValue: String = AIAgentTool.none.rawValue,
         createdAt: Date = .now,
@@ -44,6 +50,9 @@ final class WorktreeRecord {
         self.isPinnedRaw = isPinned ? true : nil
         self.cardColorRaw = cardColor == .none ? nil : cardColor.rawValue
         self.issueContext = issueContext
+        self.ticketProviderRaw = ticketProvider?.rawValue
+        self.ticketIdentifier = ticketIdentifier
+        self.ticketURL = ticketURL
         self.path = path
         self.assignedAgentRawValue = assignedAgentRawValue
         self.createdAt = createdAt
@@ -73,6 +82,11 @@ final class WorktreeRecord {
     var cardColor: WorktreeCardColor {
         get { WorktreeCardColor(rawValue: cardColorRaw ?? WorktreeCardColor.none.rawValue) ?? .none }
         set { cardColorRaw = newValue == .none ? nil : newValue.rawValue }
+    }
+
+    var ticketProvider: TicketProviderKind? {
+        get { ticketProviderRaw.flatMap(TicketProviderKind.init(rawValue:)) }
+        set { ticketProviderRaw = newValue?.rawValue }
     }
 
     var lifecycleState: WorktreeLifecycle {
