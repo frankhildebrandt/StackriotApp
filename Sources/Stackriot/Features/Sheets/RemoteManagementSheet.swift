@@ -87,7 +87,7 @@ struct RemoteManagementSheet: View {
                 Spacer()
 
                 if sshKeys.isEmpty {
-                    Text("SSH keys are managed in Settings.")
+                    Text("Manage SSH keys in Settings > SSH Keys.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

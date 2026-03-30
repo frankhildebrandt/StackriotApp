@@ -21,7 +21,6 @@
 		E0000000000000000000000A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000A /* AppModel.swift */; };
 		E0000000000000000000000B /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000B /* AppServices.swift */; };
 		E0000000000000000000000C /* Drafts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000C /* Drafts.swift */; };
-		E0000000000000000000000D /* AppChromeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000D /* AppChromeViews.swift */; };
 		E0000000000000000000000E /* Domain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000E /* Domain.swift */; };
 		E00000000000000000000048 /* GeneratedCommitMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000048 /* GeneratedCommitMessage.swift */; };
 		E0000000000000000000000F /* AgentActivityDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000F /* AgentActivityDot.swift */; };
@@ -87,6 +86,15 @@
 		E00000000000000000000052 /* ClaudePrintStreamJSONParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000052 /* ClaudePrintStreamJSONParser.swift */; };
 		E00000000000000000000053 /* CopilotPromptJSONLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000053 /* CopilotPromptJSONLParser.swift */; };
 		E00000000000000000000054 /* StructuredAgentOutputParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000054 /* StructuredAgentOutputParser.swift */; };
+		E00000000000000000000056 /* AboutSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000056 /* AboutSettingsView.swift */; };
+		E00000000000000000000057 /* AIProviderSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000057 /* AIProviderSettingsView.swift */; };
+		E00000000000000000000058 /* NodeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000058 /* NodeSettingsView.swift */; };
+		E00000000000000000000059 /* RepositoriesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000059 /* RepositoriesSettingsView.swift */; };
+		E0000000000000000000005A /* SettingsCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000005A /* SettingsCategory.swift */; };
+		E0000000000000000000005B /* SettingsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000005B /* SettingsRootView.swift */; };
+		E0000000000000000000005C /* SettingsScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000005C /* SettingsScaffold.swift */; };
+		E0000000000000000000005D /* SSHKeysSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000005D /* SSHKeysSettingsView.swift */; };
+		E0000000000000000000005E /* TerminalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000005E /* TerminalSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -104,7 +112,6 @@
 		D0000000000000000000000A /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		D0000000000000000000000B /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServices.swift; sourceTree = "<group>"; };
 		D0000000000000000000000C /* Drafts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Drafts.swift; sourceTree = "<group>"; };
-		D0000000000000000000000D /* AppChromeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppChromeViews.swift; sourceTree = "<group>"; };
 		D0000000000000000000000E /* Domain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain.swift; sourceTree = "<group>"; };
 		D00000000000000000000048 /* GeneratedCommitMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneratedCommitMessage.swift; sourceTree = "<group>"; };
 		D0000000000000000000000F /* AgentActivityDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivityDot.swift; sourceTree = "<group>"; };
@@ -170,6 +177,15 @@
 		D00000000000000000000052 /* ClaudePrintStreamJSONParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudePrintStreamJSONParser.swift; sourceTree = "<group>"; };
 		D00000000000000000000053 /* CopilotPromptJSONLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotPromptJSONLParser.swift; sourceTree = "<group>"; };
 		D00000000000000000000054 /* StructuredAgentOutputParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredAgentOutputParser.swift; sourceTree = "<group>"; };
+		D00000000000000000000056 /* AboutSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutSettingsView.swift; sourceTree = "<group>"; };
+		D00000000000000000000057 /* AIProviderSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderSettingsView.swift; sourceTree = "<group>"; };
+		D00000000000000000000058 /* NodeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeSettingsView.swift; sourceTree = "<group>"; };
+		D00000000000000000000059 /* RepositoriesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoriesSettingsView.swift; sourceTree = "<group>"; };
+		D0000000000000000000005A /* SettingsCategory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsCategory.swift; sourceTree = "<group>"; };
+		D0000000000000000000005B /* SettingsRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRootView.swift; sourceTree = "<group>"; };
+		D0000000000000000000005C /* SettingsScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScaffold.swift; sourceTree = "<group>"; };
+		D0000000000000000000005D /* SSHKeysSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeysSettingsView.swift; sourceTree = "<group>"; };
+		D0000000000000000000005E /* TerminalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -198,7 +214,6 @@
 			children = (
 				F00000000000000000000001 /* App */,
 				F00000000000000000000002 /* AppState */,
-				F00000000000000000000003 /* Chrome */,
 				F00000000000000000000004 /* Domain */,
 				F00000000000000000000005 /* Features */,
 				F00000000000000000000006 /* Model */,
@@ -245,14 +260,6 @@
 			path = AppState;
 			sourceTree = "<group>";
 		};
-		F00000000000000000000003 /* Chrome */ = {
-			isa = PBXGroup;
-			children = (
-				D0000000000000000000000D /* AppChromeViews.swift */,
-			);
-			path = Chrome;
-			sourceTree = "<group>";
-		};
 		F00000000000000000000004 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
@@ -271,6 +278,7 @@
 				F0000000000000000000000D /* Shared */,
 				F0000000000000000000000E /* Sheets */,
 				F0000000000000000000000F /* Sidebar */,
+				F00000000000000000000010 /* Settings */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -406,6 +414,22 @@
 			path = Sidebar;
 			sourceTree = "<group>";
 		};
+		F00000000000000000000010 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				D00000000000000000000056 /* AboutSettingsView.swift */,
+				D00000000000000000000057 /* AIProviderSettingsView.swift */,
+				D00000000000000000000058 /* NodeSettingsView.swift */,
+				D00000000000000000000059 /* RepositoriesSettingsView.swift */,
+				D0000000000000000000005A /* SettingsCategory.swift */,
+				D0000000000000000000005B /* SettingsRootView.swift */,
+				D0000000000000000000005C /* SettingsScaffold.swift */,
+				D0000000000000000000005D /* SSHKeysSettingsView.swift */,
+				D0000000000000000000005E /* TerminalSettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -497,8 +521,16 @@
 				E0000000000000000000000A /* AppModel.swift in Sources */,
 				E0000000000000000000000B /* AppServices.swift in Sources */,
 				E0000000000000000000000C /* Drafts.swift in Sources */,
-				E0000000000000000000000D /* AppChromeViews.swift in Sources */,
 				E0000000000000000000000E /* Domain.swift in Sources */,
+				E00000000000000000000056 /* AboutSettingsView.swift in Sources */,
+				E00000000000000000000057 /* AIProviderSettingsView.swift in Sources */,
+				E00000000000000000000058 /* NodeSettingsView.swift in Sources */,
+				E00000000000000000000059 /* RepositoriesSettingsView.swift in Sources */,
+				E0000000000000000000005A /* SettingsCategory.swift in Sources */,
+				E0000000000000000000005B /* SettingsRootView.swift in Sources */,
+				E0000000000000000000005C /* SettingsScaffold.swift in Sources */,
+				E0000000000000000000005D /* SSHKeysSettingsView.swift in Sources */,
+				E0000000000000000000005E /* TerminalSettingsView.swift in Sources */,
 				E00000000000000000000048 /* GeneratedCommitMessage.swift in Sources */,
 				E0000000000000000000000F /* AgentActivityDot.swift in Sources */,
 					E00000000000000000000010 /* DiffInspectorView.swift in Sources */,

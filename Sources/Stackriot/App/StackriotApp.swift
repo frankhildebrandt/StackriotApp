@@ -22,9 +22,10 @@ struct StackriotApp: App {
         }
 
         Settings {
-            SettingsView()
+            SettingsRootView()
                 .environment(appModel)
         }
+        .defaultSize(width: 1040, height: 680)
         .modelContainer(for: StackriotModelContainer.persistentModelTypes)
 
         Window("About Stackriot", id: "about") {
