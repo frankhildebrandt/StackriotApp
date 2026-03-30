@@ -221,6 +221,7 @@ private struct EmbeddedBrowserWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let webView = WKWebView(frame: .zero, configuration: EmbeddedBrowserSessionStore.configuration(for: provider))
+        EmbeddedBrowserSessionStore.applyPreferredUserAgent(to: webView)
         webView.navigationDelegate = context.coordinator
         context.coordinator.attach(webView)
         if let initialURL {

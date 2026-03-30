@@ -215,6 +215,18 @@ struct StackriotTests {
     }
 
     @Test
+    func embeddedBrowserUsesModernSafariUserAgentForSupportedSystems() {
+        let sonomaUserAgent = EmbeddedBrowserSessionStore.preferredSafariUserAgent(operatingSystemMajorVersion: 14)
+        #expect(sonomaUserAgent.contains("Version/17.6"))
+        #expect(sonomaUserAgent.contains("Safari/605.1.15"))
+        #expect(!sonomaUserAgent.contains("Stackriot"))
+
+        let sequoiaUserAgent = EmbeddedBrowserSessionStore.preferredSafariUserAgent(operatingSystemMajorVersion: 15)
+        #expect(sequoiaUserAgent.contains("Version/18.4"))
+        #expect(sequoiaUserAgent.contains("Safari/605.1.15"))
+    }
+
+    @Test
     func nodeVersionResolverSupportsMinimumComparatorRanges() {
         let resolver = NodeVersionSpecResolver()
         let resolved = resolver.resolveInstallableSpec(
