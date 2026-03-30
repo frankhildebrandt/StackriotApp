@@ -137,7 +137,7 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
         if normalizedType == "assistant.reasoning" || normalizedType == "assistant.reasoning_delta" {
             guard let text = extractReasoningText(from: payload) else { return nil }
             return reasoningChunk(
-                text: text,
+                text: text + normalizedType == "assistant.reasoning_delta" ? " " : "",
                 id: reasoningSegmentID(for: payload, object: object),
                 groupID: messageGroupID(for: payload, object: object),
                 renderedPrefix: normalizedType.contains("delta") ? "" : "[copilot] Thinking: "
