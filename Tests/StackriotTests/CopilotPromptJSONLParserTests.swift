@@ -8,12 +8,12 @@ struct CopilotPromptJSONLParserTests {
 
         let chunk = parser.consume("""
         {"type":"assistant.reasoning_delta","data":{"reasoningId":"reason-1","deltaContent":"Inspecting"},"id":"event-1","timestamp":"2026-03-30T02:10:41.000Z","ephemeral":true}
-        {"type":"assistant.reasoning","data":{"reasoningId":"reason-1","content":"Inspecting the repo"},"id":"event-2","timestamp":"2026-03-30T02:10:42.000Z"}
-        {"type":"assistant.message_delta","data":{"messageId":"msg-1","deltaContent":"hel"},"id":"event-3","timestamp":"2026-03-30T02:10:42.500Z","ephemeral":true}
-        {"type":"assistant.message","data":{"messageId":"msg-1","content":"hello","toolRequests":[],"interactionId":"it-1","phase":"final_answer","reasoningOpaque":"opaque"},"id":"event-4","timestamp":"2026-03-30T02:10:43.000Z"}
-        {"type":"tool.execution_start","data":{"toolCallId":"tool-1","toolName":"bash","arguments":{"command":"git status","description":"Inspect repo"}},"id":"event-5","timestamp":"2026-03-30T02:10:44.000Z"}
-        {"type":"tool.execution_partial_result","data":{"toolCallId":"tool-1","partialOutput":"On branch "},"id":"event-6","timestamp":"2026-03-30T02:10:44.500Z","ephemeral":true}
-        {"type":"tool.execution_complete","data":{"toolCallId":"tool-1","success":true,"result":{"content":"On branch main","detailedContent":"On branch main\\n<exited with exit code 0>"}},"id":"event-7","timestamp":"2026-03-30T02:10:45.000Z"}
+        {"type":"assistant.reasoning","data":{"reasoningId":"reason-1","content":"Inspecting the repo"},"id":"event-2","timestamp":"2026-03-30T02:10:42.000Z","parentId":"turn-parent-1"}
+        {"type":"assistant.message_delta","data":{"messageId":"msg-1","deltaContent":"hel"},"id":"event-3","timestamp":"2026-03-30T02:10:42.500Z","ephemeral":true,"parentId":"turn-parent-1"}
+        {"type":"assistant.message","data":{"messageId":"msg-1","content":"hello","toolRequests":[],"interactionId":"it-1","phase":"final_answer","reasoningOpaque":"opaque"},"id":"event-4","timestamp":"2026-03-30T02:10:43.000Z","parentId":"turn-parent-1"}
+        {"type":"tool.execution_start","data":{"toolCallId":"tool-1","toolName":"bash","arguments":{"command":"git status","description":"Inspect repo"},"intentionSummary":"Inspect repo"},"id":"event-5","timestamp":"2026-03-30T02:10:44.000Z","parentId":"turn-parent-1"}
+        {"type":"tool.execution_partial_result","data":{"toolCallId":"tool-1","partialOutput":"On branch "},"id":"event-6","timestamp":"2026-03-30T02:10:44.500Z","ephemeral":true,"parentId":"turn-parent-1"}
+        {"type":"tool.execution_complete","data":{"toolCallId":"tool-1","success":true,"result":{"content":"On branch main","detailedContent":"On branch main\\n<exited with exit code 0>"}},"id":"event-7","timestamp":"2026-03-30T02:10:45.000Z","parentId":"turn-parent-1"}
         {"type":"mystery.event","data":{"foo":"bar"},"id":"event-8","timestamp":"2026-03-30T02:10:46.000Z"}
         """ + "\n")
 
@@ -31,14 +31,17 @@ struct CopilotPromptJSONLParserTests {
         #expect(message?.kind == .agentMessage)
         #expect(message?.bodyText == "hello")
         #expect(message?.revision == 2)
-        #expect(message?.groupID == "it-1")
+        #expect(message?.groupID == "turn-parent-1")
+        #expect(message?.title == "Final answer")
 
         let tool = chunk.segments.first { $0.id == "tool-1" }
         #expect(tool?.kind == .commandExecution)
         #expect(tool?.title == "git status")
+        #expect(tool?.subtitle == "Inspect repo")
         #expect(tool?.status == .completed)
         #expect(tool?.aggregatedOutput == "On branch main\n<exited with exit code 0>")
         #expect(tool?.revision == 3)
+        #expect(tool?.groupID == "turn-parent-1")
 
         let fallback = chunk.segments.first { $0.kind == .fallbackText }
         #expect(fallback?.subtitle == "mystery.event")
@@ -67,11 +70,12 @@ struct CopilotPromptJSONLParserTests {
         let parser = CopilotPromptJSONLParser()
 
         let chunk = parser.consume("""
-        {"type":"assistant.turn_start","data":{"turnId":"22","interactionId":"it-22"},"id":"event-20","timestamp":"2026-03-30T06:40:17.441Z"}
-        {"type":"user.message","data":{"content":"# Cursor CLI Integration","transformedContent":"normalized content","interactionId":"it-22"},"id":"event-21","timestamp":"2026-03-30T06:40:17.500Z"}
-        {"type":"assistant.reasoning_delta","data":{"reasoningId":"reason-22","deltaContent":"Inspecting"},"id":"event-22","timestamp":"2026-03-30T06:40:17.600Z","ephemeral":true}
-        {"type":"assistant.message","data":{"messageId":"msg-22","content":"I am checking the parser","interactionId":"it-22"},"id":"event-23","timestamp":"2026-03-30T06:40:17.700Z"}
-        {"type":"assistant.turn_end","data":{"turnId":"22","interactionId":"it-22"},"id":"event-24","timestamp":"2026-03-30T06:40:17.800Z"}
+        {"type":"assistant.turn_start","data":{"turnId":"22","interactionId":"it-22"},"id":"event-20","timestamp":"2026-03-30T06:40:17.441Z","parentId":"parent-22"}
+        {"type":"user.message","data":{"content":"# Cursor CLI Integration","transformedContent":"normalized content","interactionId":"it-22"},"id":"event-21","timestamp":"2026-03-30T06:40:17.500Z","parentId":"parent-22"}
+        {"type":"tool.execution_start","data":{"toolCallId":"intent-22","toolName":"report_intent","arguments":{"intent":"Inspecting parser"}},"id":"event-21b","timestamp":"2026-03-30T06:40:17.550Z","parentId":"parent-22"}
+        {"type":"assistant.reasoning_delta","data":{"reasoningId":"reason-22","deltaContent":"Inspecting"},"id":"event-22","timestamp":"2026-03-30T06:40:17.600Z","ephemeral":true,"parentId":"parent-22"}
+        {"type":"assistant.message","data":{"messageId":"msg-22","content":"I am checking the parser","interactionId":"it-22"},"id":"event-23","timestamp":"2026-03-30T06:40:17.700Z","parentId":"parent-22"}
+        {"type":"assistant.turn_end","data":{"turnId":"22","interactionId":"it-22"},"id":"event-24","timestamp":"2026-03-30T06:40:17.800Z","parentId":"parent-22"}
         """ + "\n")
 
         #expect(chunk.renderedText.contains("[copilot] Turn 22 started"))
@@ -81,27 +85,76 @@ struct CopilotPromptJSONLParserTests {
 
         let turn = chunk.segments.first { $0.id == "turn-22" }
         #expect(turn?.kind == .toolCall)
-        #expect(turn?.title == "Turn 22")
+        #expect(turn?.title == "Inspecting parser")
         #expect(turn?.status == .completed)
         #expect(turn?.revision == 2)
-        #expect(turn?.groupID == "it-22")
+        #expect(turn?.groupID == "parent-22")
 
         let userMessage = chunk.segments.first { $0.id == "user-event-21" }
         #expect(userMessage?.kind == .toolCall)
         #expect(userMessage?.title == "User prompt")
         #expect(userMessage?.bodyText == "# Cursor CLI Integration")
         #expect(userMessage?.status == .completed)
-        #expect(userMessage?.groupID == "it-22")
+        #expect(userMessage?.groupID == "parent-22")
 
         let reasoning = chunk.segments.first { $0.id == "reason-22" }
         #expect(reasoning?.kind == .reasoning)
         #expect(reasoning?.bodyText == "Inspecting")
+        #expect(reasoning?.groupID == "parent-22")
 
         let message = chunk.segments.first { $0.id == "msg-22" }
         #expect(message?.kind == .agentMessage)
         #expect(message?.bodyText == "I am checking the parser")
+        #expect(message?.groupID == "parent-22")
+
+        let intent = chunk.segments.first { $0.id == "intent-22" }
+        #expect(intent?.kind == .toolCall)
+        #expect(intent?.title == "Inspecting parser")
+        #expect(intent?.subtitle == "report_intent")
+        #expect(intent?.bodyText == "Inspecting parser")
+        #expect(intent?.groupID == "parent-22")
 
         #expect(chunk.segments.contains { $0.kind == .fallbackText } == false)
+    }
+
+    @Test
+    func ignoresEphemeralSessionNoiseEvents() {
+        let parser = CopilotPromptJSONLParser()
+
+        let chunk = parser.consume("""
+        {"type":"session.mcp_server_status_changed","data":{"name":"github","status":"ready"},"id":"event-30","timestamp":"2026-03-30T06:40:18.000Z"}
+        {"type":"session.mcp_servers_loaded","data":{"count":2},"id":"event-31","timestamp":"2026-03-30T06:40:18.100Z"}
+        {"type":"session.tools_updated","data":{"count":9},"id":"event-32","timestamp":"2026-03-30T06:40:18.200Z"}
+        {"type":"session.background_tasks_changed","data":{"count":1},"id":"event-33","timestamp":"2026-03-30T06:40:18.300Z"}
+        """ + "\n")
+
+        #expect(chunk.renderedText.isEmpty)
+        #expect(chunk.segments.isEmpty)
+    }
+
+    @Test
+    func mergesDeltaWordsWithSpacesAndPreservesReasoningAfterEmptyDelta() {
+        let parser = CopilotPromptJSONLParser()
+
+        let chunk = parser.consume("""
+        {"type":"assistant.reasoning_delta","data":{"reasoningId":"reason-space","deltaContent":"I"},"id":"event-40","timestamp":"2026-03-30T06:40:19.000Z","parentId":"parent-space"}
+        {"type":"assistant.reasoning_delta","data":{"reasoningId":"reason-space","deltaContent":"found"},"id":"event-41","timestamp":"2026-03-30T06:40:19.100Z","parentId":"parent-space"}
+        {"type":"assistant.reasoning_delta","data":{"reasoningId":"reason-space","deltaContent":"the"},"id":"event-42","timestamp":"2026-03-30T06:40:19.200Z","parentId":"parent-space"}
+        {"type":"assistant.reasoning_delta","data":{"reasoningId":"reason-space","deltaContent":"issue"},"id":"event-43","timestamp":"2026-03-30T06:40:19.300Z","parentId":"parent-space"}
+        {"type":"assistant.reasoning_delta","data":{"reasoningId":"reason-space","deltaContent":""},"id":"event-44","timestamp":"2026-03-30T06:40:19.400Z","parentId":"parent-space"}
+        {"type":"assistant.message_delta","data":{"messageId":"msg-space","deltaContent":"I"},"id":"event-45","timestamp":"2026-03-30T06:40:19.500Z","parentId":"parent-space"}
+        {"type":"assistant.message_delta","data":{"messageId":"msg-space","deltaContent":"fixed"},"id":"event-46","timestamp":"2026-03-30T06:40:19.600Z","parentId":"parent-space"}
+        {"type":"assistant.message_delta","data":{"messageId":"msg-space","deltaContent":"the"},"id":"event-47","timestamp":"2026-03-30T06:40:19.700Z","parentId":"parent-space"}
+        {"type":"assistant.message_delta","data":{"messageId":"msg-space","deltaContent":"bug"},"id":"event-48","timestamp":"2026-03-30T06:40:19.800Z","parentId":"parent-space"}
+        """ + "\n")
+
+        let reasoning = chunk.segments.first { $0.id == "reason-space" }
+        #expect(reasoning?.bodyText == "I found the issue")
+        #expect(reasoning?.revision == 5)
+
+        let message = chunk.segments.first { $0.id == "msg-space" }
+        #expect(message?.bodyText == "I fixed the bug")
+        #expect(message?.revision == 4)
     }
 
     @Test

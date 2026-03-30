@@ -57,4 +57,49 @@ struct AgentRunFeedLayoutTests {
             Issue.record("Expected final row to remain a timeline segment")
         }
     }
+
+    @Test
+    func groupsCopilotTurnSegmentsIntoSingleTurnCard() {
+        let rows = AgentRunFeedLayout.rows(from: [
+            AgentRunSegment(
+                id: "turn-1",
+                sourceAgent: .githubCopilot,
+                kind: .toolCall,
+                title: "Exploring codebase",
+                subtitle: "it-1",
+                status: .running,
+                groupID: "parent-1"
+            ),
+            AgentRunSegment(
+                id: "user-1",
+                sourceAgent: .githubCopilot,
+                kind: .toolCall,
+                title: "User prompt",
+                bodyText: "Investigate the parser",
+                status: .completed,
+                groupID: "parent-1"
+            ),
+            AgentRunSegment(
+                id: "tool-1",
+                sourceAgent: .githubCopilot,
+                kind: .commandExecution,
+                title: "git status",
+                subtitle: "Inspect repo",
+                status: .completed,
+                groupID: "parent-1"
+            ),
+        ])
+
+        #expect(rows.count == 1)
+        if case .turnGroup(_, let sourceAgent, let title, let subtitle, let status, let summary, let segments) = rows[0] {
+            #expect(sourceAgent == .githubCopilot)
+            #expect(title == "Exploring codebase")
+            #expect(subtitle == "Inspect repo")
+            #expect(status == .running)
+            #expect(summary == "2 actions · User prompt + 1 more")
+            #expect(segments.map(\.id) == ["turn-1", "user-1", "tool-1"])
+        } else {
+            Issue.record("Expected Copilot rows with the same parent group to collapse into one turn card")
+        }
+    }
 }
