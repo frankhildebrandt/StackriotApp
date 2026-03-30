@@ -47,8 +47,8 @@ struct RunConsoleView: View {
                             isSummarizing: appModel.summarizingRunIDs.contains(run.id),
                             onClose: { appModel.dismissAISummary(for: run) }
                         )
-                    } else if run.outputInterpreter == .codexExecJSONL {
-                        CodexRunFeedView(run: run)
+                    } else if appModel.hasStructuredFeed(for: run) {
+                        AgentRunFeedView(run: run)
                             .padding(.bottom, 12)
                     } else {
                         TextEditor(text: .constant(run.outputText))

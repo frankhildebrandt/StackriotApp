@@ -149,12 +149,17 @@ struct StackriotTests {
         let prompt = "Fix failing tests"
 
         let claude = AIAgentTool.claudeCode.launchCommandWithPrompt(prompt, in: path)
-        #expect(claude.contains("claude -p --dangerously-skip-permissions"))
+        #expect(claude.contains("claude -p --dangerously-skip-permissions --output-format stream-json"))
         #expect(claude.contains(prompt.shellEscaped))
 
         let codex = AIAgentTool.codex.launchCommandWithPrompt(prompt, in: path)
-        #expect(codex.contains("codex exec --full-auto"))
+        #expect(codex.contains("codex exec --full-auto --json --color never"))
         #expect(codex.contains(prompt.shellEscaped))
+
+        let copilot = AIAgentTool.githubCopilot.launchCommandWithPrompt(prompt, in: path)
+        #expect(copilot.contains("copilot -p"))
+        #expect(copilot.contains("--allow-all-tools --output-format json"))
+        #expect(copilot.contains(prompt.shellEscaped))
     }
 
     @Test

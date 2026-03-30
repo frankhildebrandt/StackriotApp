@@ -160,26 +160,69 @@ extension AppModel {
             // If a prompt is provided, prefer the tool's dedicated non-interactive command when one
             // exists. Only fall back to PTY stdin injection for tools that lack an automation mode.
             let promptText = initialPrompt?.nonEmpty
-            if let promptText, tool == .codex {
-                let descriptor = CommandExecutionDescriptor(
-                    title: tool.displayName,
-                    actionKind: .aiAgent,
-                    showsAgentIndicator: true,
-                    executable: "codex",
-                    arguments: ["exec", "--full-auto", "--json", "--color", "never", promptText],
-                    displayCommandLine: "codex exec --full-auto --json --color never \(promptText.shellEscaped)",
-                    currentDirectoryURL: URL(fileURLWithPath: worktree.path),
-                    repositoryID: repository.id,
-                    worktreeID: worktree.id,
-                    runtimeRequirement: nil,
-                    stdinText: nil,
-                    environment: [:],
-                    usesTerminalSession: false,
-                    outputInterpreter: .codexExecJSONL
-                )
-                startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
-                refreshRunningAgentWorktrees()
-                return
+            if let promptText {
+                let descriptor: CommandExecutionDescriptor?
+                switch tool {
+                case .codex:
+                    descriptor = CommandExecutionDescriptor(
+                        title: tool.displayName,
+                        actionKind: .aiAgent,
+                        showsAgentIndicator: true,
+                        executable: "codex",
+                        arguments: ["exec", "--full-auto", "--json", "--color", "never", promptText],
+                        displayCommandLine: "codex exec --full-auto --json --color never \(promptText.shellEscaped)",
+                        currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                        repositoryID: repository.id,
+                        worktreeID: worktree.id,
+                        runtimeRequirement: nil,
+                        stdinText: nil,
+                        environment: [:],
+                        usesTerminalSession: false,
+                        outputInterpreter: .codexExecJSONL
+                    )
+                case .claudeCode:
+                    descriptor = CommandExecutionDescriptor(
+                        title: tool.displayName,
+                        actionKind: .aiAgent,
+                        showsAgentIndicator: true,
+                        executable: "claude",
+                        arguments: ["-p", "--dangerously-skip-permissions", "--output-format", "stream-json", promptText],
+                        displayCommandLine: "claude -p --dangerously-skip-permissions --output-format stream-json \(promptText.shellEscaped)",
+                        currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                        repositoryID: repository.id,
+                        worktreeID: worktree.id,
+                        runtimeRequirement: nil,
+                        stdinText: nil,
+                        environment: [:],
+                        usesTerminalSession: false,
+                        outputInterpreter: .claudePrintStreamJSON
+                    )
+                case .githubCopilot:
+                    descriptor = CommandExecutionDescriptor(
+                        title: tool.displayName,
+                        actionKind: .aiAgent,
+                        showsAgentIndicator: true,
+                        executable: "copilot",
+                        arguments: ["-p", promptText, "--allow-all-tools", "--output-format", "json"],
+                        displayCommandLine: "copilot -p \(promptText.shellEscaped) --allow-all-tools --output-format json",
+                        currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                        repositoryID: repository.id,
+                        worktreeID: worktree.id,
+                        runtimeRequirement: nil,
+                        stdinText: nil,
+                        environment: [:],
+                        usesTerminalSession: false,
+                        outputInterpreter: .copilotPromptJSONL
+                    )
+                default:
+                    descriptor = nil
+                }
+
+                if let descriptor {
+                    startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+                    refreshRunningAgentWorktrees()
+                    return
+                }
             }
 
             let shellCommand: String

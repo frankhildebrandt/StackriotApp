@@ -99,7 +99,7 @@ struct CodexExecJSONLParserTests {
         """ + "\n")
 
         #expect(chunk.segments.count == 2)
-        #expect(chunk.segments[0].kind == .mcpToolCall)
+        #expect(chunk.segments[0].kind == .toolCall)
         #expect(chunk.segments[0].status == .failed)
         #expect(chunk.segments[0].detailText?.contains("\"code\" : 500") == true)
         #expect(chunk.segments[1].kind == .fileChange)

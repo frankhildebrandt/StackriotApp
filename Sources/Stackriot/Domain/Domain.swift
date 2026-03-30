@@ -430,13 +430,13 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             ""
         case .claudeCode:
             // Claude Code uses print mode for automation. Permissions must be non-interactive.
-            "cd \(path.shellEscaped) && claude -p --dangerously-skip-permissions \(prompt.shellEscaped)"
+            "cd \(path.shellEscaped) && claude -p --dangerously-skip-permissions --output-format stream-json \(prompt.shellEscaped)"
         case .codex:
             // Codex CLI uses `exec` in automation contexts; `--full-auto` enables edits.
-            "cd \(path.shellEscaped) && codex exec --full-auto \(prompt.shellEscaped)"
+            "cd \(path.shellEscaped) && codex exec --full-auto --json --color never \(prompt.shellEscaped)"
         case .githubCopilot:
             // copilot -p executes the task and exits cleanly; --allow-all-tools enables agentic execution
-            "cd \(path.shellEscaped) && copilot -p \(prompt.shellEscaped) --allow-all-tools"
+            "cd \(path.shellEscaped) && copilot -p \(prompt.shellEscaped) --allow-all-tools --output-format json"
         case .cursorCLI:
             launchCommand(in: path)
         }
@@ -636,6 +636,8 @@ struct CommandExecutionDescriptor: Sendable {
 
 enum RunOutputInterpreterKind: String, Codable, Sendable {
     case codexExecJSONL
+    case claudePrintStreamJSON
+    case copilotPromptJSONL
 }
 
 struct RemoteExecutionContext: Sendable {

@@ -65,10 +65,10 @@ extension AppModel {
         run.outputText = "$ \(commandLine)\n"
         repository.runs.append(run)
         modelContext.insert(run)
-        if descriptor.outputInterpreter == .codexExecJSONL {
-            let parser = CodexExecJSONLParser()
-            codexExecOutputParsers[run.id] = parser
-            applyCodexParsedChunk(parser.consume(run.outputText), to: run.id)
+        if let interpreter = descriptor.outputInterpreter {
+            let parser = StructuredAgentOutputParserFactory.makeParser(for: interpreter)
+            structuredOutputParsersByRunID[run.id] = parser
+            applyStructuredParsedChunk(parser.consume(run.outputText), to: run.id)
         }
 
         do {
@@ -99,9 +99,9 @@ extension AppModel {
 
     func handleRunOutput(runID: UUID, chunk: String) {
         guard let run = runRecord(with: runID) else { return }
-        if let parser = codexExecOutputParsers[runID] {
+        if let parser = structuredOutputParsersByRunID[runID] {
             run.outputText += chunk
-            applyCodexParsedChunk(parser.consume(chunk), to: runID)
+            applyStructuredParsedChunk(parser.consume(chunk), to: runID)
         } else {
             run.outputText += chunk
         }
@@ -127,7 +127,7 @@ extension AppModel {
         activeRunIDs.remove(runID)
         delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
-        codexExecOutputParsers.removeValue(forKey: runID)
+        structuredOutputParsersByRunID.removeValue(forKey: runID)
         terminalTabs.markCompleted(runID: runID)
         scheduleAutoHideIfNeeded(for: runID)
         refreshRunningAgentWorktrees()
@@ -148,9 +148,9 @@ extension AppModel {
     func handleRunFailure(runID: UUID, message: String) {
         guard let run = runRecord(with: runID), let modelContext = storedModelContext else { return }
         let renderedMessage = "\n\(message)\n"
-        if let parser = codexExecOutputParsers[runID] {
+        if let parser = structuredOutputParsersByRunID[runID] {
             run.outputText += renderedMessage
-            applyCodexParsedChunk(parser.consume(renderedMessage), to: runID)
+            applyStructuredParsedChunk(parser.consume(renderedMessage), to: runID)
         } else {
             run.outputText += renderedMessage
         }
@@ -160,7 +160,7 @@ extension AppModel {
         activeRunIDs.remove(runID)
         delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
-        codexExecOutputParsers.removeValue(forKey: runID)
+        structuredOutputParsersByRunID.removeValue(forKey: runID)
         terminalTabs.markCompleted(runID: runID)
         scheduleAutoHideIfNeeded(for: runID)
         refreshRunningAgentWorktrees()
@@ -331,33 +331,37 @@ extension AppModel {
     }
 
     private func flushBufferedRunOutputIfNeeded(runID: UUID) {
-        guard let parser = codexExecOutputParsers[runID] else { return }
-        applyCodexParsedChunk(parser.finish(), to: runID)
+        guard let parser = structuredOutputParsersByRunID[runID] else { return }
+        applyStructuredParsedChunk(parser.finish(), to: runID)
     }
 
-    func codexSegments(for run: RunRecord) -> [CodexRunSegment] {
-        codexRunSegmentsByRunID[run.id] ?? []
+    func structuredSegments(for run: RunRecord) -> [AgentRunSegment] {
+        agentRunSegmentsByRunID[run.id] ?? []
     }
 
-    func ensureCodexSegmentsLoaded(for run: RunRecord) {
-        guard run.outputInterpreter == .codexExecJSONL else { return }
-        guard codexRunSegmentsByRunID[run.id] == nil else { return }
-
-        let parser = CodexExecJSONLParser()
-        var segments: [CodexRunSegment] = []
-        mergeCodexSegments(parser.consume(run.outputText).segments, into: &segments)
-        mergeCodexSegments(parser.finish().segments, into: &segments)
-        codexRunSegmentsByRunID[run.id] = segments
+    func hasStructuredFeed(for run: RunRecord) -> Bool {
+        run.outputInterpreter != nil
     }
 
-    private func applyCodexParsedChunk(_ parsedChunk: CodexExecParsedChunk, to runID: UUID) {
+    func ensureStructuredSegmentsLoaded(for run: RunRecord) {
+        guard let interpreter = run.outputInterpreter else { return }
+        guard agentRunSegmentsByRunID[run.id] == nil else { return }
+
+        let parser = StructuredAgentOutputParserFactory.makeParser(for: interpreter)
+        var segments: [AgentRunSegment] = []
+        mergeStructuredSegments(parser.consume(run.outputText).segments, into: &segments)
+        mergeStructuredSegments(parser.finish().segments, into: &segments)
+        agentRunSegmentsByRunID[run.id] = segments
+    }
+
+    private func applyStructuredParsedChunk(_ parsedChunk: StructuredAgentOutputChunk, to runID: UUID) {
         guard !parsedChunk.segments.isEmpty else { return }
-        var segments = codexRunSegmentsByRunID[runID] ?? []
-        mergeCodexSegments(parsedChunk.segments, into: &segments)
-        codexRunSegmentsByRunID[runID] = segments
+        var segments = agentRunSegmentsByRunID[runID] ?? []
+        mergeStructuredSegments(parsedChunk.segments, into: &segments)
+        agentRunSegmentsByRunID[runID] = segments
     }
 
-    private func mergeCodexSegments(_ newSegments: [CodexRunSegment], into existingSegments: inout [CodexRunSegment]) {
+    private func mergeStructuredSegments(_ newSegments: [AgentRunSegment], into existingSegments: inout [AgentRunSegment]) {
         for segment in newSegments {
             if let index = existingSegments.firstIndex(where: { $0.id == segment.id }) {
                 existingSegments[index] = segment
