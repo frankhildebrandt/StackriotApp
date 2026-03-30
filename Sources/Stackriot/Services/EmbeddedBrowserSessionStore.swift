@@ -7,9 +7,21 @@ enum EmbeddedBrowserSessionStore {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-        configuration.applicationNameForUserAgent = "Stackriot"
         _ = provider
         return configuration
+    }
+
+    static func applyPreferredUserAgent(to webView: WKWebView) {
+        webView.customUserAgent = preferredSafariUserAgent()
+    }
+
+    nonisolated static func preferredSafariUserAgent(operatingSystemMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion) -> String {
+        let safariVersion: String = if operatingSystemMajorVersion >= 15 {
+            "18.4"
+        } else {
+            "17.6"
+        }
+        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(safariVersion) Safari/605.1.15"
     }
 
     static func loginURL(for provider: TicketProviderKind) -> URL {
