@@ -138,8 +138,22 @@ extension AppModel {
             pendingErrorMessage = "Published \(branch) to \(remote.name)."
             dismissPublishSheet()
             _ = modelContext
+            notifyOperationSuccess(
+                title: "Branch published",
+                subtitle: repository.displayName,
+                body: "\(branch) was pushed to \(remote.name).",
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": worktree.id.uuidString,
+                ]
+            )
         } catch {
             pendingErrorMessage = error.localizedDescription
+            notifyOperationFailure(
+                title: "Branch publish failed",
+                subtitle: publishDraft.remoteName.nonEmpty,
+                body: error.localizedDescription
+            )
         }
     }
 }

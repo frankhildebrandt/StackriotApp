@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Testing
+import UserNotifications
 @testable import Stackriot
 
 struct StackriotTests {
@@ -1755,6 +1756,124 @@ struct StackriotTests {
     }
 
     @Test
+    func appNotificationServiceRequestsAuthorizationBeforeDelivery() async {
+        let center = TestUserNotificationCenter(
+            authorizationStatus: .notDetermined,
+            authorizationGrantResult: true
+        )
+        let service = AppNotificationService(center: center)
+
+        let result = await service.deliver(
+            AppNotificationRequest(
+                identifier: "run-finished",
+                title: "Codex",
+                subtitle: "AI Agent",
+                body: "Completed successfully.",
+                kind: .success
+            )
+        )
+
+        #expect(result == .delivered)
+        #expect(await center.requestAuthorizationCallCount == 1)
+        let requests = await center.deliveredRequestSnapshots()
+        #expect(requests.count == 1)
+        #expect(requests[0].title == "Codex")
+        #expect(requests[0].subtitle == "AI Agent")
+        #expect(requests[0].body == "Completed successfully.")
+    }
+
+    @Test
+    func appNotificationServiceSkipsDeliveryWhenPermissionIsDenied() async {
+        let center = TestUserNotificationCenter(authorizationStatus: .denied)
+        let service = AppNotificationService(center: center)
+
+        let result = await service.deliver(
+            AppNotificationRequest(
+                identifier: "run-failed",
+                title: "Build",
+                subtitle: "Run Configuration",
+                body: "Failed with exit code 65.",
+                kind: .failure
+            )
+        )
+
+        #expect(result == .skipped(.denied))
+        #expect(await center.requestAuthorizationCallCount == 0)
+        #expect(await center.deliveredRequestSnapshots().isEmpty)
+    }
+
+    @MainActor
+    @Test
+    func completedRunsTriggerDesktopNotifications() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let recorder = RecordingNotificationService()
+        let appModel = AppModel(services: AppServices(notificationService: recorder))
+        appModel.storedModelContext = modelContext
+
+        let repository = makeRepository(name: "Notifications")
+        let worktree = WorktreeRecord(branchName: "feature/desktop-alerts", path: "/tmp/desktop-alerts", repository: repository)
+        let run = RunRecord(
+            actionKind: .makeTarget,
+            title: "make test",
+            commandLine: "make test",
+            outputText: "$ make test\nok\n",
+            status: .running,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        repository.worktrees = [worktree]
+        repository.runs = [run]
+        modelContext.insert(repository)
+        modelContext.insert(worktree)
+        modelContext.insert(run)
+        try modelContext.save()
+
+        appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
+        try? await Task.sleep(for: .milliseconds(50))
+
+        let notifications = await recorder.deliveredRequests
+        #expect(notifications.count == 1)
+        #expect(notifications[0].title == "make test")
+        #expect(notifications[0].subtitle == "Make Target")
+        #expect(notifications[0].body.contains("Notifications / feature/desktop-alerts"))
+        #expect(notifications[0].kind == .success)
+    }
+
+    @MainActor
+    @Test
+    func cancelledRunsDoNotTriggerDesktopNotifications() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let recorder = RecordingNotificationService()
+        let appModel = AppModel(services: AppServices(notificationService: recorder))
+        appModel.storedModelContext = modelContext
+
+        let repository = makeRepository(name: "CancelledNotifications")
+        let worktree = WorktreeRecord(branchName: "feature/cancelled", path: "/tmp/cancelled", repository: repository)
+        let run = RunRecord(
+            actionKind: .npmScript,
+            title: "npm test",
+            commandLine: "npm test",
+            outputText: "$ npm test\n",
+            status: .running,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        repository.worktrees = [worktree]
+        repository.runs = [run]
+        modelContext.insert(repository)
+        modelContext.insert(worktree)
+        modelContext.insert(run)
+        try modelContext.save()
+
+        appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: true)
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(await recorder.deliveredRequests.isEmpty)
+    }
+
+    @Test
     func fixWithAIPromptIncludesErrorContext() {
         let run = RunRecord(
             actionKind: .runConfiguration,
@@ -3268,5 +3387,86 @@ struct StackriotTests {
             namespace: namespace,
             project: project
         )
+    }
+}
+
+private struct DeliveredNotificationSnapshot: Sendable, Equatable {
+    let identifier: String
+    let title: String
+    let subtitle: String
+    let body: String
+}
+
+private final class TestUserNotificationCenter: UserNotificationCentering, @unchecked Sendable {
+    private let lock = NSLock()
+    private var currentAuthorizationStatus: UNAuthorizationStatus
+    private var requestAuthorizationCallCountValue = 0
+    private var deliveredRequests: [DeliveredNotificationSnapshot] = []
+    private let authorizationGrantResult: Bool
+
+    init(
+        authorizationStatus: UNAuthorizationStatus,
+        authorizationGrantResult: Bool = false
+    ) {
+        currentAuthorizationStatus = authorizationStatus
+        self.authorizationGrantResult = authorizationGrantResult
+    }
+
+    func authorizationStatus() async -> UNAuthorizationStatus {
+        lock.withLock { currentAuthorizationStatus }
+    }
+
+    func requestAuthorization(options _: UNAuthorizationOptions) async throws -> Bool {
+        lock.withLock {
+            requestAuthorizationCallCountValue += 1
+            currentAuthorizationStatus = authorizationGrantResult ? .authorized : .denied
+        }
+        return authorizationGrantResult
+    }
+
+    func add(_ request: UNNotificationRequest) async throws {
+        lock.withLock {
+            deliveredRequests.append(
+                DeliveredNotificationSnapshot(
+                    identifier: request.identifier,
+                    title: request.content.title,
+                    subtitle: request.content.subtitle,
+                    body: request.content.body
+                )
+            )
+        }
+    }
+
+    var requestAuthorizationCallCount: Int {
+        get async { lock.withLock { requestAuthorizationCallCountValue } }
+    }
+
+    func deliveredRequestSnapshots() async -> [DeliveredNotificationSnapshot] {
+        lock.withLock { deliveredRequests }
+    }
+}
+
+private actor RecordingNotificationService: AppNotificationServing {
+    private(set) var deliveredRequests: [AppNotificationRequest] = []
+    private(set) var prepareCallCount = 0
+
+    @discardableResult
+    func prepareAuthorization() async -> AppNotificationAuthorizationState {
+        prepareCallCount += 1
+        return .authorized
+    }
+
+    @discardableResult
+    func deliver(_ request: AppNotificationRequest) async -> AppNotificationDeliveryResult {
+        deliveredRequests.append(request)
+        return .delivered
+    }
+}
+
+private extension NSLock {
+    func withLock<T>(_ work: () -> T) -> T {
+        lock()
+        defer { unlock() }
+        return work()
     }
 }

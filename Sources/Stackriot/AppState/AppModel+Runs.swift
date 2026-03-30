@@ -230,6 +230,7 @@ extension AppModel {
         run.exitCode = Int(exitCode)
         let finalStatus: RunStatusKind = wasCancelled ? .cancelled : (exitCode == 0 ? .succeeded : .failed)
         run.status = finalStatus
+        notifyRunCompletionIfNeeded(run)
         finalizeRawLogIfNeeded(runID: runID, endedAt: endedAt, status: finalStatus)
         activeRunIDs.remove(runID)
         delegatedAgentRunIDs.remove(runID)
@@ -283,6 +284,7 @@ extension AppModel {
         let endedAt = Date.now
         run.endedAt = endedAt
         run.status = .failed
+        notifyRunCompletionIfNeeded(run, failureMessage: message)
         finalizeRawLogIfNeeded(runID: runID, endedAt: endedAt, status: .failed)
         activeRunIDs.remove(runID)
         delegatedAgentRunIDs.remove(runID)

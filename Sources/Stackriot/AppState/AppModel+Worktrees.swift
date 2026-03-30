@@ -170,8 +170,23 @@ extension AppModel {
             )
             finishCreatedWorktree(worktree, in: repository)
             await refreshWorktreeStatuses(for: repository)
+            notifyOperationSuccess(
+                title: "Worktree created",
+                subtitle: repository.displayName,
+                body: "\(worktree.branchName) is ready.",
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": worktree.id.uuidString,
+                ]
+            )
         } catch {
             pendingErrorMessage = error.localizedDescription
+            notifyOperationFailure(
+                title: "Worktree creation failed",
+                subtitle: repository.displayName,
+                body: error.localizedDescription,
+                userInfo: ["repositoryID": repository.id.uuidString]
+            )
         }
     }
 
@@ -278,8 +293,26 @@ extension AppModel {
             repository.updatedAt = .now
             save(modelContext)
             await refreshWorktreeStatuses(for: repository)
+            notifyOperationSuccess(
+                title: "Worktree moved",
+                subtitle: repository.displayName,
+                body: "\(worktree.branchName) moved to \(destination.lastPathComponent).",
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": worktree.id.uuidString,
+                ]
+            )
         } catch {
             pendingErrorMessage = error.localizedDescription
+            notifyOperationFailure(
+                title: "Worktree move failed",
+                subtitle: repository.displayName,
+                body: error.localizedDescription,
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": worktree.id.uuidString,
+                ]
+            )
         }
     }
 
@@ -367,8 +400,23 @@ extension AppModel {
                 worktreePendingMergeOfferID = nil
             }
             await refreshWorktreeStatuses(for: repository)
+            notifyOperationSuccess(
+                title: "Worktree removed",
+                subtitle: repository.displayName,
+                body: "\(worktree.branchName) was removed.",
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": worktreeID.uuidString,
+                ]
+            )
         } catch {
             pendingErrorMessage = error.localizedDescription
+            notifyOperationFailure(
+                title: "Worktree removal failed",
+                subtitle: worktree.repository?.displayName,
+                body: error.localizedDescription,
+                userInfo: ["worktreeID": worktree.id.uuidString]
+            )
         }
     }
 
@@ -413,6 +461,15 @@ extension AppModel {
         let outcome = await performLocalMerge(sourceWorktree, repository: repository, modelContext: modelContext)
         if case .committed = outcome {
             pendingErrorMessage = "Integrated \(sourceWorktree.branchName) into \(repository.defaultBranch)."
+            notifyOperationSuccess(
+                title: "Integration finished",
+                subtitle: repository.displayName,
+                body: "\(sourceWorktree.branchName) was merged into \(repository.defaultBranch).",
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": sourceWorktree.id.uuidString,
+                ]
+            )
         }
         await refreshWorktreeStatuses(for: repository)
     }
@@ -436,6 +493,15 @@ extension AppModel {
                 pendingErrorMessage = "Integrated \(worktree.branchName) into \(repository.defaultBranch)."
                 worktree.lifecycleState = .merged
                 save(modelContext)
+                notifyOperationSuccess(
+                    title: "Integration finished",
+                    subtitle: repository.displayName,
+                    body: "\(worktree.branchName) was merged into \(repository.defaultBranch).",
+                    userInfo: [
+                        "repositoryID": repository.id.uuidString,
+                        "worktreeID": worktree.id.uuidString,
+                    ]
+                )
                 if deleteAfterIntegration {
                     await removeWorktree(worktree, in: modelContext)
                 }
@@ -466,8 +532,26 @@ extension AppModel {
                 )
                 save(modelContext)
                 startPRMonitoring(for: worktree, repository: repository, in: modelContext)
+                notifyOperationSuccess(
+                    title: "Pull request created",
+                    subtitle: repository.displayName,
+                    body: "#\(prInfo.number) is ready for \(worktree.branchName).",
+                    userInfo: [
+                        "repositoryID": repository.id.uuidString,
+                        "worktreeID": worktree.id.uuidString,
+                    ]
+                )
             } catch {
                 pendingErrorMessage = error.localizedDescription
+                notifyOperationFailure(
+                    title: "Pull request creation failed",
+                    subtitle: repository.displayName,
+                    body: error.localizedDescription,
+                    userInfo: [
+                        "repositoryID": repository.id.uuidString,
+                        "worktreeID": worktree.id.uuidString,
+                    ]
+                )
             }
         }
     }
@@ -557,6 +641,15 @@ extension AppModel {
                 if pr.status == .merged {
                     worktree.lifecycleState = .merged
                     save(modelContext)
+                    notifyOperationSuccess(
+                        title: "Pull request merged",
+                        subtitle: repository.displayName,
+                        body: "\(worktree.branchName) was merged upstream.",
+                        userInfo: [
+                            "repositoryID": repository.id.uuidString,
+                            "worktreeID": worktree.id.uuidString,
+                        ]
+                    )
                     if worktree.shouldDeleteOnMerge {
                         await removeWorktree(worktree, in: modelContext)
                     }
