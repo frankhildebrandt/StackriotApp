@@ -11,6 +11,7 @@ final class RunRecord {
     var endedAt: Date?
     var exitCode: Int?
     var outputText: String
+    var outputInterpreterRawValue: String?
     var aiSummaryTitle: String?
     var aiSummaryText: String?
     var statusRawValue: String
@@ -27,6 +28,7 @@ final class RunRecord {
         endedAt: Date? = nil,
         exitCode: Int? = nil,
         outputText: String = "",
+        outputInterpreter: RunOutputInterpreterKind? = nil,
         aiSummaryTitle: String? = nil,
         aiSummaryText: String? = nil,
         status: RunStatusKind = .pending,
@@ -42,6 +44,7 @@ final class RunRecord {
         self.endedAt = endedAt
         self.exitCode = exitCode
         self.outputText = outputText
+        self.outputInterpreterRawValue = outputInterpreter?.rawValue
         self.aiSummaryTitle = aiSummaryTitle
         self.aiSummaryText = aiSummaryText
         self.statusRawValue = status.rawValue
@@ -58,5 +61,10 @@ final class RunRecord {
     var status: RunStatusKind {
         get { RunStatusKind(rawValue: statusRawValue) ?? .failed }
         set { statusRawValue = newValue.rawValue }
+    }
+
+    var outputInterpreter: RunOutputInterpreterKind? {
+        get { outputInterpreterRawValue.flatMap(RunOutputInterpreterKind.init(rawValue:)) }
+        set { outputInterpreterRawValue = newValue?.rawValue }
     }
 }
