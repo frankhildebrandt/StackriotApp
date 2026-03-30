@@ -122,12 +122,14 @@ extension AppModel {
             var updated = devContainerState(for: worktree)
             updated.activeOperation = nil
             devContainerStatesByWorktreeID[worktreeID] = updated
+            notifyDevContainerOperationCompletion(operation, worktree: worktree, snapshot: snapshot)
         } catch {
             var failed = devContainerState(for: worktree)
             failed.activeOperation = nil
             failed.detailsErrorMessage = error.localizedDescription
             devContainerStatesByWorktreeID[worktreeID] = failed
             pendingErrorMessage = error.localizedDescription
+            notifyDevContainerOperationFailure(operation, worktree: worktree, message: error.localizedDescription)
         }
     }
 

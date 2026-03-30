@@ -113,6 +113,7 @@ final class AppModel: @unchecked Sendable {
     func configure(modelContext: ModelContext) {
         if storedModelContext == nil {
             storedModelContext = modelContext
+            prepareNotificationsIfNeeded()
             migrateLegacyRepositoriesIfNeeded(in: modelContext)
             migrateWorktreePrimaryContextsIfNeeded(in: modelContext)
             startAutoRefreshLoopIfNeeded()
@@ -347,5 +348,165 @@ final class AppModel: @unchecked Sendable {
 
     func defaultBranchWorkspace(for repository: ManagedRepository) -> WorktreeRecord? {
         worktrees(for: repository).first(where: \.isDefaultBranchWorkspace)
+    }
+}
+
+extension AppModel {
+    func prepareNotificationsIfNeeded() {
+        let notificationService = services.notificationService
+        Task {
+            _ = await notificationService.prepareAuthorization()
+        }
+    }
+
+    func notifyRunCompletionIfNeeded(_ run: RunRecord, failureMessage: String? = nil) {
+        guard run.status != .cancelled else { return }
+
+        let context = runNotificationContext(for: run)
+        let body: String
+        let kind: AppNotificationKind
+
+        switch run.status {
+        case .succeeded:
+            kind = .success
+            body = context.map { "Completed successfully in \($0)." } ?? "Completed successfully."
+        case .failed:
+            kind = .failure
+            if let failureMessage = failureMessage?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty {
+                body = context.map { "Failed in \($0): \(failureMessage)" } ?? "Failed: \(failureMessage)"
+            } else if let exitCode = run.exitCode {
+                body = context.map { "Failed in \($0) with exit code \(exitCode)." } ?? "Failed with exit code \(exitCode)."
+            } else {
+                body = context.map { "Failed in \($0)." } ?? "Failed."
+            }
+        case .pending, .running, .cancelled:
+            return
+        }
+
+        deliverNotification(
+            AppNotificationRequest(
+                identifier: "run-\(run.id.uuidString)-\(run.status.rawValue)",
+                title: run.title,
+                subtitle: run.actionKind.notificationSubtitle,
+                body: body,
+                userInfo: [
+                    "runID": run.id.uuidString,
+                    "status": run.status.rawValue,
+                ],
+                kind: kind
+            )
+        )
+    }
+
+    func notifyDevContainerOperationCompletion(
+        _ operation: DevContainerOperation,
+        worktree: WorktreeRecord,
+        snapshot: DevContainerWorkspaceSnapshot
+    ) {
+        let runtimeText = snapshot.runtimeStatus.displayName.lowercased()
+        let repositoryName = worktree.repository?.displayName ?? worktree.branchName
+        deliverNotification(
+            AppNotificationRequest(
+                identifier: "devcontainer-\(worktree.id.uuidString)-\(operation.rawValue)-success",
+                title: "Dev Container \(operation.title) finished",
+                subtitle: repositoryName,
+                body: "\(worktree.branchName) is now \(runtimeText).",
+                userInfo: [
+                    "worktreeID": worktree.id.uuidString,
+                    "operation": operation.rawValue,
+                ],
+                kind: .success
+            )
+        )
+    }
+
+    func notifyDevContainerOperationFailure(
+        _ operation: DevContainerOperation,
+        worktree: WorktreeRecord,
+        message: String
+    ) {
+        deliverNotification(
+            AppNotificationRequest(
+                identifier: "devcontainer-\(worktree.id.uuidString)-\(operation.rawValue)-failure",
+                title: "Dev Container \(operation.title) failed",
+                subtitle: worktree.repository?.displayName,
+                body: "\(worktree.branchName): \(message)",
+                userInfo: [
+                    "worktreeID": worktree.id.uuidString,
+                    "operation": operation.rawValue,
+                ],
+                kind: .failure
+            )
+        )
+    }
+
+    func notifyOperationSuccess(
+        title: String,
+        subtitle: String? = nil,
+        body: String,
+        userInfo: [String: String] = [:]
+    ) {
+        deliverNotification(
+            AppNotificationRequest(
+                title: title,
+                subtitle: subtitle,
+                body: body,
+                userInfo: userInfo,
+                kind: .success
+            )
+        )
+    }
+
+    func notifyOperationFailure(
+        title: String,
+        subtitle: String? = nil,
+        body: String,
+        userInfo: [String: String] = [:]
+    ) {
+        deliverNotification(
+            AppNotificationRequest(
+                title: title,
+                subtitle: subtitle,
+                body: body,
+                userInfo: userInfo,
+                kind: .failure
+            )
+        )
+    }
+
+    private func deliverNotification(_ request: AppNotificationRequest) {
+        let notificationService = services.notificationService
+        Task {
+            _ = await notificationService.deliver(request)
+        }
+    }
+
+    private func runNotificationContext(for run: RunRecord) -> String? {
+        let parts = [
+            run.repository?.displayName,
+            run.worktree?.branchName,
+        ].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " / ")
+    }
+}
+
+private extension ActionKind {
+    var notificationSubtitle: String {
+        switch self {
+        case .openIDE:
+            "Open IDE"
+        case .makeTarget:
+            "Make Target"
+        case .npmScript:
+            "npm Script"
+        case .installDependencies:
+            "Dependency Install"
+        case .aiAgent:
+            "AI Agent"
+        case .gitOperation:
+            "Git Operation"
+        case .runConfiguration:
+            "Run Configuration"
+        }
     }
 }

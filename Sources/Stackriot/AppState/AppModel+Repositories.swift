@@ -109,8 +109,19 @@ extension AppModel {
             selectedRepositoryID = repository.id
             isCloneSheetPresented = false
             await refresh(repository, in: modelContext)
+            notifyOperationSuccess(
+                title: "Repository cloned",
+                subtitle: repository.displayName,
+                body: "Finished cloning \(rawRemote).",
+                userInfo: ["repositoryID": repository.id.uuidString]
+            )
         } catch {
             pendingErrorMessage = error.localizedDescription
+            notifyOperationFailure(
+                title: "Repository clone failed",
+                subtitle: cloneDraft.displayName.nonEmpty,
+                body: error.localizedDescription
+            )
         }
     }
 
@@ -233,8 +244,20 @@ extension AppModel {
             }
             selectedWorktreeIDsByRepository.removeValue(forKey: repository.id)
             clearRepositoryDeletionRequest()
+            notifyOperationSuccess(
+                title: "Repository deleted",
+                subtitle: repository.displayName,
+                body: "Removed the bare repository and its worktrees.",
+                userInfo: ["repositoryID": repository.id.uuidString]
+            )
         } catch {
             pendingErrorMessage = error.localizedDescription
+            notifyOperationFailure(
+                title: "Repository deletion failed",
+                subtitle: repository.displayName,
+                body: error.localizedDescription,
+                userInfo: ["repositoryID": repository.id.uuidString]
+            )
         }
     }
 

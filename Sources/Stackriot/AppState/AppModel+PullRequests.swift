@@ -101,8 +101,23 @@ extension AppModel {
             finishCreatedWorktree(worktree, in: repository)
             startPRMonitoring(for: worktree, repository: repository, in: modelContext)
             await refreshWorktreeStatuses(for: repository)
+            notifyOperationSuccess(
+                title: "Pull request checked out",
+                subtitle: repository.displayName,
+                body: "#\(pr.number) is ready in \(worktree.branchName).",
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": worktree.id.uuidString,
+                ]
+            )
         } catch {
             pendingErrorMessage = error.localizedDescription
+            notifyOperationFailure(
+                title: "Pull request checkout failed",
+                subtitle: repository.displayName,
+                body: error.localizedDescription,
+                userInfo: ["repositoryID": repository.id.uuidString]
+            )
         }
     }
 
@@ -142,8 +157,26 @@ extension AppModel {
             }
             save(modelContext)
             await refreshWorktreeStatuses(for: repository)
+            notifyOperationSuccess(
+                title: "Pull request updated",
+                subtitle: repository.displayName,
+                body: "\(worktree.branchName) now tracks the latest PR head.",
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": worktree.id.uuidString,
+                ]
+            )
         } catch {
             pendingErrorMessage = error.localizedDescription
+            notifyOperationFailure(
+                title: "Pull request update failed",
+                subtitle: repository.displayName,
+                body: error.localizedDescription,
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": worktree.id.uuidString,
+                ]
+            )
         }
     }
 
