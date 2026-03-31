@@ -152,7 +152,7 @@ extension AppModel {
         return MCPPlanPayload(
             worktreeID: worktree.id.uuidString,
             branchName: worktree.branchName,
-            path: worktree.path,
+            path: worktree.displayPath ?? "",
             planText: loadImplementationPlan(for: worktree.id),
             intentText: loadIntent(for: worktree.id),
             lastModifiedAt: modifiedAt
@@ -165,7 +165,7 @@ extension AppModel {
             repositoryID: repository.id.uuidString,
             repositoryName: repository.displayName,
             branchName: worktree.branchName,
-            path: worktree.path,
+            path: worktree.displayPath ?? "",
             issueContext: worktree.issueContext,
             isDefaultBranchWorkspace: worktree.isDefaultBranchWorkspace,
             isPinned: worktree.isPinned,

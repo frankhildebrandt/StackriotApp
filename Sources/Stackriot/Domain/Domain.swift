@@ -620,6 +620,13 @@ enum WorktreeLifecycle: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum WorktreeKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    case regular
+    case idea
+
+    var id: String { rawValue }
+}
+
 enum WorktreeCardColor: String, Codable, CaseIterable, Identifiable, Sendable {
     case none
     case blue

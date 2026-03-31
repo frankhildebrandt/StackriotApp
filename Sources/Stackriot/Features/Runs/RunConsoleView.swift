@@ -84,7 +84,9 @@ struct RunConsoleView: View {
             } else {
                 ForEach(installedAgents) { tool in
                     Button("Fix with \(tool.displayName)") {
-                        appModel.launchFixWithAI(for: run, using: tool, in: modelContext)
+                        Task {
+                            await appModel.launchFixWithAI(for: run, using: tool, in: modelContext)
+                        }
                     }
                 }
             }

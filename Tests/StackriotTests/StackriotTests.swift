@@ -390,7 +390,7 @@ struct StackriotTests {
     @Test
     @MainActor
     func ensureSelectedWorktreeActivatesSpecialTabForInitialSelection() {
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         let repository = ManagedRepository(
             displayName: "Stackriot",
             bareRepositoryPath: "/tmp/repo.git",
@@ -418,7 +418,7 @@ struct StackriotTests {
     @Test
     @MainActor
     func selectWorktreeActivatesSpecialTabForNonDefaultWorktree() {
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         let repository = ManagedRepository(
             displayName: "Stackriot",
             bareRepositoryPath: "/tmp/repo.git",
@@ -446,8 +446,8 @@ struct StackriotTests {
 
     @Test
     @MainActor
-    func worktreeOrderingPlacesPinnedEntriesBetweenDefaultAndRegular() {
-        let appModel = AppModel()
+    func worktreeOrderingPlacesIdeaTreesBetweenPinnedAndRegular() {
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         let repository = ManagedRepository(
             displayName: "Stackriot",
             bareRepositoryPath: "/tmp/repo.git",
@@ -467,17 +467,26 @@ struct StackriotTests {
             createdAt: Date(timeIntervalSince1970: 20),
             repository: repository
         )
+        let ideaTree = WorktreeRecord(
+            branchName: "feature/idea",
+            kind: .idea,
+            sourceBranch: "main",
+            createdAt: Date(timeIntervalSince1970: 25),
+            repository: repository
+        )
         let regularWorktree = WorktreeRecord(
             branchName: "feature/newer",
             path: "/tmp/regular",
             createdAt: Date(timeIntervalSince1970: 30),
             repository: repository
         )
-        repository.worktrees = [regularWorktree, pinnedWorktree, defaultWorktree]
+        repository.worktrees = [regularWorktree, ideaTree, pinnedWorktree, defaultWorktree]
 
         let sorted = appModel.worktrees(for: repository)
+        let sortedIDs = sorted.map(\.id)
+        let expectedIDs = [defaultWorktree.id, pinnedWorktree.id, ideaTree.id, regularWorktree.id]
 
-        #expect(sorted.map(\.id) == [defaultWorktree.id, pinnedWorktree.id, regularWorktree.id])
+        #expect(sortedIDs == expectedIDs)
     }
 
     @Test
@@ -803,7 +812,7 @@ struct StackriotTests {
         modelContext.insert(upstream)
         try modelContext.save()
 
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
         appModel.migrateLegacyRepositoriesIfNeeded(in: modelContext)
 
@@ -1062,7 +1071,7 @@ struct StackriotTests {
         modelContext.insert(worktree)
         try modelContext.save()
 
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
 
         await appModel.refreshAllRepositories(force: false)
@@ -1090,7 +1099,7 @@ struct StackriotTests {
         modelContext.insert(repository)
         try modelContext.save()
 
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
 
         appModel.migrateLegacyRepositoriesIfNeeded(in: modelContext)
@@ -1146,7 +1155,7 @@ struct StackriotTests {
     @Test
     func assignRepositoryKeepsNamespaceAndProjectConsistent() throws {
         let modelContext = try makeInMemoryModelContext()
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
 
         let defaultNamespace = appModel.defaultNamespace(in: modelContext)
@@ -1170,7 +1179,7 @@ struct StackriotTests {
     @Test
     func movingProjectUpdatesContainedRepositoriesToTargetNamespace() throws {
         let modelContext = try makeInMemoryModelContext()
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
 
         let sourceNamespace = RepositoryNamespace(name: "Source", sortOrder: 1)
@@ -1195,7 +1204,7 @@ struct StackriotTests {
     @Test
     func deletingProjectMovesRepositoriesIntoDefaultNamespace() throws {
         let modelContext = try makeInMemoryModelContext()
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
 
         let defaultNamespace = appModel.defaultNamespace(in: modelContext)
@@ -1220,7 +1229,7 @@ struct StackriotTests {
     @Test
     func deletingNamespaceMovesDirectAndProjectRepositoriesToDefaultNamespace() throws {
         let modelContext = try makeInMemoryModelContext()
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
 
         let defaultNamespace = appModel.defaultNamespace(in: modelContext)
@@ -1695,7 +1704,7 @@ struct StackriotTests {
             }
         }
 
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
         appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
 
@@ -1726,7 +1735,7 @@ struct StackriotTests {
         modelContext.insert(run)
         try modelContext.save()
 
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
         appModel.handleRunTermination(runID: run.id, exitCode: 1, wasCancelled: false)
 
@@ -1757,7 +1766,7 @@ struct StackriotTests {
         modelContext.insert(run)
         try modelContext.save()
 
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
         appModel.handleRunTermination(runID: run.id, exitCode: 2, wasCancelled: false)
 
@@ -1954,7 +1963,7 @@ struct StackriotTests {
         modelContext.insert(failedRun)
         try modelContext.save()
 
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
         appModel.pendingRunFixesByAgentRunID[UUID()] = RunFixRequest(
             tool: .codex,
@@ -2541,7 +2550,7 @@ struct StackriotTests {
     @MainActor
     @Test
     func initialPlanIncludesProviderNeutralJiraTicketDetails() {
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         let ticket = TicketDetails(
             reference: TicketReference(provider: .jira, id: "ABC-123", displayID: "ABC-123"),
             title: "Jira Plan",
@@ -2583,7 +2592,7 @@ struct StackriotTests {
         modelContext.insert(repository)
         try modelContext.save()
 
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
         appModel.worktreeDraft = WorktreeDraft(sourceBranch: cloneInfo.defaultBranch)
         appModel.worktreeDraft.branchName = "  Feature A  "
@@ -2623,10 +2632,15 @@ struct StackriotTests {
         }
 
         #expect(worktree.branchName == "Feature-A")
+        #expect(worktree.kind == .idea)
+        #expect(worktree.sourceBranch == cloneInfo.defaultBranch)
+        #expect(worktree.materializedPath == nil)
+        #expect(worktree.destinationRootPath == nil)
         #expect(worktree.issueContext == "#123 Ticket backed worktree")
         #expect(worktree.ticketProvider == .github)
         #expect(worktree.ticketIdentifier == "123")
         #expect(worktree.ticketURL == "https://github.com/octo/example/issues/123")
+        #expect(!FileManager.default.fileExists(atPath: worktree.projectedMaterializationPath ?? ""))
 
         let intentURL = AppPaths.intentFile(for: worktree.id)
         let plan = try String(contentsOf: intentURL, encoding: .utf8)
@@ -2638,7 +2652,6 @@ struct StackriotTests {
         #expect(plan.contains("### alice - 2025-03-29T12:00:00Z"))
 
         try? FileManager.default.removeItem(at: intentURL)
-        try? FileManager.default.removeItem(at: URL(fileURLWithPath: worktree.path))
         try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
     }
 
@@ -2660,7 +2673,7 @@ struct StackriotTests {
         modelContext.insert(repository)
         try modelContext.save()
 
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
         appModel.worktreeDraft = WorktreeDraft(sourceBranch: cloneInfo.defaultBranch)
         appModel.worktreeDraft.branchName = "feature/abc-123-import-jira"
@@ -2701,6 +2714,8 @@ struct StackriotTests {
             return
         }
 
+        #expect(worktree.kind == .idea)
+        #expect(worktree.materializedPath == nil)
         #expect(worktree.issueContext == "ABC-123 Import Jira tickets")
         #expect(worktree.ticketProvider == .jira)
         #expect(worktree.ticketIdentifier == "ABC-123")
@@ -2713,7 +2728,6 @@ struct StackriotTests {
         #expect(plan.contains("Kommentar aus Jira."))
 
         try? FileManager.default.removeItem(at: intentURL)
-        try? FileManager.default.removeItem(at: URL(fileURLWithPath: worktree.path))
         try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
     }
 
@@ -2736,7 +2750,7 @@ struct StackriotTests {
         modelContext.insert(repository)
         try modelContext.save()
 
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
         appModel.worktreeDraft = WorktreeDraft(sourceBranch: cloneInfo.defaultBranch)
         appModel.worktreeDraft.branchName = "Feature Without Ticket"
@@ -2750,13 +2764,119 @@ struct StackriotTests {
         #expect(appModel.pendingErrorMessage == nil)
         #expect(repository.worktrees.count == 1)
         #expect(repository.worktrees.first?.issueContext == "Manual context")
-        #expect(repository.worktrees.first?.path.hasPrefix(destinationRoot.path + "/") == true)
+        #expect(repository.worktrees.first?.kind == .idea)
+        #expect(repository.worktrees.first?.materializedPath == nil)
+        #expect(repository.worktrees.first?.destinationRootPath == destinationRoot.path)
+        #expect(repository.worktrees.first?.sourceBranch == cloneInfo.defaultBranch)
+        #expect(repository.worktrees.first?.projectedMaterializationPath?.hasPrefix(destinationRoot.path + "/") == true)
+        #expect(!FileManager.default.fileExists(atPath: repository.worktrees.first?.projectedMaterializationPath ?? ""))
 
         if let worktree = repository.worktrees.first {
-            try? FileManager.default.removeItem(at: AppPaths.planFile(for: worktree.id))
-            try? FileManager.default.removeItem(at: URL(fileURLWithPath: worktree.path))
+            try? FileManager.default.removeItem(at: AppPaths.intentFile(for: worktree.id))
         }
         try? FileManager.default.removeItem(at: destinationRoot)
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
+    @MainActor
+    @Test
+    func createPlanMaterializesIdeaTreeBeforeStartingDraft() async throws {
+        let remote = try await createSeededRemote(named: "idea-plan-materialize")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Idea-Plan-\(UUID().uuidString)"
+        )
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: cloneInfo.displayName,
+            remoteURL: remote.remote.absoluteString,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath.path,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        appModel.storedModelContext = modelContext
+        appModel.availableAgents = [.codex]
+        let worktree = WorktreeRecord(
+            branchName: "feature/idea-plan",
+            kind: .idea,
+            sourceBranch: cloneInfo.defaultBranch,
+            repository: repository
+        )
+        repository.worktrees = [worktree]
+
+        await appModel.startAgentPlanDraft(
+            using: .codex,
+            for: worktree,
+            in: repository,
+            currentIntentText: "Investigate the feature work",
+            modelContext: modelContext
+        )
+
+        #expect(worktree.kind == .regular)
+        #expect(worktree.materializedPath != nil)
+        #expect(FileManager.default.fileExists(atPath: try #require(worktree.materializedPath)))
+        #expect(appModel.agentPlanDraft(for: worktree.id) != nil)
+
+        if let worktreePath = worktree.materializedPath {
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: worktreePath))
+        }
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
+    @MainActor
+    @Test
+    func prepareCopilotExecutionWithPlanMaterializesIdeaTree() async throws {
+        let remote = try await createSeededRemote(named: "idea-execute-materialize")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Idea-Execute-\(UUID().uuidString)"
+        )
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: cloneInfo.displayName,
+            remoteURL: remote.remote.absoluteString,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath.path,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        let discovery = CopilotModelDiscoveryService(
+            runCommand: { _, _, _, _ in
+                CommandResult(stdout: "", stderr: #"Error: Invalid value for option "--model" (choices: "gpt-5.4-mini")"#, exitCode: 1)
+            },
+            environmentProvider: { [:] }
+        )
+        let appModel = AppModel(services: AppServices(
+            copilotModelDiscovery: discovery,
+            notificationService: RecordingNotificationService()
+        ))
+        appModel.storedModelContext = modelContext
+        appModel.availableAgents = [.githubCopilot]
+
+        let worktree = WorktreeRecord(
+            branchName: "feature/idea-execute",
+            kind: .idea,
+            sourceBranch: cloneInfo.defaultBranch,
+            repository: repository
+        )
+        repository.worktrees = [worktree]
+        appModel.saveIntent("Implement the feature", for: worktree.id)
+
+        await appModel.prepareCopilotExecutionWithPlan(for: worktree, in: repository)
+
+        let draft = try #require(appModel.pendingCopilotExecutionDraft)
+        #expect(draft.promptText == "Implement the feature")
+        #expect(worktree.kind == .regular)
+        #expect(worktree.materializedPath != nil)
+        #expect(FileManager.default.fileExists(atPath: try #require(worktree.materializedPath)))
+
+        if let worktreePath = worktree.materializedPath {
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: worktreePath))
+        }
         try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
     }
 

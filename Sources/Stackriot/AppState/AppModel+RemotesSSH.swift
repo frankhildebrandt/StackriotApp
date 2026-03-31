@@ -130,9 +130,14 @@ extension AppModel {
             guard let remote = repository.remotes.first(where: { $0.name == publishDraft.remoteName }) else {
                 throw StackriotError.remoteNameRequired
             }
+            guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+                  let worktreeURL = worktree.materializedURL
+            else {
+                return
+            }
 
             let branch = try await services.repositoryManager.publishCurrentBranch(
-                worktreePath: URL(fileURLWithPath: worktree.path),
+                worktreePath: worktreeURL,
                 remote: remoteExecutionContext(for: remote)
             )
             pendingErrorMessage = "Published \(branch) to \(remote.name)."

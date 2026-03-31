@@ -18,10 +18,16 @@ struct RunConsoleColumn: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(worktree.isDefaultBranchWorkspace ? "Main/Default" : worktree.branchName)
                         .font(.title3.weight(.semibold))
-                    Text(worktree.path)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    if let displayPath = worktree.displayPath {
+                        Text(worktree.isIdeaTree ? "IdeaTree · \(displayPath)" : displayPath)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else if worktree.isIdeaTree {
+                        Text("IdeaTree · not materialized yet")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 16)

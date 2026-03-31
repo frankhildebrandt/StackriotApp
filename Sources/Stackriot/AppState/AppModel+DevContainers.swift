@@ -2,52 +2,57 @@ import Foundation
 
 extension AppModel {
     func hasDevContainerConfiguration(for worktree: WorktreeRecord) -> Bool {
-        services.devContainerService.configuration(at: URL(fileURLWithPath: worktree.path)) != nil
+        guard let worktreeURL = worktree.materializedURL else { return false }
+        return services.devContainerService.configuration(at: worktreeURL) != nil
     }
 
     func devContainerState(for worktree: WorktreeRecord) -> DevContainerWorkspaceState {
-        let configuration = services.devContainerService.configuration(at: URL(fileURLWithPath: worktree.path))
+        let configuration = worktree.materializedURL.flatMap { services.devContainerService.configuration(at: $0) }
         var state = devContainerStatesByWorktreeID[worktree.id] ?? DevContainerWorkspaceState(configuration: configuration)
         state.configuration = configuration
         return state
     }
 
     func refreshDevContainerState(for worktree: WorktreeRecord) async {
-        let snapshot = await services.devContainerService.status(for: URL(fileURLWithPath: worktree.path))
+        guard let worktreeURL = worktree.materializedURL else {
+            devContainerStatesByWorktreeID[worktree.id] = DevContainerWorkspaceState(configuration: nil)
+            return
+        }
+        let snapshot = await services.devContainerService.status(for: worktreeURL)
         mergeDevContainerSnapshot(snapshot, into: worktree.id)
     }
 
     func startDevContainer(for worktree: WorktreeRecord) async {
-        await performDevContainerOperation(.start, for: worktree) {
-            try await services.devContainerService.start(worktreeURL: URL(fileURLWithPath: worktree.path))
+        await performDevContainerOperation(.start, for: worktree) { worktreeURL in
+            try await services.devContainerService.start(worktreeURL: worktreeURL)
         }
     }
 
     func stopDevContainer(for worktree: WorktreeRecord) async {
         stopDevContainerLogStreaming(for: worktree.id)
-        await performDevContainerOperation(.stop, for: worktree) {
-            try await services.devContainerService.stop(worktreeURL: URL(fileURLWithPath: worktree.path))
+        await performDevContainerOperation(.stop, for: worktree) { worktreeURL in
+            try await services.devContainerService.stop(worktreeURL: worktreeURL)
         }
     }
 
     func restartDevContainer(for worktree: WorktreeRecord) async {
         stopDevContainerLogStreaming(for: worktree.id)
-        await performDevContainerOperation(.restart, for: worktree) {
-            try await services.devContainerService.restart(worktreeURL: URL(fileURLWithPath: worktree.path))
+        await performDevContainerOperation(.restart, for: worktree) { worktreeURL in
+            try await services.devContainerService.restart(worktreeURL: worktreeURL)
         }
     }
 
     func rebuildDevContainer(for worktree: WorktreeRecord) async {
         stopDevContainerLogStreaming(for: worktree.id)
-        await performDevContainerOperation(.rebuild, for: worktree) {
-            try await services.devContainerService.rebuild(worktreeURL: URL(fileURLWithPath: worktree.path))
+        await performDevContainerOperation(.rebuild, for: worktree) { worktreeURL in
+            try await services.devContainerService.rebuild(worktreeURL: worktreeURL)
         }
     }
 
     func deleteDevContainer(for worktree: WorktreeRecord) async {
         stopDevContainerLogStreaming(for: worktree.id)
-        await performDevContainerOperation(.delete, for: worktree) {
-            try await services.devContainerService.delete(worktreeURL: URL(fileURLWithPath: worktree.path))
+        await performDevContainerOperation(.delete, for: worktree) { worktreeURL in
+            try await services.devContainerService.delete(worktreeURL: worktreeURL)
         }
     }
 
@@ -61,13 +66,20 @@ extension AppModel {
         }
 
         do {
+            guard let repository = worktree.repository,
+                  let modelContext = storedModelContext,
+                  await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+                  let worktreeURL = worktree.materializedURL
+            else {
+                return
+            }
             let (executable, arguments) = try await services.devContainerService.logStreamDescriptor(
-                for: URL(fileURLWithPath: worktree.path)
+                for: worktreeURL
             )
             let handle = try CommandRunner.start(
                 executable: executable,
                 arguments: arguments,
-                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                currentDirectoryURL: worktreeURL,
                 onOutput: { [weak self] chunk in
                     Task { @MainActor in
                         self?.appendDevContainerLogChunk(chunk, for: worktreeID)
@@ -108,7 +120,7 @@ extension AppModel {
     private func performDevContainerOperation(
         _ operation: DevContainerOperation,
         for worktree: WorktreeRecord,
-        execute: () async throws -> DevContainerWorkspaceSnapshot
+        execute: (URL) async throws -> DevContainerWorkspaceSnapshot
     ) async {
         let worktreeID = worktree.id
         var state = devContainerState(for: worktree)
@@ -117,7 +129,16 @@ extension AppModel {
         devContainerStatesByWorktreeID[worktreeID] = state
 
         do {
-            let snapshot = try await execute()
+            guard let repository = worktree.repository,
+                  let modelContext = storedModelContext,
+                  await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+                  let worktreeURL = worktree.materializedURL
+            else {
+                state.activeOperation = nil
+                devContainerStatesByWorktreeID[worktreeID] = state
+                return
+            }
+            let snapshot = try await execute(worktreeURL)
             mergeDevContainerSnapshot(snapshot, into: worktreeID)
             var updated = devContainerState(for: worktree)
             updated.activeOperation = nil

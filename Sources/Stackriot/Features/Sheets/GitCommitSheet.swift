@@ -65,12 +65,14 @@ struct GitCommitSheet: View {
                     dismiss()
                 }
                 Button("Commit") {
-                    appModel.runGitCommit(
-                        message: message,
-                        in: worktree,
-                        repository: repository,
-                        modelContext: modelContext
-                    )
+                    Task {
+                        await appModel.runGitCommit(
+                            message: message,
+                            in: worktree,
+                            repository: repository,
+                            modelContext: modelContext
+                        )
+                    }
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -84,7 +86,11 @@ struct GitCommitSheet: View {
     private func generateCommitMessage() {
         isGenerating = true
         generationError = nil
-        let worktreePath = worktree.path
+        guard let worktreePath = worktree.materializedPath else {
+            generationError = "Der Worktree ist noch nicht materialisiert."
+            isGenerating = false
+            return
+        }
 
         Task {
             do {

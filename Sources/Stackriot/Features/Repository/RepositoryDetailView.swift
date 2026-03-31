@@ -114,7 +114,9 @@ struct RepositoryDetailView: View {
         ), presenting: appModel.pendingIntegrationConflict) { draft in
             ForEach(availableAgents) { tool in
                 Button("Mit \(tool.displayName)") {
-                    appModel.launchConflictResolutionAgent(tool, for: draft, in: modelContext)
+                    Task {
+                        await appModel.launchConflictResolutionAgent(tool, for: draft, in: modelContext)
+                    }
                 }
             }
             Button("Abbrechen", role: .cancel) {
@@ -131,8 +133,9 @@ struct RepositoryDetailView: View {
     private func worktreeSection(worktrees: [WorktreeRecord]) -> some View {
         let defaultWorktree = worktrees.first(where: \.isDefaultBranchWorkspace)
         let pinnedWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace && $0.isPinned }
-        let regularWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace && !$0.isPinned }
-        let featureWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace }
+        let ideaTrees = worktrees.filter { !$0.isDefaultBranchWorkspace && !$0.isPinned && $0.isIdeaTree }
+        let regularWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace && !$0.isPinned && !$0.isIdeaTree }
+        let featureWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace && !$0.isIdeaTree }
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -162,7 +165,7 @@ struct RepositoryDetailView: View {
                 Button {
                     appModel.presentWorktreeSheet(for: repository)
                 } label: {
-                    Label("Create Worktree", systemImage: "plus")
+                    Label("Create IdeaTree", systemImage: "plus")
                 }
             }
 
@@ -195,8 +198,16 @@ struct RepositoryDetailView: View {
                         )
                     }
 
+                    if !ideaTrees.isEmpty {
+                        worktreeGroup(
+                            title: "IdeaTrees",
+                            subtitle: "Leichte Worktree-Entwuerfe ohne lokalen Checkout. Materialisieren erst bei Plan/Agent/Terminal.",
+                            worktrees: ideaTrees
+                        )
+                    }
+
                     worktreeGroup(
-                        title: (defaultWorktree != nil || !pinnedWorktrees.isEmpty) ? "Weitere Worktrees" : nil,
+                        title: (defaultWorktree != nil || !pinnedWorktrees.isEmpty || !ideaTrees.isEmpty) ? "Weitere Worktrees" : nil,
                         worktrees: regularWorktrees
                     )
                 }
@@ -302,6 +313,12 @@ struct RepositoryDetailView: View {
                     HStack(spacing: 8) {
                         Text(worktreeTitle(for: worktree))
                             .font(.headline)
+                        if worktree.isIdeaTree {
+                            Image(systemName: "lightbulb.fill")
+                                .imageScale(.small)
+                                .foregroundStyle(.yellow)
+                                .help("IdeaTree")
+                        }
                         if worktree.isPinned {
                             Image(systemName: "pin.fill")
                                 .imageScale(.small)
@@ -354,6 +371,17 @@ struct RepositoryDetailView: View {
                         }
                     } else if let issueContext = worktree.issueContext {
                         Label(issueContext, systemImage: "number")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let displayPath = worktree.displayPath {
+                        Label(displayPath, systemImage: worktree.isIdeaTree ? "clock.badge.sparkles" : "folder")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    } else if worktree.isIdeaTree {
+                        Label("Noch nicht materialisiert", systemImage: "lightbulb")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -461,6 +489,7 @@ struct RepositoryDetailView: View {
                     await appModel.revealWorktreeInFinder(worktree)
                 }
             }
+            .disabled(worktree.isIdeaTree)
             Menu("Kartenfarbe") {
                 ForEach(WorktreeCardColor.allCases) { color in
                     Button {
@@ -510,7 +539,7 @@ struct RepositoryDetailView: View {
                 }
                 Divider()
                 Button("Remove Worktree", role: .destructive) {
-                    worktreePendingRemoval = WorktreeRemovalDraft(id: worktree.id, path: worktree.path)
+                    worktreePendingRemoval = WorktreeRemovalDraft(id: worktree.id, path: worktree.displayPath ?? worktree.branchName)
                 }
                 .disabled(isRemovingWorktree(worktree))
             }
@@ -538,7 +567,9 @@ struct RepositoryDetailView: View {
     }
 
     private func presentMoveDialog(for worktree: WorktreeRecord) {
-        let currentDirectory = URL(fileURLWithPath: worktree.path).deletingLastPathComponent()
+        let currentDirectory = worktree.materializedURL?.deletingLastPathComponent()
+            ?? worktree.destinationRootURL
+            ?? AppPaths.worktreesRoot.appendingPathComponent(repository.displayName, isDirectory: true)
         guard let destinationRoot = IDEManager.chooseDirectory(
             title: "Worktree verschieben",
             message: "Stackriot erstellt darunter einen Unterordner fuer den Worktree.",
@@ -559,6 +590,7 @@ struct RepositoryDetailView: View {
 
     private func showsIntegrationButton(for worktree: WorktreeRecord) -> Bool {
         guard !worktree.isDefaultBranchWorkspace else { return false }
+        guard !worktree.isIdeaTree else { return false }
         guard worktree.resolvedPrimaryContext?.kind != .pullRequest else { return false }
         if worktree.lifecycleState == .integrating {
             return true
@@ -634,7 +666,11 @@ struct RepositoryDetailView: View {
     private func worktreeLifecycleIndicator(for worktree: WorktreeRecord) -> some View {
         switch worktree.lifecycleState {
         case .active:
-            if worktree.resolvedPrimaryContext?.kind == .pullRequest {
+            if worktree.isIdeaTree {
+                Label("IdeaTree", systemImage: "lightbulb")
+                    .font(.caption)
+                    .foregroundStyle(.yellow)
+            } else if worktree.resolvedPrimaryContext?.kind == .pullRequest {
                 HStack(spacing: 6) {
                     Label("PR Worktree", systemImage: "arrow.triangle.merge")
                         .font(.caption)
@@ -816,36 +852,42 @@ struct RepositoryDetailView: View {
 
     @ViewBuilder
     private func worktreeStatusRow(for worktree: WorktreeRecord) -> some View {
-        let status = appModel.worktreeStatuses[worktree.id]
-        let ahead = worktree.isDefaultBranchWorkspace ? 0 : (status?.aheadCount ?? 0)
-        let behind = worktree.isDefaultBranchWorkspace ? 0 : (status?.behindCount ?? 0)
-        let added = status?.addedLines ?? 0
-        let deleted = status?.deletedLines ?? 0
-        let hasChanges = status?.hasUncommittedChanges ?? false
+        if worktree.isIdeaTree {
+            Label("Materialisiert bei Bedarf", systemImage: "wand.and.stars")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            let status = appModel.worktreeStatuses[worktree.id]
+            let ahead = worktree.isDefaultBranchWorkspace ? 0 : (status?.aheadCount ?? 0)
+            let behind = worktree.isDefaultBranchWorkspace ? 0 : (status?.behindCount ?? 0)
+            let added = status?.addedLines ?? 0
+            let deleted = status?.deletedLines ?? 0
+            let hasChanges = status?.hasUncommittedChanges ?? false
 
-        if ahead > 0 || behind > 0 || hasChanges {
-            HStack(spacing: 8) {
-                if behind > 0 {
-                    Label("\(behind)", systemImage: "arrow.down")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.orange)
-                }
-                if ahead > 0 {
-                    Label("\(ahead)", systemImage: "arrow.up")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                if hasChanges {
-                    if ahead > 0 || behind > 0 {
-                        Divider()
-                            .frame(height: 10)
+            if ahead > 0 || behind > 0 || hasChanges {
+                HStack(spacing: 8) {
+                    if behind > 0 {
+                        Label("\(behind)", systemImage: "arrow.down")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.orange)
                     }
-                    Text("+\(added)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.green)
-                    Text("-\(deleted)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.red)
+                    if ahead > 0 {
+                        Label("\(ahead)", systemImage: "arrow.up")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    if hasChanges {
+                        if ahead > 0 || behind > 0 {
+                            Divider()
+                                .frame(height: 10)
+                        }
+                        Text("+\(added)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.green)
+                        Text("-\(deleted)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.red)
+                    }
                 }
             }
         }

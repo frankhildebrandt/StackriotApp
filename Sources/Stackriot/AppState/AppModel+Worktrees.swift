@@ -143,15 +143,11 @@ extension AppModel {
     func createWorktree(for repository: ManagedRepository, in modelContext: ModelContext) async {
         do {
             let normalizedName = WorktreeManager.normalizedWorktreeName(from: worktreeDraft.branchName)
+            guard !normalizedName.isEmpty else {
+                throw StackriotError.branchNameRequired
+            }
             let createFromConfirmedTicket = worktreeDraft.hasConfirmedTicket && worktreeDraft.selectedIssueDetails != nil
-            let info = try await services.worktreeManager.createWorktree(
-                bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
-                repositoryName: repository.displayName,
-                branchName: normalizedName,
-                sourceBranch: resolvedSourceBranch(for: repository),
-                directoryName: normalizedName,
-                destinationRoot: worktreeDraft.destinationRootURL
-            )
+            let sourceBranch = resolvedSourceBranch(for: repository)
 
             let issueContext = createFromConfirmedTicket
                 ? worktreeDraft.selectedIssueDetails.map(compactIssueContext(for:))
@@ -160,20 +156,21 @@ extension AppModel {
                 ? worktreeDraft.selectedIssueDetails.map(initialPlan(from:))
                 : nil
 
-            let worktree = try persistCreatedWorktree(
-                from: info,
+            let worktree = try persistIdeaTree(
+                branchName: normalizedName,
                 repository: repository,
+                sourceBranch: sourceBranch,
+                destinationRootPath: worktreeDraft.destinationRootPath,
                 ticketDetails: createFromConfirmedTicket ? worktreeDraft.selectedIssueDetails : nil,
                 issueContext: issueContext,
                 initialPlanText: initialPlanText,
                 in: modelContext
             )
             finishCreatedWorktree(worktree, in: repository)
-            await refreshWorktreeStatuses(for: repository)
             notifyOperationSuccess(
-                title: "Worktree created",
+                title: "IdeaTree created",
                 subtitle: repository.displayName,
-                body: "\(worktree.branchName) is ready.",
+                body: "\(worktree.branchName) will materialize when a filesystem checkout is needed.",
                 userInfo: [
                     "repositoryID": repository.id.uuidString,
                     "worktreeID": worktree.id.uuidString,
@@ -182,7 +179,7 @@ extension AppModel {
         } catch {
             pendingErrorMessage = error.localizedDescription
             notifyOperationFailure(
-                title: "Worktree creation failed",
+                title: "IdeaTree creation failed",
                 subtitle: repository.displayName,
                 body: error.localizedDescription,
                 userInfo: ["repositoryID": repository.id.uuidString]
@@ -221,21 +218,84 @@ extension AppModel {
         }
     }
 
-    private func persistCreatedWorktree(
-        from info: CreatedWorktreeInfo,
+    @discardableResult
+    func materializeIdeaTreeIfNeeded(
+        _ worktree: WorktreeRecord,
+        in repository: ManagedRepository,
+        modelContext: ModelContext
+    ) async -> WorktreeRecord? {
+        if worktree.isDefaultBranchWorkspace {
+            return worktree
+        }
+        if worktree.materializedURL != nil {
+            if worktree.isIdeaTree {
+                worktree.kind = .regular
+                worktree.materializedAt = worktree.materializedAt ?? .now
+                repository.updatedAt = .now
+                save(modelContext)
+            }
+            return worktree
+        }
+
+        do {
+            let sourceBranch = worktree.sourceBranchName ?? repository.defaultBranch
+            let info = try await services.worktreeManager.createWorktree(
+                bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
+                repositoryName: repository.displayName,
+                branchName: worktree.branchName,
+                sourceBranch: sourceBranch,
+                directoryName: worktree.branchName,
+                destinationRoot: worktree.destinationRootURL
+            )
+            worktree.sourceBranch = sourceBranch
+            worktree.markMaterialized(at: info.path.path)
+            repository.updatedAt = .now
+            try modelContext.save()
+            await refreshWorktreeStatuses(for: repository)
+            notifyOperationSuccess(
+                title: "IdeaTree materialized",
+                subtitle: repository.displayName,
+                body: "\(worktree.branchName) is now available as a filesystem worktree.",
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": worktree.id.uuidString,
+                ]
+            )
+            return worktree
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+            notifyOperationFailure(
+                title: "IdeaTree materialization failed",
+                subtitle: repository.displayName,
+                body: error.localizedDescription,
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": worktree.id.uuidString,
+                ]
+            )
+            return nil
+        }
+    }
+
+    private func persistIdeaTree(
+        branchName: String,
         repository: ManagedRepository,
+        sourceBranch: String,
+        destinationRootPath: String?,
         ticketDetails: TicketDetails?,
         issueContext: String?,
         initialPlanText: String?,
         in modelContext: ModelContext
     ) throws -> WorktreeRecord {
         let worktree = WorktreeRecord(
-            branchName: info.branchName,
+            branchName: branchName,
+            kind: .idea,
             issueContext: issueContext,
             ticketProvider: ticketDetails?.provider,
             ticketIdentifier: ticketDetails?.reference.id,
             ticketURL: ticketDetails?.url,
-            path: info.path.path,
+            sourceBranch: sourceBranch,
+            destinationRootPath: destinationRootPath,
             repository: repository,
             primaryContext: ticketDetails.map {
                 WorktreePrimaryContext(
@@ -280,15 +340,33 @@ extension AppModel {
             if worktree.isDefaultBranchWorkspace {
                 throw StackriotError.commandFailed("The default workspace cannot be moved.")
             }
+            if worktree.isIdeaTree {
+                worktree.destinationRootPath = newParentDirectory.path
+                repository.updatedAt = .now
+                save(modelContext)
+                notifyOperationSuccess(
+                    title: "IdeaTree updated",
+                    subtitle: repository.displayName,
+                    body: "\(worktree.branchName) will materialize under \(newParentDirectory.lastPathComponent).",
+                    userInfo: [
+                        "repositoryID": repository.id.uuidString,
+                        "worktreeID": worktree.id.uuidString,
+                    ]
+                )
+                return
+            }
+            guard let worktreeURL = worktree.materializedURL else {
+                throw StackriotError.worktreeUnavailable
+            }
 
             let destination = try await services.worktreeManager.moveWorktree(
                 bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
-                worktreePath: URL(fileURLWithPath: worktree.path),
+                worktreePath: worktreeURL,
                 newParentDirectory: newParentDirectory,
                 directoryName: worktree.branchName
             )
 
-            worktree.path = destination.path
+            worktree.markMaterialized(at: destination.path)
             worktree.lastOpenedAt = .now
             repository.updatedAt = .now
             save(modelContext)
@@ -356,7 +434,7 @@ extension AppModel {
             }
 
             let worktreeID = worktree.id
-            let worktreePath = worktree.path
+            let worktreePath = worktree.materializedPath
             let repositoryID = repository.id
             let bareRepositoryPath = repository.bareRepositoryPath
             let remainingWorktreeID = try modelContext.fetch(
@@ -378,10 +456,12 @@ extension AppModel {
             )
             .map(\.id)
 
-            try await services.worktreeManager.removeWorktree(
-                bareRepositoryPath: URL(fileURLWithPath: bareRepositoryPath),
-                worktreePath: URL(fileURLWithPath: worktreePath)
-            )
+            if let worktreePath {
+                try await services.worktreeManager.removeWorktree(
+                    bareRepositoryPath: URL(fileURLWithPath: bareRepositoryPath),
+                    worktreePath: URL(fileURLWithPath: worktreePath)
+                )
+            }
 
             stopPRMonitoring(for: worktreeID)
             modelContext.delete(worktree)
@@ -426,26 +506,31 @@ extension AppModel {
         var statuses: [UUID: WorktreeStatus] = [:]
 
         let statusService = services.worktreeStatusService
-        await withTaskGroup(of: (UUID, WorktreeStatus).self) { group in
+        await withTaskGroup(of: (UUID, WorktreeStatus)?.self) { group in
             for worktree in repository.worktrees {
+                guard let worktreeURL = worktree.materializedURL else { continue }
                 let worktreeID = worktree.id
-                let worktreePath = worktree.path
                 let isDefault = worktree.isDefaultBranchWorkspace
                 let compareBranch = isDefault ? "\(defaultRemoteName)/\(defaultBranch)" : defaultBranch
                 group.addTask { [statusService] in
                     let status = await statusService.fetchStatus(
-                        worktreePath: URL(fileURLWithPath: worktreePath),
+                        worktreePath: worktreeURL,
                         defaultBranch: compareBranch
                     )
                     return (worktreeID, status)
                 }
             }
 
-            for await (worktreeID, status) in group {
-                statuses[worktreeID] = status
+            for await result in group {
+                if let (worktreeID, status) = result {
+                    statuses[worktreeID] = status
+                }
             }
         }
 
+        for worktree in repository.worktrees where worktree.materializedURL == nil {
+            worktreeStatuses.removeValue(forKey: worktree.id)
+        }
         for (worktreeID, status) in statuses {
             worktreeStatuses[worktreeID] = status
         }
@@ -509,8 +594,13 @@ extension AppModel {
 
         case .githubPR:
             do {
+                guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+                      let worktreeURL = worktree.materializedURL
+                else {
+                    return
+                }
                 let prInfo = try await services.gitHubCLIService.createPR(
-                    worktreePath: URL(fileURLWithPath: worktree.path),
+                    worktreePath: worktreeURL,
                     title: draft.prTitle,
                     body: draft.prBody,
                     baseBranch: repository.defaultBranch
@@ -571,11 +661,16 @@ extension AppModel {
         guard let defaultWorktree = await ensureDefaultBranchWorkspace(for: repository, in: modelContext) else {
             return .failed
         }
+        guard await materializeIdeaTreeIfNeeded(sourceWorktree, in: repository, modelContext: modelContext) != nil,
+              let defaultWorktreeURL = defaultWorktree.materializedURL
+        else {
+            return .failed
+        }
         do {
             let result = try await services.worktreeStatusService.integrate(
                 sourceBranch: sourceWorktree.branchName,
                 defaultBranch: repository.defaultBranch,
-                defaultWorktreePath: URL(fileURLWithPath: defaultWorktree.path)
+                defaultWorktreePath: defaultWorktreeURL
             )
             switch result {
             case .committed:
@@ -665,9 +760,12 @@ extension AppModel {
     }
 
     func loadDiff(for worktree: WorktreeRecord) async -> WorkspaceDiffSnapshot {
+        guard let worktreeURL = worktree.materializedURL else {
+            return WorkspaceDiffSnapshot(files: [])
+        }
         do {
             return try await services.worktreeStatusService.loadUncommittedDiff(
-                worktreePath: URL(fileURLWithPath: worktree.path)
+                worktreePath: worktreeURL
             )
         } catch {
             pendingErrorMessage = error.localizedDescription
@@ -681,12 +779,17 @@ extension AppModel {
         strategy: SyncStrategy,
         modelContext: ModelContext
     ) async {
+        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+              let worktreeURL = worktree.materializedURL
+        else {
+            return
+        }
         do {
             switch strategy {
             case .rebase:
                 do {
                     try await services.worktreeStatusService.rebase(
-                        worktreePath: URL(fileURLWithPath: worktree.path),
+                        worktreePath: worktreeURL,
                         onto: repository.defaultBranch
                     )
                     worktreePendingMergeOfferID = nil
@@ -696,7 +799,7 @@ extension AppModel {
                 }
             case .merge:
                 try await services.worktreeStatusService.merge(
-                    worktreePath: URL(fileURLWithPath: worktree.path),
+                    worktreePath: worktreeURL,
                     from: repository.defaultBranch
                 )
                 worktreePendingMergeOfferID = nil

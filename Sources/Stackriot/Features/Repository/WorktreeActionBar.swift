@@ -59,7 +59,7 @@ struct WorktreeActionBar: View {
                     .padding(.horizontal, 2)
             }
 
-            if !worktree.isDefaultBranchWorkspace {
+            if !worktree.isDefaultBranchWorkspace && !worktree.isIdeaTree {
                 gitMenuButton
             }
 
@@ -155,7 +155,9 @@ struct WorktreeActionBar: View {
         Menu {
             ForEach(installedAgents) { tool in
                 Button {
-                    appModel.launchAgent(tool, for: worktree, in: modelContext)
+                    Task {
+                        _ = await appModel.launchAgent(tool, for: worktree, in: modelContext)
+                    }
                 } label: {
                     Label(tool.displayName, systemImage: tool.systemImageName)
                 }
@@ -171,7 +173,9 @@ struct WorktreeActionBar: View {
 
     private var terminalButton: some View {
         Button {
-            appModel.openTerminal(for: worktree, in: modelContext)
+            Task {
+                await appModel.openTerminal(for: worktree, in: modelContext)
+            }
         } label: {
             Image(systemName: "terminal")
         }
@@ -365,7 +369,7 @@ struct WorktreeActionBar: View {
     }
 
     private var hasDependencyActions: Bool {
-        let worktreeURL = URL(fileURLWithPath: worktree.path)
+        guard let worktreeURL = worktree.materializedURL else { return false }
         return FileManager.default.fileExists(atPath: worktreeURL.appendingPathComponent("package.json").path)
     }
 
@@ -460,7 +464,7 @@ struct WorktreeActionBar: View {
 
     private func executeDependencyAction(_ action: DependencyActionDraft) {
         Task {
-            appModel.installDependencies(
+            await appModel.installDependencies(
                 mode: action.mode,
                 in: worktree,
                 repository: repository,

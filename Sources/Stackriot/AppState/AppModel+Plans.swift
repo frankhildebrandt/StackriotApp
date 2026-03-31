@@ -172,16 +172,28 @@ extension AppModel {
         in modelContext: ModelContext,
         options: AgentLaunchOptions = AgentLaunchOptions(),
         promptOverride: String? = nil
-    ) {
+    ) async {
+        guard let repository = worktree.repository else {
+            pendingErrorMessage = StackriotError.worktreeUnavailable.localizedDescription
+            return
+        }
+        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil else { return }
         let promptText = promptOverride ?? planExecutionPrompt(for: worktree).text
         terminalTabs.deselectPlanTab(for: worktree.id)
-        launchAgent(tool, for: worktree, in: modelContext, initialPrompt: promptText, options: options)
+        _ = await launchAgent(tool, for: worktree, in: modelContext, initialPrompt: promptText, options: options)
     }
 
     func prepareCopilotExecutionWithPlan(for worktree: WorktreeRecord, in repository: ManagedRepository) async {
         guard availableAgents.contains(.githubCopilot) else {
             pendingErrorMessage = "GitHub Copilot is not available on this machine."
             return
+        }
+        if worktree.isIdeaTree {
+            guard let modelContext = storedModelContext else {
+                pendingErrorMessage = "The model context is unavailable."
+                return
+            }
+            guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil else { return }
         }
 
         let prompt = planExecutionPrompt(for: worktree)
@@ -246,13 +258,15 @@ extension AppModel {
         )
 
         pendingCopilotExecutionDraft = nil
-        launchAgentWithPlan(
+        Task {
+            await launchAgentWithPlan(
             .githubCopilot,
             for: worktree,
             in: modelContext,
             options: options,
             promptOverride: draft.promptText
-        )
+            )
+        }
     }
 
     func availablePlanningAgents() -> [AIAgentTool] {
@@ -288,8 +302,8 @@ extension AppModel {
         for worktree: WorktreeRecord,
         in repository: ManagedRepository,
         currentIntentText: String,
-        modelContext _: ModelContext
-    ) {
+        modelContext: ModelContext
+    ) async {
         guard !worktree.isDefaultBranchWorkspace else { return }
         guard tool.supportsPlanning else {
             pendingErrorMessage = "\(tool.displayName) does not support interactive planning in Stackriot yet."
@@ -299,6 +313,7 @@ extension AppModel {
             pendingErrorMessage = "\(tool.displayName) is not available on this machine."
             return
         }
+        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil else { return }
 
         if let existingDraft = agentPlanDraftsByWorktreeID[worktree.id] {
             if activeRunIDs.contains(existingDraft.runID) {
@@ -937,7 +952,9 @@ extension AppModel {
         currentIntentText: String,
         modelContext: ModelContext
     ) {
-        startAgentPlanDraft(using: .codex, for: worktree, in: repository, currentIntentText: currentIntentText, modelContext: modelContext)
+        Task {
+            await startAgentPlanDraft(using: .codex, for: worktree, in: repository, currentIntentText: currentIntentText, modelContext: modelContext)
+        }
     }
 
     func sendCodexPlanReply(_ reply: String, for worktreeID: UUID) {
