@@ -307,21 +307,20 @@ struct GitHubCLIService: TicketProviderService {
         baseBranch: String
     ) async throws -> PRInfo {
         let environment = await commandEnvironment()
-        let result = try await runCommand(
+        let createResult = try await runCommand(
             "gh",
             [
                 "pr", "create",
                 "--title", title,
                 "--body", body.isEmpty ? " " : body,
                 "--base", baseBranch,
-                "--json", "number,url",
             ],
             worktreePath,
             environment
         )
 
-        guard result.exitCode == 0 else {
-            throw commandFailure(from: result)
+        guard createResult.exitCode == 0 else {
+            throw commandFailure(from: createResult)
         }
 
         struct PRResponse: Decodable {
@@ -329,9 +328,33 @@ struct GitHubCLIService: TicketProviderService {
             let url: String
         }
 
-        let data = Data(result.stdout.utf8)
-        let decoded = try Self.jsonDecoder.decode(PRResponse.self, from: data)
-        return PRInfo(number: decoded.number, url: decoded.url)
+        guard let createdPRURL = Self.pullRequestURL(from: createResult.stdout) else {
+            throw StackriotError.commandFailed("GitHub CLI did not return a pull request URL.")
+        }
+
+        let viewResult = try await runCommand(
+            "gh",
+            ["pr", "view", createdPRURL, "--json", "number,url"],
+            worktreePath,
+            environment
+        )
+
+        if viewResult.exitCode == 0 {
+            let data = Data(viewResult.stdout.utf8)
+            if let decoded = try? Self.jsonDecoder.decode(PRResponse.self, from: data) {
+                return PRInfo(number: decoded.number, url: decoded.url)
+            }
+        }
+
+        if let number = Self.pullRequestNumber(from: createdPRURL) {
+            return PRInfo(number: number, url: createdPRURL)
+        }
+
+        guard viewResult.exitCode == 0 else {
+            throw commandFailure(from: viewResult)
+        }
+
+        throw StackriotError.commandFailed("GitHub CLI returned an unparseable pull request response.")
     }
 
     /// Gibt den aktuellen Status eines Pull Requests zurueck.
@@ -483,6 +506,51 @@ struct GitHubCLIService: TicketProviderService {
         let detail = (result.stderr.isEmpty ? result.stdout : result.stderr)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return StackriotError.commandFailed(detail.isEmpty ? "GitHub CLI command failed." : detail)
+    }
+
+    private static func pullRequestURL(from output: String) -> String? {
+        let tokens = output.split(whereSeparator: \.isWhitespace)
+        let trimmedCharacters = CharacterSet(charactersIn: "\"'()[]{}<>,.;")
+
+        for token in tokens {
+            let candidate = String(token).trimmingCharacters(in: trimmedCharacters)
+            guard let url = URL(string: candidate), isGitHubPullRequestURL(url) else {
+                continue
+            }
+            return url.absoluteString
+        }
+
+        return nil
+    }
+
+    private static func pullRequestNumber(from urlString: String) -> Int? {
+        guard
+            let url = URL(string: urlString),
+            isGitHubPullRequestURL(url)
+        else {
+            return nil
+        }
+
+        let pathComponents = url.path.split(separator: "/")
+        guard pathComponents.count >= 4 else { return nil }
+        return Int(pathComponents[3])
+    }
+
+    private static func isGitHubPullRequestURL(_ url: URL) -> Bool {
+        guard url.host?.lowercased() == "github.com" else {
+            return false
+        }
+
+        let pathComponents = url.path.split(separator: "/")
+        guard pathComponents.count >= 4 else {
+            return false
+        }
+
+        guard pathComponents[2] == "pull" else {
+            return false
+        }
+
+        return Int(pathComponents[3]) != nil
     }
 
     private static func looksLikeMissingIssue(message: String) -> Bool {
