@@ -2323,6 +2323,171 @@ struct StackriotTests {
         #expect(empty.comments.isEmpty)
     }
 
+    @Test
+    func gitHubCreatePRUsesSupportedCLIFlowAndParsesCreatedURL() async throws {
+        actor CommandRecorder {
+            private var commands: [(String, [String], String?, [String: String])] = []
+
+            func append(
+                executable: String,
+                arguments: [String],
+                directory: URL?,
+                environment: [String: String]
+            ) {
+                commands.append((executable, arguments, directory?.path, environment))
+            }
+
+            func snapshot() -> [(String, [String], String?, [String: String])] {
+                commands
+            }
+        }
+
+        let recorder = CommandRecorder()
+        let worktree = try temporaryDirectory(named: "gh-create-pr")
+        let service = GitHubCLIService(
+            runCommand: { executable, arguments, currentDirectoryURL, environment in
+                await recorder.append(
+                    executable: executable,
+                    arguments: arguments,
+                    directory: currentDirectoryURL,
+                    environment: environment
+                )
+                if executable == "gh",
+                   arguments == [
+                       "pr", "create",
+                       "--title", "Feature title",
+                       "--body", "PR body",
+                       "--base", "main",
+                   ]
+                {
+                    return CommandResult(
+                        stdout: """
+                        Creating pull request for feature-branch into main in octo/example
+
+                        https://github.com/octo/example/pull/42
+                        """,
+                        stderr: "",
+                        exitCode: 0
+                    )
+                }
+                if executable == "gh",
+                   arguments == ["pr", "view", "https://github.com/octo/example/pull/42", "--json", "number,url"]
+                {
+                    return CommandResult(
+                        stdout: #"{"number":42,"url":"https://github.com/octo/example/pull/42"}"#,
+                        stderr: "",
+                        exitCode: 0
+                    )
+                }
+
+                Issue.record("Unexpected command: \(executable) \(arguments.joined(separator: " "))")
+                return CommandResult(stdout: "", stderr: "", exitCode: 1)
+            },
+            environmentProvider: { ["PATH": "/opt/homebrew/bin:/usr/bin:/bin"] }
+        )
+
+        let prInfo = try await service.createPR(
+            worktreePath: worktree,
+            title: "Feature title",
+            body: "PR body",
+            baseBranch: "main"
+        )
+
+        #expect(prInfo.number == 42)
+        #expect(prInfo.url == "https://github.com/octo/example/pull/42")
+
+        let commands = await recorder.snapshot()
+        #expect(commands.count == 2)
+        #expect(commands.allSatisfy { $0.2 == worktree.path })
+        #expect(commands.allSatisfy { $0.3["PATH"] == "/opt/homebrew/bin:/usr/bin:/bin" })
+    }
+
+    @Test
+    func gitHubCreatePRPropagatesCreateFailures() async throws {
+        let worktree = try temporaryDirectory(named: "gh-create-pr-error")
+        let service = GitHubCLIService(
+            runCommand: { executable, arguments, _, _ in
+                if executable == "gh",
+                   arguments == [
+                       "pr", "create",
+                       "--title", "Feature title",
+                       "--body", " ",
+                       "--base", "main",
+                   ]
+                {
+                    return CommandResult(stdout: "", stderr: "unknown flag: --json", exitCode: 1)
+                }
+
+                Issue.record("Unexpected command: \(executable) \(arguments.joined(separator: " "))")
+                return CommandResult(stdout: "", stderr: "", exitCode: 1)
+            },
+            environmentProvider: { ["PATH": "/opt/homebrew/bin:/usr/bin:/bin"] }
+        )
+
+        do {
+            _ = try await service.createPR(
+                worktreePath: worktree,
+                title: "Feature title",
+                body: "",
+                baseBranch: "main"
+            )
+            Issue.record("Expected createPR to throw.")
+        } catch let error as StackriotError {
+            guard case let .commandFailed(message) = error else {
+                Issue.record("Unexpected StackriotError: \(error)")
+                return
+            }
+            #expect(message == "unknown flag: --json")
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test
+    func gitHubCreatePRFallsBackToNumberFromURLWhenViewOutputCannotBeDecoded() async throws {
+        let worktree = try temporaryDirectory(named: "gh-create-pr-fallback")
+        let service = GitHubCLIService(
+            runCommand: { executable, arguments, _, _ in
+                if executable == "gh",
+                   arguments == [
+                       "pr", "create",
+                       "--title", "Feature title",
+                       "--body", "PR body",
+                       "--base", "main",
+                   ]
+                {
+                    return CommandResult(
+                        stdout: """
+                        Warning: using default repository
+                        https://github.com/octo/example/pull/77
+                        """,
+                        stderr: "",
+                        exitCode: 0
+                    )
+                }
+                if executable == "gh",
+                   arguments == ["pr", "view", "https://github.com/octo/example/pull/77", "--json", "number,url"]
+                {
+                    return CommandResult(stdout: "not-json", stderr: "", exitCode: 0)
+                }
+
+                Issue.record("Unexpected command: \(executable) \(arguments.joined(separator: " "))")
+                return CommandResult(stdout: "", stderr: "", exitCode: 1)
+            },
+            environmentProvider: { ["PATH": "/opt/homebrew/bin:/usr/bin:/bin"] }
+        )
+
+        let prInfo = try await service.createPR(
+            worktreePath: worktree,
+            title: "Feature title",
+            body: "PR body",
+            baseBranch: "main"
+        )
+
+        #expect(prInfo.number == 77)
+        #expect(prInfo.url == "https://github.com/octo/example/pull/77")
+    }
+
     @MainActor
     @Test
     func jiraReadinessRequiresConfigurationAndReportsAuthFailures() async {
