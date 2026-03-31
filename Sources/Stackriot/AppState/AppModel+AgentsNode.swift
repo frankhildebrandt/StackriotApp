@@ -2,6 +2,22 @@ import Foundation
 import SwiftData
 
 extension AppModel {
+    private func materializedWorktreeContext(
+        for worktree: WorktreeRecord,
+        in modelContext: ModelContext
+    ) async -> (repository: ManagedRepository, url: URL)? {
+        guard let repository = worktree.repository else {
+            pendingErrorMessage = StackriotError.worktreeUnavailable.localizedDescription
+            return nil
+        }
+        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+              let worktreeURL = worktree.materializedURL
+        else {
+            return nil
+        }
+        return (repository, worktreeURL)
+    }
+
     func installedAgentTools() -> [AIAgentTool] {
         AIAgentTool.allCases.filter { tool in
             tool != .none && availableAgents.contains(tool)
@@ -9,16 +25,19 @@ extension AppModel {
     }
 
     func availableRunConfigurations(for worktree: WorktreeRecord) -> [RunConfiguration] {
-        services.runConfigurationDiscovery.discoverRunConfigurations(in: URL(fileURLWithPath: worktree.path))
+        guard let worktreeURL = worktree.materializedURL else { return [] }
+        return services.runConfigurationDiscovery.discoverRunConfigurations(in: worktreeURL)
     }
 
     func availableDevTools(for worktree: WorktreeRecord) -> [SupportedDevTool] {
-        services.devToolDiscovery.availableTools(in: URL(fileURLWithPath: worktree.path))
+        guard let worktreeURL = worktree.materializedURL else { return [] }
+        return services.devToolDiscovery.availableTools(in: worktreeURL)
     }
 
     func openDevTool(_ tool: SupportedDevTool, for worktree: WorktreeRecord, in modelContext: ModelContext) async {
         do {
-            try await services.ideManager.open(tool, worktreeURL: URL(fileURLWithPath: worktree.path))
+            guard let (_, worktreeURL) = await materializedWorktreeContext(for: worktree, in: modelContext) else { return }
+            try await services.ideManager.open(tool, worktreeURL: worktreeURL)
             worktree.lastOpenedAt = .now
             try modelContext.save()
         } catch {
@@ -30,8 +49,8 @@ extension AppModel {
         await openDevTool(tool, for: worktree, in: modelContext)
     }
 
-    func openTerminal(for worktree: WorktreeRecord, in modelContext: ModelContext) {
-        guard let repository = worktree.repository else { return }
+    func openTerminal(for worktree: WorktreeRecord, in modelContext: ModelContext) async {
+        guard let (repository, worktreeURL) = await materializedWorktreeContext(for: worktree, in: modelContext) else { return }
 
         let shell = ProcessInfo.processInfo.environment["SHELL"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -43,7 +62,7 @@ extension AppModel {
             executable: loginShell,
             arguments: ["-il"],
             displayCommandLine: loginShell,
-            currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+            currentDirectoryURL: worktreeURL,
             repositoryID: repository.id,
             worktreeID: worktree.id,
             runtimeRequirement: nil,
@@ -58,6 +77,7 @@ extension AppModel {
         repository: ManagedRepository,
         modelContext: ModelContext
     ) async {
+        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil else { return }
         let availableTools = Set(availableDevTools(for: worktree))
         if let descriptor = services.runConfigurationDiscovery.makeExecutionDescriptor(
             for: configuration,
@@ -78,8 +98,13 @@ extension AppModel {
     }
 
 
-    func runGitCommit(message: String, in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) {
+    func runGitCommit(message: String, in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) async {
         let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+              let worktreeURL = worktree.materializedURL
+        else {
+            return
+        }
         let shellCommand = "git add -A && git commit -m \(trimmedMessage.shellEscaped)"
         let descriptor = CommandExecutionDescriptor(
             title: "git commit",
@@ -87,7 +112,7 @@ extension AppModel {
             executable: "/bin/sh",
             arguments: ["-lc", shellCommand],
             displayCommandLine: "git add -A && git commit -m \"\(trimmedMessage)\"",
-            currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+            currentDirectoryURL: worktreeURL,
             repositoryID: repository.id,
             worktreeID: worktree.id,
             runtimeRequirement: nil,
@@ -98,8 +123,13 @@ extension AppModel {
 
     func runGitPush(in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) async {
         do {
+            guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+                  let worktreeURL = worktree.materializedURL
+            else {
+                return
+            }
             let hasUpstream = try await services.repositoryManager.hasUpstreamBranch(
-                worktreePath: URL(fileURLWithPath: worktree.path)
+                worktreePath: worktreeURL
             )
 
             if !hasUpstream {
@@ -113,7 +143,7 @@ extension AppModel {
                 executable: "git",
                 arguments: ["push"],
                 displayCommandLine: nil,
-                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                currentDirectoryURL: worktreeURL,
                 repositoryID: repository.id,
                 worktreeID: worktree.id,
                 runtimeRequirement: nil,
@@ -126,13 +156,18 @@ extension AppModel {
     }
 
     func runGitPull(in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) async {
+        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+              let worktreeURL = worktree.materializedURL
+        else {
+            return
+        }
         let descriptor = CommandExecutionDescriptor(
             title: "git pull",
             actionKind: .gitOperation,
             executable: "git",
             arguments: ["pull"],
             displayCommandLine: nil,
-            currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+            currentDirectoryURL: worktreeURL,
             repositoryID: repository.id,
             worktreeID: worktree.id,
             runtimeRequirement: nil,
@@ -145,7 +180,7 @@ extension AppModel {
         availableAgents = await services.agentManager.checkAvailability()
     }
 
-    func launchFixWithAI(for run: RunRecord, using tool: AIAgentTool, in modelContext: ModelContext) {
+    func launchFixWithAI(for run: RunRecord, using tool: AIAgentTool, in modelContext: ModelContext) async {
         guard run.isFixableBuildFailure,
               let runConfigurationID = run.runConfigurationID?.nonEmpty,
               let worktreeID = run.worktreeID,
@@ -157,7 +192,7 @@ extension AppModel {
         }
 
         let prompt = Self.fixWithAIPrompt(for: run)
-        guard let agentRun = launchAgent(tool, for: worktree, in: modelContext, initialPrompt: prompt) else {
+        guard let agentRun = await launchAgent(tool, for: worktree, in: modelContext, initialPrompt: prompt) else {
             return
         }
 
@@ -232,16 +267,14 @@ extension AppModel {
         in modelContext: ModelContext,
         initialPrompt: String? = nil,
         options: AgentLaunchOptions = AgentLaunchOptions()
-    ) -> RunRecord? {
+    ) async -> RunRecord? {
         guard tool != .none else { return nil }
 
         do {
             worktree.assignedAgent = tool
             try modelContext.save()
 
-            guard let repository = worktree.repository else {
-                throw StackriotError.worktreeUnavailable
-            }
+            guard let (repository, worktreeURL) = await materializedWorktreeContext(for: worktree, in: modelContext) else { return nil }
 
             let shell = ProcessInfo.processInfo.environment["SHELL"]?.trimmingCharacters(in: .whitespacesAndNewlines)
             let loginShell = (shell?.isEmpty == false ? shell! : "/bin/zsh")
@@ -274,7 +307,7 @@ extension AppModel {
                         executable: executable,
                         arguments: components.arguments,
                         displayCommandLine: components.displayCommandLine,
-                        currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                        currentDirectoryURL: worktreeURL,
                         repositoryID: repository.id,
                         worktreeID: worktree.id,
                         runtimeRequirement: nil,
@@ -299,18 +332,18 @@ extension AppModel {
             let shellCommand: String
             let stdinText: String?
             if let prompt = promptText {
-                let cmd = tool.launchCommandWithPrompt(prompt, in: worktree.path, options: options)
-                if cmd != tool.launchCommand(in: worktree.path) {
+                let cmd = tool.launchCommandWithPrompt(prompt, in: worktreeURL.path, options: options)
+                if cmd != tool.launchCommand(in: worktreeURL.path) {
                     // Tool handles the prompt via flag — no PTY stdin injection needed
                     shellCommand = cmd
                     stdinText = nil
                 } else {
                     // Tool uses interactive mode — inject prompt via PTY stdin
-                    shellCommand = tool.launchCommand(in: worktree.path)
+                    shellCommand = tool.launchCommand(in: worktreeURL.path)
                     stdinText = "\(prompt)\n"
                 }
             } else {
-                shellCommand = tool.launchCommand(in: worktree.path)
+                shellCommand = tool.launchCommand(in: worktreeURL.path)
                 stdinText = nil
             }
             let descriptor = CommandExecutionDescriptor(
@@ -320,7 +353,7 @@ extension AppModel {
                 executable: loginShell,
                 arguments: ["-ilc", shellCommand],
                 displayCommandLine: shellCommand,
-                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                currentDirectoryURL: worktreeURL,
                 repositoryID: repository.id,
                 worktreeID: worktree.id,
                 runtimeRequirement: nil,
@@ -341,7 +374,7 @@ extension AppModel {
         _ tool: AIAgentTool,
         for draft: IntegrationConflictDraft,
         in modelContext: ModelContext
-    ) {
+    ) async {
         guard
             let repository = repositoryRecord(with: draft.repositoryID),
             let defaultWorktree = worktreeRecord(with: draft.defaultWorktreeID)
@@ -362,7 +395,7 @@ extension AppModel {
         """
         pendingIntegrationConflict = nil
         selectedWorktreeIDsByRepository[repository.id] = defaultWorktree.id
-        launchAgent(tool, for: defaultWorktree, in: modelContext, initialPrompt: prompt)
+        _ = await launchAgent(tool, for: defaultWorktree, in: modelContext, initialPrompt: prompt)
     }
 
     func assignAgent(_ tool: AIAgentTool, to worktree: WorktreeRecord, in modelContext: ModelContext) {
@@ -387,14 +420,19 @@ extension AppModel {
         in worktree: WorktreeRecord,
         repository: ManagedRepository,
         modelContext: ModelContext
-    ) {
+    ) async {
+        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+              let worktreeURL = worktree.materializedURL
+        else {
+            return
+        }
         let descriptor = CommandExecutionDescriptor(
             title: "make \(target)",
             actionKind: .makeTarget,
             executable: "make",
             arguments: [target],
             displayCommandLine: nil,
-            currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+            currentDirectoryURL: worktreeURL,
             repositoryID: repository.id,
             worktreeID: worktree.id,
             runtimeRequirement: nil,
@@ -408,17 +446,22 @@ extension AppModel {
         in worktree: WorktreeRecord,
         repository: ManagedRepository,
         modelContext: ModelContext
-    ) {
+    ) async {
+        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+              let worktreeURL = worktree.materializedURL
+        else {
+            return
+        }
         let descriptor = CommandExecutionDescriptor(
             title: "npm run \(script)",
             actionKind: .npmScript,
             executable: "npm",
             arguments: ["run", script],
             displayCommandLine: nil,
-            currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+            currentDirectoryURL: worktreeURL,
             repositoryID: repository.id,
             worktreeID: worktree.id,
-            runtimeRequirement: services.nodeTooling.runtimeRequirement(for: URL(fileURLWithPath: worktree.path)),
+            runtimeRequirement: services.nodeTooling.runtimeRequirement(for: worktreeURL),
             stdinText: nil
         )
         startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
@@ -429,7 +472,8 @@ extension AppModel {
         in worktree: WorktreeRecord,
         repository: ManagedRepository,
         modelContext: ModelContext
-    ) {
+    ) async {
+        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil else { return }
         let descriptor = services.nodeTooling.installDescriptor(for: worktree, mode: mode, repositoryID: repository.id)
         startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
     }

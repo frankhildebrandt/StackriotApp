@@ -5,6 +5,7 @@ import SwiftData
 final class WorktreeRecord {
     var id: UUID
     var branchName: String
+    var kindRaw: String?
     var isDefaultBranchWorkspaceRaw: Bool?
     var isPinnedRaw: Bool?
     var cardColorRaw: String?
@@ -13,6 +14,10 @@ final class WorktreeRecord {
     var ticketIdentifier: String?
     var ticketURL: String?
     var path: String
+    var materializedPathRaw: String?
+    var sourceBranch: String?
+    var destinationRootPath: String?
+    var materializedAt: Date?
     @Transient var assignedAgentRawValue: String = AIAgentTool.none.rawValue
     var createdAt: Date
     var lastOpenedAt: Date?
@@ -38,6 +43,7 @@ final class WorktreeRecord {
     init(
         id: UUID = UUID(),
         branchName: String,
+        kind: WorktreeKind = .regular,
         isDefaultBranchWorkspace: Bool = false,
         isPinned: Bool = false,
         cardColor: WorktreeCardColor = .none,
@@ -45,7 +51,11 @@ final class WorktreeRecord {
         ticketProvider: TicketProviderKind? = nil,
         ticketIdentifier: String? = nil,
         ticketURL: String? = nil,
-        path: String,
+        path: String = "",
+        materializedPath: String? = nil,
+        sourceBranch: String? = nil,
+        destinationRootPath: String? = nil,
+        materializedAt: Date? = nil,
         assignedAgentRawValue: String = AIAgentTool.none.rawValue,
         createdAt: Date = .now,
         lastOpenedAt: Date? = nil,
@@ -58,6 +68,7 @@ final class WorktreeRecord {
     ) {
         self.id = id
         self.branchName = branchName
+        self.kindRaw = kind == .regular ? nil : kind.rawValue
         self.isDefaultBranchWorkspaceRaw = isDefaultBranchWorkspace ? true : nil
         self.isPinnedRaw = isPinned ? true : nil
         self.cardColorRaw = cardColor == .none ? nil : cardColor.rawValue
@@ -65,7 +76,12 @@ final class WorktreeRecord {
         self.ticketProviderRaw = ticketProvider?.rawValue
         self.ticketIdentifier = ticketIdentifier
         self.ticketURL = ticketURL
-        self.path = path
+        let resolvedMaterializedPath = materializedPath?.nilIfBlank ?? path.nilIfBlank
+        self.path = resolvedMaterializedPath ?? ""
+        self.materializedPathRaw = resolvedMaterializedPath
+        self.sourceBranch = sourceBranch?.nilIfBlank
+        self.destinationRootPath = destinationRootPath?.nilIfBlank
+        self.materializedAt = resolvedMaterializedPath == nil ? nil : (materializedAt ?? createdAt)
         self.assignedAgentRawValue = assignedAgentRawValue
         self.createdAt = createdAt
         self.lastOpenedAt = lastOpenedAt
@@ -82,9 +98,70 @@ final class WorktreeRecord {
         set { assignedAgentRawValue = newValue.rawValue }
     }
 
+    var kind: WorktreeKind {
+        get {
+            WorktreeKind(rawValue: kindRaw ?? WorktreeKind.regular.rawValue) ?? .regular
+        }
+        set {
+            kindRaw = newValue == .regular ? nil : newValue.rawValue
+        }
+    }
+
     var isDefaultBranchWorkspace: Bool {
         get { isDefaultBranchWorkspaceRaw ?? false }
         set { isDefaultBranchWorkspaceRaw = newValue }
+    }
+
+    var isIdeaTree: Bool {
+        kind == .idea
+    }
+
+    var materializedPath: String? {
+        get { materializedPathRaw?.nilIfBlank ?? path.nilIfBlank }
+        set {
+            let normalized = newValue?.nilIfBlank
+            materializedPathRaw = normalized
+            path = normalized ?? ""
+        }
+    }
+
+    var isMaterialized: Bool {
+        isDefaultBranchWorkspace || materializedPath != nil
+    }
+
+    var materializedURL: URL? {
+        materializedPath.map { URL(fileURLWithPath: $0) }
+    }
+
+    var destinationRootURL: URL? {
+        destinationRootPath?.nilIfBlank.map { URL(fileURLWithPath: $0, isDirectory: true) }
+    }
+
+    var displayPath: String? {
+        materializedPath ?? projectedMaterializationPath
+    }
+
+    var projectedMaterializationPath: String? {
+        guard !isDefaultBranchWorkspace else { return materializedPath }
+        let rootURL: URL
+        if let destinationRootURL {
+            rootURL = destinationRootURL
+        } else if let repository {
+            rootURL = AppPaths.worktreesRoot.appendingPathComponent(repository.displayName, isDirectory: true)
+        } else {
+            return nil
+        }
+        return rootURL.appendingPathComponent(branchName, isDirectory: true).path
+    }
+
+    var sourceBranchName: String? {
+        sourceBranch?.nilIfBlank
+    }
+
+    func markMaterialized(at path: String, kind: WorktreeKind = .regular, timestamp: Date = .now) {
+        materializedPath = path
+        materializedAt = timestamp
+        self.kind = kind
     }
 
     var isPinned: Bool {

@@ -119,13 +119,15 @@ struct PlanEditorView: View {
                     Button {
                         saveTask?.cancel()
                         persistCurrentBodyText()
-                        appModel.startAgentPlanDraft(
-                            using: tool,
-                            for: worktree,
-                            in: repository,
-                            currentIntentText: bodyText,
-                            modelContext: modelContext
-                        )
+                        Task {
+                            await appModel.startAgentPlanDraft(
+                                using: tool,
+                                for: worktree,
+                                in: repository,
+                                currentIntentText: bodyText,
+                                modelContext: modelContext
+                            )
+                        }
                     } label: {
                         Label(tool.displayName, systemImage: tool.systemImageName)
                     }
@@ -154,7 +156,9 @@ struct PlanEditorView: View {
                                 await appModel.prepareCopilotExecutionWithPlan(for: worktree, in: repository)
                             }
                         } else {
-                            appModel.launchAgentWithPlan(tool, for: worktree, in: modelContext)
+                            Task {
+                                await appModel.launchAgentWithPlan(tool, for: worktree, in: modelContext)
+                            }
                         }
                     }
                 }

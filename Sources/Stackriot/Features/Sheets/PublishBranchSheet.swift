@@ -16,10 +16,12 @@ struct PublishBranchSheet: View {
             Text("Publish Branch")
                 .font(.title2.weight(.semibold))
 
-            Text(worktree.path)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+            if let displayPath = worktree.displayPath {
+                Text(displayPath)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
 
             Picker("Remote", selection: $appModel.publishDraft.remoteName) {
                 ForEach(repository.remotes.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })) { remote in
@@ -47,4 +49,3 @@ struct PublishBranchSheet: View {
         .background(.regularMaterial)
     }
 }
-

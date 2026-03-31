@@ -26,9 +26,9 @@ struct CreateWorktreeSheet: View {
         let destinationDescription = projectedDestinationPath
             ?? "Standardpfad unter \(AppPaths.worktreesRoot.path)"
         var message = """
-        Es wird ein neuer lokaler Worktree mit dem Branch \(appModel.worktreeDraft.normalizedBranchName) aus \(sourceBranchName) angelegt.
-        Zielpfad: \(destinationDescription)
-        Dateien und Metadaten in diesem Repository werden lokal erweitert.
+        Es wird ein neuer IdeaTree mit dem Branch \(appModel.worktreeDraft.normalizedBranchName) aus \(sourceBranchName) angelegt.
+        Geplanter Zielpfad bei spaeterer Materialisierung: \(destinationDescription)
+        Zunaechst wird nur der Datensatz mit Intent und Metadaten gespeichert; ein Git-Worktree wird noch nicht erstellt.
         """
 
         if appModel.worktreeDraft.hasConfirmedTicket, let selectedTicket = appModel.worktreeDraft.selectedTicket {
@@ -58,7 +58,7 @@ struct CreateWorktreeSheet: View {
         let selectedProvider = draft.ticketProvider ?? draft.availableTicketProviders.first
 
         VStack(alignment: .leading, spacing: 20) {
-            Text("Create Worktree")
+            Text("Create IdeaTree")
                 .font(.title2.weight(.semibold))
 
             HStack(alignment: .top, spacing: 20) {
@@ -308,7 +308,7 @@ struct CreateWorktreeSheet: View {
             }
 
             if isCreating {
-                ProgressView("Worktree wird erstellt…")
+                ProgressView("IdeaTree wird erstellt…")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -320,7 +320,7 @@ struct CreateWorktreeSheet: View {
                 .keyboardShortcut(.cancelAction)
                 .disabled(isCreating)
 
-                Button("Create") {
+                Button("Create IdeaTree") {
                     pendingCreationConfirmation = true
                 }
                 .buttonStyle(.borderedProminent)
@@ -346,7 +346,7 @@ struct CreateWorktreeSheet: View {
             }
             triggerImmediateSearch()
         }
-        .confirmationDialog("Worktree erstellen?", isPresented: $pendingCreationConfirmation) {
+        .confirmationDialog("IdeaTree erstellen?", isPresented: $pendingCreationConfirmation) {
             Button("Erstellen") {
                 createWorktree()
             }

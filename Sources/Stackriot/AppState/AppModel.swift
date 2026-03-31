@@ -208,6 +208,9 @@ final class AppModel: @unchecked Sendable {
             if lhs.isPinned != rhs.isPinned {
                 return lhs.isPinned
             }
+            if lhs.isIdeaTree != rhs.isIdeaTree {
+                return lhs.isIdeaTree
+            }
             return lhs.createdAt > rhs.createdAt
         }
     }

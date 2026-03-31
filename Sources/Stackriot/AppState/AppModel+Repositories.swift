@@ -221,7 +221,18 @@ extension AppModel {
 
     func revealWorktreeInFinder(_ worktree: WorktreeRecord) async {
         do {
-            try await services.ideManager.revealInFinder(path: URL(fileURLWithPath: worktree.path))
+            guard let repository = worktree.repository else {
+                throw StackriotError.worktreeUnavailable
+            }
+            guard let modelContext = storedModelContext else {
+                throw StackriotError.worktreeUnavailable
+            }
+            guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+                  let worktreeURL = worktree.materializedURL
+            else {
+                return
+            }
+            try await services.ideManager.revealInFinder(path: worktreeURL)
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
@@ -234,7 +245,7 @@ extension AppModel {
             }
             try await services.repositoryManager.deleteRepository(
                 bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
-                worktreePaths: repository.worktrees.map { URL(fileURLWithPath: $0.path) }
+                worktreePaths: repository.worktrees.compactMap(\.materializedURL)
             )
 
             modelContext.delete(repository)

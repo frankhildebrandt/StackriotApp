@@ -14,7 +14,11 @@ struct WorktreePrimaryContextView: View {
         Group {
             switch worktree.primaryContextTabKind {
             case .readme:
-                ReadmeView(worktreePath: worktree.path)
+                if let worktreePath = worktree.materializedPath {
+                    ReadmeView(worktreePath: worktreePath)
+                } else {
+                    PlanEditorView(role: .intent, worktree: worktree, repository: repository)
+                }
             case .plan:
                 primaryPaneContent(browserAvailable: false)
             case .browser:

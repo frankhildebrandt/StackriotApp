@@ -132,14 +132,19 @@ extension AppModel {
         }
 
         do {
+            guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
+                  let worktreeURL = worktree.materializedURL
+            else {
+                return
+            }
             try await services.worktreeManager.updateCheckedOutPullRequest(
                 bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
-                worktreePath: URL(fileURLWithPath: worktree.path),
+                worktreePath: worktreeURL,
                 localBranchName: worktree.branchName,
                 prNumber: prNumber
             )
             let localHead = try await services.worktreeManager.currentRevision(
-                worktreePath: URL(fileURLWithPath: worktree.path)
+                worktreePath: worktreeURL
             )
             if var context = worktree.primaryContext ?? worktree.resolvedPrimaryContext {
                 context = WorktreePrimaryContext(
@@ -208,9 +213,12 @@ extension AppModel {
             let storedHead = worktree.resolvedPrimaryContext?.upstreamSHA
             do {
                 let pr = try await services.gitHubCLIService.loadPullRequest(number: prNumber, in: repository)
-                let localHead = try? await services.worktreeManager.currentRevision(
-                    worktreePath: URL(fileURLWithPath: worktree.path)
-                )
+                let localHead: String?
+                if let worktreeURL = worktree.materializedURL {
+                    localHead = try? await services.worktreeManager.currentRevision(worktreePath: worktreeURL)
+                } else {
+                    localHead = nil
+                }
                 pullRequestUpstreamStatuses[worktree.id] = PullRequestUpstreamStatus(
                     state: pr.status,
                     remoteHeadSHA: pr.headRefOID,

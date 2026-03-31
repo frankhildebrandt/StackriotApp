@@ -21,12 +21,14 @@ struct AgentRunSummaryWindow: View {
                 Spacer()
                 if let commitMessage, let worktree = resolvedWorktree, let repository = resolvedRepository {
                     Button {
-                        appModel.runGitCommit(
-                            message: commitMessage.fullMessage,
-                            in: worktree,
-                            repository: repository,
-                            modelContext: modelContext
-                        )
+                        Task {
+                            await appModel.runGitCommit(
+                                message: commitMessage.fullMessage,
+                                in: worktree,
+                                repository: repository,
+                                modelContext: modelContext
+                            )
+                        }
                     } label: {
                         Label("Commit Work", systemImage: "checkmark.circle")
                     }
