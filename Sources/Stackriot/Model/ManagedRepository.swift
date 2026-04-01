@@ -79,4 +79,13 @@ final class ManagedRepository {
     var primaryRemote: RepositoryRemote? {
         defaultRemote
     }
+
+    func childWorktrees(of parent: WorktreeRecord) -> [WorktreeRecord] {
+        worktrees.filter { $0.parentWorktreeID == parent.id }
+    }
+
+    func parentWorktree(of child: WorktreeRecord) -> WorktreeRecord? {
+        guard let parentID = child.parentWorktreeID else { return nil }
+        return worktrees.first(where: { $0.id == parentID })
+    }
 }

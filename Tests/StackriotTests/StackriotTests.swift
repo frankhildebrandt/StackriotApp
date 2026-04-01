@@ -683,8 +683,8 @@ struct StackriotTests {
 
         let result = try await WorktreeStatusService().integrate(
             sourceBranch: "feature/integration",
-            defaultBranch: cloneInfo.defaultBranch,
-            defaultWorktreePath: defaultWorkspace.path
+            targetBranch: cloneInfo.defaultBranch,
+            targetWorktreePath: defaultWorkspace.path
         )
 
         guard case .committed = result else {
@@ -740,8 +740,8 @@ struct StackriotTests {
 
         let result = try await WorktreeStatusService().integrate(
             sourceBranch: "feature/conflict",
-            defaultBranch: cloneInfo.defaultBranch,
-            defaultWorktreePath: defaultWorkspace.path
+            targetBranch: cloneInfo.defaultBranch,
+            targetWorktreePath: defaultWorkspace.path
         )
 
         switch result {
@@ -3609,6 +3609,120 @@ struct StackriotTests {
 
         try? FileManager.default.removeItem(at: destinationRoot)
         try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
+    @Test
+    func quickIntentHotkeyFormattingAndCodingStayStable() throws {
+        let configuration = QuickIntentHotkeyConfiguration(
+            isEnabled: true,
+            keyCode: 34,
+            modifiers: [.command, .option, .shift]
+        )
+
+        #expect(configuration.displayString == "Cmd + Opt + Shift + I")
+        #expect(QuickIntentHotkeyConfiguration.keyLabel(for: 49) == "Space")
+        #expect(QuickIntentHotkeyConfiguration.keyLabel(for: 999) == "Key 999")
+
+        let encoded = try JSONEncoder().encode(configuration)
+        let decoded = try JSONDecoder().decode(QuickIntentHotkeyConfiguration.self, from: encoded)
+        #expect(decoded == configuration)
+    }
+
+    @MainActor
+    @Test
+    func parentChildGroupingKeepsRootsVisibleAndPreventsCycles() throws {
+        let repository = makeRepository(name: "ParentChildGrouping")
+        let root = WorktreeRecord(
+            branchName: "feature/root",
+            createdAt: Date(timeIntervalSince1970: 10),
+            repository: repository
+        )
+        let child = WorktreeRecord(
+            branchName: "feature/child",
+            parentWorktreeID: root.id,
+            createdAt: Date(timeIntervalSince1970: 20),
+            repository: repository
+        )
+        let missingParentChild = WorktreeRecord(
+            branchName: "feature/orphaned",
+            parentWorktreeID: UUID(),
+            createdAt: Date(timeIntervalSince1970: 30),
+            repository: repository
+        )
+        let newerRoot = WorktreeRecord(
+            branchName: "feature/newer-root",
+            createdAt: Date(timeIntervalSince1970: 40),
+            repository: repository
+        )
+        repository.worktrees = [root, child, missingParentChild, newerRoot]
+
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        let roots = appModel.groupedRootWorktrees(from: repository.worktrees, in: repository)
+        let directChildren = appModel.childWorktrees(of: root, in: repository)
+
+        #expect(roots.map(\.branchName) == [
+            "feature/newer-root",
+            "feature/orphaned",
+            "feature/root",
+        ])
+        #expect(directChildren.map(\.branchName) == ["feature/child"])
+        #expect(appModel.canAssignParentWorktree(child, to: root, in: repository) == false)
+        #expect(appModel.canAssignParentWorktree(newerRoot, to: child, in: repository))
+    }
+
+    @MainActor
+    @Test
+    func quickIntentCreateActionUsesSelectedWorktreeAsParentBranch() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: "QuickIntentRepo",
+            bareRepositoryPath: "/tmp/quick-intent-repo",
+            defaultBranch: "main"
+        )
+        let parent = WorktreeRecord(
+            branchName: "feature/current-base",
+            path: "/tmp/quick-intent-parent",
+            sourceBranch: "main",
+            repository: repository
+        )
+        repository.worktrees = [parent]
+        modelContext.insert(repository)
+        modelContext.insert(parent)
+        try modelContext.save()
+
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        appModel.storedModelContext = modelContext
+        appModel.selectedRepositoryID = repository.id
+        appModel.selectedWorktreeIDsByRepository[repository.id] = parent.id
+        appModel.quickIntentSession = QuickIntentSession(
+            source: .clipboard,
+            sourceLabel: "Zwischenablage",
+            text: "Ship dashboard shortcuts",
+            useCurrentWorktreeAsParent: true
+        )
+
+        await appModel.runQuickIntentCreateAction()
+
+        #expect(appModel.pendingErrorMessage == nil)
+        #expect(appModel.quickIntentSession == nil)
+        #expect(repository.worktrees.count == 2)
+
+        guard let created = repository.worktrees.first(where: { $0.id != parent.id }) else {
+            Issue.record("Expected quick intent child worktree")
+            return
+        }
+
+        #expect(created.kind == .idea)
+        #expect(created.parentWorktreeID == parent.id)
+        #expect(created.sourceBranch == "feature/current-base")
+        #expect(created.branchName == WorktreeManager.normalizedWorktreeName(from: "Ship dashboard shortcuts"))
+        #expect(appModel.selectedWorktreeID(for: repository) == created.id)
+
+        let intentURL = AppPaths.intentFile(for: created.id)
+        let intent = try String(contentsOf: intentURL, encoding: .utf8)
+        #expect(intent == "Ship dashboard shortcuts")
+
+        try? FileManager.default.removeItem(at: intentURL)
     }
 
     private func createSeededRemote(named name: String) async throws -> (root: URL, remote: URL) {

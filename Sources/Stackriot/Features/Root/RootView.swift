@@ -82,6 +82,11 @@ struct RootView: View {
             openWindow(id: "cursor-agent-markdown", value: payload)
             appModel.pendingAgentMarkdownWindowPayload = nil
         }
+        .onChange(of: appModel.pendingQuickIntentActivationID) { _, activationID in
+            guard activationID != nil else { return }
+            openWindow(id: "quick-intent")
+            appModel.pendingQuickIntentActivationID = nil
+        }
         .task {
             appModel.configure(modelContext: modelContext)
             await appModel.checkAgentAvailability()
@@ -258,15 +263,8 @@ struct RootView: View {
             }
         }
         .confirmationDialog(
-            appModel.pendingTerminalCloseConfirmation?.title ?? "Terminal schließen?",
-            isPresented: Binding(
-                get: { appModel.pendingTerminalCloseConfirmation != nil },
-                set: { newValue in
-                    if !newValue {
-                        appModel.clearPendingTerminalCloseConfirmation()
-                    }
-                }
-            )
+            pendingTerminalCloseTitle,
+            isPresented: pendingTerminalCloseBinding
         ) {
             Button("Force Close", role: .destructive) {
                 appModel.confirmPendingTerminalClose(in: modelContext)
@@ -275,22 +273,51 @@ struct RootView: View {
                 appModel.clearPendingTerminalCloseConfirmation()
             }
         } message: {
-            Text(appModel.pendingTerminalCloseConfirmation?.message ?? "")
+            Text(pendingTerminalCloseMessage)
         }
-        .alert("Stackriot", isPresented: Binding(
+        .alert(isPresented: pendingErrorBinding) {
+            Alert(
+                title: Text("Stackriot"),
+                message: Text(pendingErrorText),
+                dismissButton: .cancel(Text("OK")) {
+                    appModel.pendingErrorMessage = nil
+                }
+            )
+        }
+    }
+
+    private var pendingErrorBinding: Binding<Bool> {
+        Binding(
             get: { appModel.pendingErrorMessage != nil },
             set: { newValue in
                 if !newValue {
                     appModel.pendingErrorMessage = nil
                 }
             }
-        )) {
-            Button("OK", role: .cancel) {
-                appModel.pendingErrorMessage = nil
+        )
+    }
+
+    private var pendingErrorText: String {
+        appModel.pendingErrorMessage ?? ""
+    }
+
+    private var pendingTerminalCloseBinding: Binding<Bool> {
+        Binding(
+            get: { appModel.pendingTerminalCloseConfirmation != nil },
+            set: { newValue in
+                if !newValue {
+                    appModel.clearPendingTerminalCloseConfirmation()
+                }
             }
-        } message: {
-            Text(appModel.pendingErrorMessage ?? "")
-        }
+        )
+    }
+
+    private var pendingTerminalCloseTitle: String {
+        appModel.pendingTerminalCloseConfirmation?.title ?? "Terminal schließen?"
+    }
+
+    private var pendingTerminalCloseMessage: String {
+        appModel.pendingTerminalCloseConfirmation?.message ?? ""
     }
 }
 extension View {

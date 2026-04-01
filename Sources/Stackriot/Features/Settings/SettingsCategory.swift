@@ -2,6 +2,7 @@ import Foundation
 
 enum SettingsCategory: String, CaseIterable, Identifiable {
     case repositories
+    case shortcuts
     case terminal
     case node
     case aiProvider
@@ -19,6 +20,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .repositories:
             "Repositories"
+        case .shortcuts:
+            "Shortcuts"
         case .terminal:
             "Terminal"
         case .node:
@@ -42,6 +45,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .repositories:
             "shippingbox"
+        case .shortcuts:
+            "keyboard"
         case .terminal:
             "terminal"
         case .node:
@@ -65,6 +70,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .repositories:
             "Refresh behavior and repository workflow defaults."
+        case .shortcuts:
+            "Global quick-intent shortcut, recorder, and accessibility hints."
         case .terminal:
             "How finished terminal tabs are kept and presented."
         case .node:

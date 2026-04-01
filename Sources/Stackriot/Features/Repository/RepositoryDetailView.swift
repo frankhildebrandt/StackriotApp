@@ -165,14 +165,14 @@ struct RepositoryDetailView: View {
         }
     }
 
-    private func worktreeSection(worktrees: [WorktreeRecord], buckets: WorktreeBuckets) -> some View {
+    private func worktreeSection(worktrees: [WorktreeRecord], buckets: WorktreeBuckets) -> AnyView {
         let defaultWorktree = buckets.defaultWorktree
         let pinnedWorktrees = buckets.pinnedWorktrees
         let ideaTrees = buckets.ideaTrees
         let regularWorktrees = buckets.regularWorktrees
         let featureWorktrees = buckets.featureWorktrees
 
-        return VStack(alignment: .leading, spacing: 12) {
+        return AnyView(VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Worktrees")
                     .font(.title3.weight(.semibold))
@@ -251,7 +251,7 @@ struct RepositoryDetailView: View {
                     featureWorktreeMotivationCard
                 }
             }
-        }
+        })
     }
 
     private var emptyWorktreeState: some View {
@@ -286,14 +286,13 @@ struct RepositoryDetailView: View {
         movingWorktreeIDs.contains(worktree.id)
     }
 
-    @ViewBuilder
     private func worktreeGroup(
         title: String?,
         subtitle: String? = nil,
         worktrees: [WorktreeRecord]
-    ) -> some View {
+    ) -> AnyView {
         if !worktrees.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
+            return AnyView(VStack(alignment: .leading, spacing: 10) {
                 if let title {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(title)
@@ -307,15 +306,35 @@ struct RepositoryDetailView: View {
                 }
 
                 VStack(spacing: 10) {
-                    ForEach(worktrees) { worktree in
-                        worktreeCard(worktree)
+                    ForEach(appModel.groupedRootWorktrees(from: worktrees, in: repository)) { worktree in
+                        worktreeTree(worktree, within: worktrees, indentationLevel: 0)
+                    }
+                }
+            })
+        }
+        return AnyView(EmptyView())
+    }
+
+    private func worktreeTree(_ worktree: WorktreeRecord, within worktrees: [WorktreeRecord], indentationLevel: Int) -> AnyView {
+        AnyView(VStack(spacing: 10) {
+            worktreeCard(worktree, indentationLevel: indentationLevel)
+
+            let descendants = appModel
+                .childWorktrees(of: worktree, in: repository)
+                .filter { child in
+                    worktrees.contains(where: { $0.id == child.id })
+                }
+            if !descendants.isEmpty {
+                VStack(spacing: 10) {
+                    ForEach(descendants) { child in
+                        worktreeTree(child, within: worktrees, indentationLevel: indentationLevel + 1)
                     }
                 }
             }
-        }
+        })
     }
 
-    private func worktreeCard(_ worktree: WorktreeRecord) -> some View {
+    private func worktreeCard(_ worktree: WorktreeRecord, indentationLevel: Int) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 if autoSyncAvailable(for: worktree) {
@@ -346,6 +365,12 @@ struct RepositoryDetailView: View {
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
+                        if indentationLevel > 0 {
+                            Image(systemName: "arrow.turn.down.right")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .help("Sub-Worktree")
+                        }
                         Text(worktreeTitle(for: worktree))
                             .font(.headline)
                         if worktree.isIdeaTree {
@@ -476,7 +501,7 @@ struct RepositoryDetailView: View {
                             }
                             .buttonStyle(.plain)
                             .disabled(worktree.lifecycleState == .integrating)
-                            .help("In \(repository.defaultBranch) integrieren")
+                            .help("In \(integrationTargetBranchName(for: worktree)) integrieren")
                         }
                     }
                 }
@@ -486,6 +511,7 @@ struct RepositoryDetailView: View {
                 defaultBranchIndicatorRow(for: worktree)
             }
         }
+        .padding(.leading, CGFloat(indentationLevel) * 24)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -561,7 +587,7 @@ struct RepositoryDetailView: View {
                         )
                     }
                 }
-                Button("In Main/Default integrieren") {
+                Button("In \(integrationTargetBranchName(for: worktree)) integrieren") {
                     appModel.integrationDraft = IntegrationDraft(
                         prTitle: worktree.branchName
                     )
@@ -632,6 +658,15 @@ struct RepositoryDetailView: View {
         }
         let status = appModel.worktreeStatuses[worktree.id]
         return (status?.aheadCount ?? 0) > 0
+    }
+
+    private func integrationTargetBranchName(for worktree: WorktreeRecord) -> String {
+        if let parentID = worktree.parentWorktreeID,
+           let parent = repository.worktrees.first(where: { $0.id == parentID })
+        {
+            return parent.branchName
+        }
+        return repository.defaultBranch
     }
 
     private func worktreeTitle(for worktree: WorktreeRecord) -> String {

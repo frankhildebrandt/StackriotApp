@@ -113,6 +113,42 @@ struct IntegrationDraft {
     }
 }
 
+struct QuickIntentSession: Identifiable {
+    let id: UUID
+    var source: QuickIntentCaptureSource
+    var sourceLabel: String
+    var text: String
+    var branchName: String
+    var summaryTitle: String
+    var useCurrentWorktreeAsParent: Bool
+    var accessibilityAvailable: Bool
+    var accessibilityHint: String?
+    var isSummarizing = false
+    var isPerformingAction = false
+
+    init(
+        id: UUID = UUID(),
+        source: QuickIntentCaptureSource,
+        sourceLabel: String,
+        text: String,
+        branchName: String = "",
+        summaryTitle: String = "",
+        useCurrentWorktreeAsParent: Bool = false,
+        accessibilityAvailable: Bool = true,
+        accessibilityHint: String? = nil
+    ) {
+        self.id = id
+        self.source = source
+        self.sourceLabel = sourceLabel
+        self.text = text
+        self.branchName = branchName
+        self.summaryTitle = summaryTitle
+        self.useCurrentWorktreeAsParent = useCurrentWorktreeAsParent
+        self.accessibilityAvailable = accessibilityAvailable
+        self.accessibilityHint = accessibilityHint
+    }
+}
+
 enum NameEditorMode {
     case create
     case rename

@@ -1,3 +1,4 @@
+import AppKit
 import Observation
 import SwiftData
 import SwiftUI
@@ -54,6 +55,8 @@ final class AppModel: @unchecked Sendable {
     var pendingRunFixesByAgentRunID: [UUID: RunFixRequest] = [:]
     var activeAgentPlanDraftWorktreeID: UUID?
     var pendingCopilotExecutionDraft: PendingAgentExecutionDraft?
+    var quickIntentSession: QuickIntentSession?
+    var pendingQuickIntentActivationID: UUID?
     var intentContentVersionsByWorktreeID: [UUID: Int] = [:]
     var implementationPlanContentVersionsByWorktreeID: [UUID: Int] = [:]
     var devContainerStatesByWorktreeID: [UUID: DevContainerWorkspaceState] = [:]
@@ -121,6 +124,7 @@ final class AppModel: @unchecked Sendable {
         if storedModelContext == nil {
             storedModelContext = modelContext
             prepareNotificationsIfNeeded()
+            configureQuickIntentHotKey()
             migrateLegacyRepositoriesIfNeeded(in: modelContext)
             migrateWorktreePrimaryContextsIfNeeded(in: modelContext)
             startAutoRefreshLoopIfNeeded()
@@ -347,6 +351,60 @@ final class AppModel: @unchecked Sendable {
 
     func defaultBranchWorkspace(for repository: ManagedRepository) -> WorktreeRecord? {
         worktrees(for: repository).first(where: \.isDefaultBranchWorkspace)
+    }
+}
+
+extension AppModel {
+    func configureQuickIntentHotKey() {
+        services.globalHotKeyManager.register(AppPreferences.quickIntentHotkeyConfiguration) { [weak self] in
+            guard let self else { return }
+            self.presentQuickIntentFromSystemTrigger()
+        }
+    }
+
+    func presentQuickIntentFromSystemTrigger() {
+        let capture = services.quickIntentContextService.captureCurrentContext()
+        presentQuickIntent(capture)
+    }
+
+    func presentQuickIntentFromURL(_ url: URL) {
+        do {
+            let capture = try services.quickIntentContextService.captureContext(from: url)
+            presentQuickIntent(capture)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func dismissQuickIntentSession() {
+        quickIntentSession = nil
+    }
+
+    func quickIntentRepositoryContext() -> (namespace: RepositoryNamespace?, repository: ManagedRepository?, worktree: WorktreeRecord?) {
+        let repository = selectedRepository()
+        let worktree = repository.flatMap { selectedWorktree(for: $0) }
+        let namespace = selectedNamespaceID.flatMap(namespaceRecord(with:))
+        return (namespace, repository, worktree)
+    }
+
+    private func presentQuickIntent(_ capture: QuickIntentCapture) {
+        let normalizedText = capture.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let generatedBranch = WorktreeManager.normalizedWorktreeName(
+            from: normalizedText
+                .components(separatedBy: .newlines)
+                .first ?? ""
+        )
+        quickIntentSession = QuickIntentSession(
+            source: capture.source,
+            sourceLabel: capture.sourceLabel,
+            text: capture.text,
+            branchName: generatedBranch,
+            useCurrentWorktreeAsParent: false,
+            accessibilityAvailable: capture.accessibilityAvailable,
+            accessibilityHint: capture.accessibilityHint
+        )
+        pendingQuickIntentActivationID = UUID()
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 

@@ -3,19 +3,23 @@ import Foundation
 struct AIProviderService {
     typealias WorktreeNameGenerator = @Sendable (_ ticket: TicketDetails, _ configuration: AIProviderConfiguration) async throws -> AIWorktreeNameSuggestion
     typealias RunSummaryGenerator = @Sendable (_ title: String, _ commandLine: String, _ output: String, _ exitCode: Int?, _ configuration: AIProviderConfiguration) async throws -> AIRunSummary
+    typealias IntentSummaryGenerator = @Sendable (_ text: String, _ configuration: AIProviderConfiguration) async throws -> AIIntentSummary
 
     private let configurationProvider: @Sendable () -> AIProviderConfiguration
     private let worktreeNameGenerator: WorktreeNameGenerator
     private let runSummaryGenerator: RunSummaryGenerator
+    private let intentSummaryGenerator: IntentSummaryGenerator
 
     init(
         configurationProvider: @escaping @Sendable () -> AIProviderConfiguration = { AppPreferences.aiConfiguration },
         worktreeNameGenerator: @escaping WorktreeNameGenerator = AIProviderService.liveWorktreeNameSuggestion,
-        runSummaryGenerator: @escaping RunSummaryGenerator = AIProviderService.liveRunSummary
+        runSummaryGenerator: @escaping RunSummaryGenerator = AIProviderService.liveRunSummary,
+        intentSummaryGenerator: @escaping IntentSummaryGenerator = AIProviderService.liveIntentSummary
     ) {
         self.configurationProvider = configurationProvider
         self.worktreeNameGenerator = worktreeNameGenerator
         self.runSummaryGenerator = runSummaryGenerator
+        self.intentSummaryGenerator = intentSummaryGenerator
     }
 
     func suggestWorktreeName(for ticket: TicketDetails) async throws -> AIWorktreeNameSuggestion {
@@ -39,6 +43,14 @@ struct AIProviderService {
         return try await runSummaryGenerator(title, commandLine, output, exitCode, configuration)
     }
 
+    func summarizeTextForIntent(_ text: String) async throws -> AIIntentSummary {
+        let configuration = configurationProvider()
+        guard configuration.isConfigured else {
+            return fallbackIntentSummary(for: text)
+        }
+        return try await intentSummaryGenerator(text, configuration)
+    }
+
     func generateCommitMessage(diff: String) async throws -> AIRunSummary {
         let configuration = configurationProvider()
         guard configuration.isConfigured else {
@@ -58,6 +70,10 @@ struct AIProviderService {
         exitCode: Int?
     ) -> AIRunSummary {
         Self.fallbackRunSummary(title: title, commandLine: commandLine, output: output, exitCode: exitCode)
+    }
+
+    func fallbackIntentSummary(for text: String) -> AIIntentSummary {
+        Self.fallbackIntentSummary(for: text)
     }
 
     private static func liveCommitMessageSummary(
@@ -213,6 +229,48 @@ struct AIProviderService {
         return AIRunSummary(title: summaryTitle, summary: summaryText)
     }
 
+    private static func liveIntentSummary(
+        text: String,
+        configuration: AIProviderConfiguration
+    ) async throws -> AIIntentSummary {
+        let trimmedInput = String(text.suffix(12_000))
+        let prompt = """
+        Fasse den folgenden Rohtext fuer einen neuen Intent auf Deutsch zusammen und antworte nur mit JSON.
+
+        Regeln:
+        - `title` ist ein kurzer Titel mit maximal 6 Woertern.
+        - `summary` ist ein kurzer, klarer Arbeitsauftrag in 2 bis 5 Saetzen.
+        - Schreibe praezise und produktorientiert.
+        - Erhalte wichtige Randbedingungen, aber vermeide Wiederholungen.
+
+        JSON-Schema:
+        {
+          "title": "Kurzer Titel",
+          "summary": "Praeziser, editierbarer Intent."
+        }
+
+        Rohtext:
+        \(trimmedInput)
+        """
+
+        let response = try await generateText(
+            configuration: configuration,
+            systemPrompt: "Du verdichtest ungeordneten Rohtext in kurze, verlaessliche Intent-Zusammenfassungen auf Deutsch.",
+            userPrompt: prompt
+        )
+        guard let data = extractFirstJSONObject(from: response)?.data(using: .utf8) else {
+            throw StackriotError.commandFailed("AI response did not contain valid JSON for the intent summary.")
+        }
+        let decoded = try JSONDecoder().decode(RunSummaryPayload.self, from: data)
+        guard
+            let title = decoded.title.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty,
+            let summary = decoded.summary.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        else {
+            throw StackriotError.commandFailed("AI response for intent summary was incomplete.")
+        }
+        return AIIntentSummary(title: title, summary: summary)
+    }
+
     private static func generateText(
         configuration: AIProviderConfiguration,
         systemPrompt: String,
@@ -238,6 +296,22 @@ struct AIProviderService {
                 userPrompt: userPrompt
             )
         }
+    }
+
+    private static func fallbackIntentSummary(for text: String) -> AIIntentSummary {
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = normalized
+            .components(separatedBy: .newlines)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .prefix(6)
+            .joined(separator: " ")
+            .nonEmpty ?? "Quick Intent"
+        let summary = String(normalized.prefix(800)).nonEmpty ?? "Kein Inhalt vorhanden."
+        return AIIntentSummary(title: title, summary: summary)
     }
 
     private static func generateOpenAICompatibleText(
