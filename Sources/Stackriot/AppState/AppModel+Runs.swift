@@ -191,9 +191,13 @@ extension AppModel {
                 refreshRunningAgentWorktrees()
             }
             if let worktree {
-                terminalTabs.deselectPlanTab(for: worktree.id)
-                terminalTabs.activate(runID: runID, worktreeID: worktree.id)
                 selectedWorktreeIDsByRepository[repository.id] = worktree.id
+                if descriptor.activatesTerminalTab {
+                    terminalTabs.deselectPlanTab(for: worktree.id)
+                    terminalTabs.activate(runID: runID, worktreeID: worktree.id)
+                } else {
+                    terminalTabs.showInBackground(runID: runID, worktreeID: worktree.id)
+                }
             }
             Task { [weak self] in
                 await self?.launchRun(runID: runID, descriptor: descriptor)

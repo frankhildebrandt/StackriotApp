@@ -9,10 +9,10 @@ struct PendingCopilotExecutionSheet: View {
 
         VStack(alignment: .leading, spacing: 16) {
             if let draft = appModel.pendingCopilotExecutionDraft {
-                Text("Execute with GitHub Copilot")
+                Text(draft.activatesTerminalTab ? "Execute with GitHub Copilot" : "Send to Background with GitHub Copilot")
                     .font(.title3.weight(.semibold))
 
-                Text("Run the current \(draft.promptSourceTitle.lowercased()) with GitHub Copilot.")
+                Text(executionDescription(for: draft))
                     .foregroundStyle(.secondary)
 
                 if draft.isLoadingCopilotModels {
@@ -62,7 +62,7 @@ struct PendingCopilotExecutionSheet: View {
                         }
                     }
 
-                    Button("Execute") {
+                    Button(draft.activatesTerminalTab ? "Execute" : "Send to Background") {
                         appModel.executePendingCopilotExecution(in: modelContext)
                     }
                     .keyboardShortcut(.defaultAction)
@@ -74,5 +74,13 @@ struct PendingCopilotExecutionSheet: View {
         }
         .padding(20)
         .frame(width: 460)
+    }
+
+    private func executionDescription(for draft: PendingAgentExecutionDraft) -> String {
+        let sourceTitle = draft.promptSourceTitle.lowercased()
+        if draft.activatesTerminalTab {
+            return "Run the current \(sourceTitle) with GitHub Copilot."
+        }
+        return "Run the current \(sourceTitle) with GitHub Copilot in the background while keeping the plan open."
     }
 }
