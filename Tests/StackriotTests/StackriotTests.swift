@@ -3688,6 +3688,56 @@ struct StackriotTests {
 
     @MainActor
     @Test
+    func navigateToRunSelectsNamespaceRepositoryWorktreeAndTab() throws {
+        let modelContext = try makeInMemoryModelContext()
+        let namespace = RepositoryNamespace(name: "Automation")
+        let repository = ManagedRepository(
+            displayName: "Job Repo",
+            bareRepositoryPath: "/tmp/job-repo",
+            defaultBranch: "main",
+            namespace: namespace
+        )
+        let worktree = WorktreeRecord(
+            branchName: "feature/job",
+            path: "/tmp/job-repo-feature-job",
+            sourceBranch: "main",
+            repository: repository
+        )
+        let run = RunRecord(
+            actionKind: .aiAgent,
+            title: "Implement feature",
+            commandLine: "copilot",
+            status: .running,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        namespace.repositories = [repository]
+        repository.worktrees = [worktree]
+        repository.runs = [run]
+        modelContext.insert(namespace)
+        modelContext.insert(repository)
+        modelContext.insert(worktree)
+        modelContext.insert(run)
+        try modelContext.save()
+
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        appModel.storedModelContext = modelContext
+        appModel.selectedNamespaceID = UUID()
+        appModel.terminalTabs.selectPlanTab(for: worktree.id)
+        appModel.terminalTabs.showInBackground(runID: run.id, worktreeID: worktree.id)
+
+        appModel.navigateToRun(run)
+
+        #expect(appModel.selectedNamespaceID == namespace.id)
+        #expect(appModel.selectedRepositoryID == repository.id)
+        #expect(appModel.selectedWorktreeID(for: repository) == worktree.id)
+        #expect(appModel.terminalTabs.selectedVisibleRunID(for: worktree.id) == run.id)
+        #expect(appModel.terminalTabs.isPlanTabSelected(for: worktree.id) == false)
+    }
+
+    @MainActor
+    @Test
     func quickIntentCreateActionUsesSelectedWorktreeAsParentBranch() async throws {
         let modelContext = try makeInMemoryModelContext()
         let repository = ManagedRepository(
