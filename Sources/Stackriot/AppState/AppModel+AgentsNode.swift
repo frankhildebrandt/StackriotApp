@@ -30,7 +30,7 @@ extension AppModel {
     }
 
     func availableDevTools(for worktree: WorktreeRecord) -> [SupportedDevTool] {
-        guard let worktreeURL = worktree.materializedURL else { return [] }
+        guard let worktreeURL = worktree.materializedURL ?? worktree.projectedMaterializationURL else { return [] }
         return services.devToolDiscovery.availableTools(in: worktreeURL)
     }
 

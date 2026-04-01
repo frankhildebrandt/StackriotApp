@@ -1381,6 +1381,30 @@ struct StackriotTests {
         #expect(relevantTools.contains(.intellijIdea))
     }
 
+    @MainActor
+    @Test
+    func devToolContextFilteringKeepsGenericEditorsForProjectedIdeaTreePath() throws {
+        let destinationRoot = try temporaryDirectory(named: "idea-tree-dev-tools")
+        let projectedWorktreeURL = destinationRoot.appendingPathComponent("feature/idea-open", isDirectory: true)
+        let service = DevToolDiscoveryService()
+
+        let relevantTools = service.relevantTools(
+            from: [.cursor, .vscode, .zed, .xcode, .goland, .phpstorm, .webstorm, .intellijIdea],
+            for: projectedWorktreeURL
+        )
+
+        #expect(relevantTools.contains(.cursor))
+        #expect(relevantTools.contains(.vscode))
+        #expect(relevantTools.contains(.zed))
+        #expect(relevantTools.contains(.intellijIdea))
+        #expect(!relevantTools.contains(.xcode))
+        #expect(!relevantTools.contains(.goland))
+        #expect(!relevantTools.contains(.phpstorm))
+        #expect(!relevantTools.contains(.webstorm))
+
+        try? FileManager.default.removeItem(at: destinationRoot)
+    }
+
     @Test
     func worktreeNameNormalizationReplacesWhitespaceWithHyphen() {
         #expect(WorktreeManager.normalizedWorktreeName(from: "Feature A") == "Feature-A")
