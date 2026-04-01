@@ -103,11 +103,11 @@ struct RawLogBrowserWindow: View {
         .confirmationDialog("RAW-Log loeschen?", item: $pendingDeletion) { record in
             Button("Loeschen", role: .destructive) {
                 let deletedID = record.id
-                appModel.deleteRawLog(record, in: modelContext)
-                if selectedLogID == deletedID {
-                    selectedLogID = filteredLogs.first(where: { $0.id != deletedID })?.id
-                }
                 Task {
+                    await appModel.deleteRawLog(record, in: modelContext)
+                    if selectedLogID == deletedID {
+                        selectedLogID = filteredLogs.first(where: { $0.id != deletedID })?.id
+                    }
                     await reloadRawLogsFromStore()
                 }
             }
@@ -366,7 +366,7 @@ struct RawLogBrowserWindow: View {
         }
 
         do {
-            logText = try appModel.rawLogContents(selectedRecord)
+            logText = try await appModel.rawLogContents(selectedRecord)
             logLoadError = nil
         } catch {
             logText = ""

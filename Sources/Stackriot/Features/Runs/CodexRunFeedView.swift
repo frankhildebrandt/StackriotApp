@@ -23,12 +23,64 @@ private struct AgentFeedScrollTrigger: Equatable {
     let lastRevision: Int
 }
 
+private struct RawLogTaskTrigger: Equatable {
+    let outputCount: Int
+    let removedTypes: Set<String>
+}
+
+private struct AgentRunFeedPresentation: Equatable, Sendable {
+    let feedSegments: [AgentRunSegment]
+    let assistantDrawerText: String
+    let rows: [AgentRunFeedRow]
+
+    static let empty = AgentRunFeedPresentation(feedSegments: [], assistantDrawerText: "", rows: [])
+
+    static func build(from segments: [AgentRunSegment], usesAssistantDrawer: Bool) -> AgentRunFeedPresentation {
+        let feedSegments: [AgentRunSegment]
+        let assistantSegments: [AgentRunSegment]
+
+        if usesAssistantDrawer {
+            var nextFeedSegments: [AgentRunSegment] = []
+            var nextAssistantSegments: [AgentRunSegment] = []
+            nextFeedSegments.reserveCapacity(segments.count)
+            nextAssistantSegments.reserveCapacity(segments.count / 2)
+
+            for segment in segments {
+                if segment.kind == .agentMessage {
+                    nextAssistantSegments.append(segment)
+                } else {
+                    nextFeedSegments.append(segment)
+                }
+            }
+
+            feedSegments = nextFeedSegments
+            assistantSegments = nextAssistantSegments
+        } else {
+            feedSegments = segments
+            assistantSegments = []
+        }
+
+        let assistantDrawerText = assistantSegments
+            .compactMap(\.bodyText)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n")
+
+        return AgentRunFeedPresentation(
+            feedSegments: feedSegments,
+            assistantDrawerText: assistantDrawerText,
+            rows: AgentRunFeedLayout.rows(from: feedSegments)
+        )
+    }
+}
+
 struct AgentRunFeedView: View {
     @Environment(AppModel.self) private var appModel
 
     let run: RunRecord
 
     @State private var selectedMode: AgentRunContentMode = .feed
+    @State private var presentation = AgentRunFeedPresentation.empty
+    @State private var cachedRawLogDisplayText = ""
 
     private var usesAssistantDrawer: Bool {
         switch run.outputInterpreter {
@@ -43,28 +95,6 @@ struct AgentRunFeedView: View {
         appModel.structuredSegments(for: run)
     }
 
-    /// Cursor and Copilot streaming JSONL keep the final assistant reply in a dedicated drawer.
-    private var feedSegments: [AgentRunSegment] {
-        guard usesAssistantDrawer else { return segments }
-        return segments.filter { $0.kind != .agentMessage }
-    }
-
-    private var assistantSegments: [AgentRunSegment] {
-        guard usesAssistantDrawer else { return [] }
-        return segments.filter { $0.kind == .agentMessage }
-    }
-
-    private var assistantDrawerText: String {
-        assistantSegments
-            .map { $0.bodyText ?? "" }
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .joined(separator: "\n\n")
-    }
-
-    private var rows: [AgentRunFeedRow] {
-        AgentRunFeedLayout.rows(from: feedSegments)
-    }
-
     private var bottomAnchorID: String {
         "agent-run-feed-bottom-\(run.id.uuidString)"
     }
@@ -75,14 +105,14 @@ struct AgentRunFeedView: View {
 
     private var scrollTrigger: AgentFeedScrollTrigger {
         AgentFeedScrollTrigger(
-            count: feedSegments.count,
-            lastSegmentID: feedSegments.last?.id,
-            lastRevision: feedSegments.last?.revision ?? 0
+            count: presentation.feedSegments.count,
+            lastSegmentID: presentation.feedSegments.last?.id,
+            lastRevision: presentation.feedSegments.last?.revision ?? 0
         )
     }
 
     private var showFeedEmptyPlaceholder: Bool {
-        rows.isEmpty && (!usesAssistantDrawer || assistantDrawerText.isEmpty)
+        presentation.rows.isEmpty && (!usesAssistantDrawer || presentation.assistantDrawerText.isEmpty)
     }
 
     private var rawLogRemovedEventTypes: Set<String> {
@@ -124,6 +154,31 @@ struct AgentRunFeedView: View {
         .task(id: run.id) {
             appModel.ensureStructuredSegmentsLoaded(for: run)
         }
+        .task(id: presentationTaskTrigger) {
+            let nextSegments = segments
+            let usesAssistantDrawer = usesAssistantDrawer
+            let nextPresentation = await Task.detached(priority: .userInitiated) {
+                AgentRunFeedPresentation.build(from: nextSegments, usesAssistantDrawer: usesAssistantDrawer)
+            }.value
+            guard !Task.isCancelled else { return }
+            presentation = nextPresentation
+        }
+        .task(id: rawLogTaskTrigger) {
+            let outputText = run.outputText
+            let removedTypes = rawLogRemovedEventTypes
+            let nextText: String
+
+            if removedTypes.isEmpty {
+                nextText = outputText
+            } else {
+                nextText = await Task.detached(priority: .utility) {
+                    Self.jsonLRemovingEventTypes(outputText, removedTypes: removedTypes)
+                }.value
+            }
+
+            guard !Task.isCancelled else { return }
+            cachedRawLogDisplayText = nextText
+        }
     }
 
     private var feedView: some View {
@@ -152,7 +207,7 @@ struct AgentRunFeedView: View {
                         )
                         .frame(maxWidth: .infinity, minHeight: 240)
                     } else {
-                        ForEach(rows) { row in
+                        ForEach(presentation.rows) { row in
                             AgentRunFeedRowView(row: row)
                                 .id(row.id)
                         }
@@ -180,7 +235,7 @@ struct AgentRunFeedView: View {
     }
 
     private var rawLogView: some View {
-        TextEditor(text: .constant(rawLogDisplayText))
+        TextEditor(text: .constant(cachedRawLogDisplayText))
             .font(.system(.body, design: .monospaced))
             .scrollContentBackground(.hidden)
             .padding(12)
@@ -189,13 +244,22 @@ struct AgentRunFeedView: View {
             .foregroundStyle(.white)
     }
 
-    /// Full JSONL is stored on the run; streaming assistant message events stay in the drawer instead of duplicating in raw-log view.
-    private var rawLogDisplayText: String {
-        guard !rawLogRemovedEventTypes.isEmpty else { return run.outputText }
-        return Self.jsonLRemovingEventTypes(run.outputText, removedTypes: rawLogRemovedEventTypes)
+    private var presentationTaskTrigger: AgentFeedScrollTrigger {
+        AgentFeedScrollTrigger(
+            count: segments.count,
+            lastSegmentID: segments.last?.id,
+            lastRevision: segments.last?.revision ?? 0
+        )
     }
 
-    private static func jsonLRemovingEventTypes(_ text: String, removedTypes: Set<String>) -> String {
+    private var rawLogTaskTrigger: RawLogTaskTrigger {
+        RawLogTaskTrigger(
+            outputCount: run.outputText.count,
+            removedTypes: rawLogRemovedEventTypes
+        )
+    }
+
+    nonisolated private static func jsonLRemovingEventTypes(_ text: String, removedTypes: Set<String>) -> String {
         let lowered = Set(removedTypes.map { $0.lowercased() })
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         let kept = lines.filter { line in
@@ -227,13 +291,13 @@ struct AgentRunFeedView: View {
                     .foregroundStyle(.secondary)
                 ScrollView {
                     Group {
-                        if assistantDrawerText.isEmpty {
+                        if presentation.assistantDrawerText.isEmpty {
                             Text("Warte auf Antwort…")
                                 .font(.subheadline)
                                 .foregroundStyle(.tertiary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else {
-                            AgentRichTextFlow(text: assistantDrawerText)
+                            AgentRichTextFlow(text: presentation.assistantDrawerText)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -251,7 +315,7 @@ struct AgentRunFeedView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(Color.accentColor.opacity(0.12), lineWidth: 1)
             )
-            .onChange(of: assistantDrawerText.count) { _, _ in
+            .onChange(of: presentation.assistantDrawerText.count) { _, _ in
                 scrollAssistantDrawerToBottom(using: proxy)
             }
             .onAppear {
@@ -269,7 +333,7 @@ struct AgentRunFeedView: View {
     }
 }
 
-enum AgentRunFeedRow: Identifiable, Equatable {
+enum AgentRunFeedRow: Identifiable, Equatable, Sendable {
     case segment(AgentRunSegment)
     case turnGroup(
         id: String,

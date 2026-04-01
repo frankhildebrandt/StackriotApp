@@ -87,6 +87,12 @@ final class AppModel: @unchecked Sendable {
     @ObservationIgnored
     var rawLogFlushTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored
+    let incomingRunOutputThrottle = RunOutputThrottle()
+    @ObservationIgnored
+    let rawLogAppendCoordinator = RawLogAppendCoordinator()
+    @ObservationIgnored
+    var rawLogFileURLsByRunID: [UUID: URL] = [:]
+    @ObservationIgnored
     var structuredOutputParsersByRunID: [UUID: any StructuredAgentOutputParsing] = [:]
     @ObservationIgnored
     var rawLogRecordIDsByRunID: [UUID: UUID] = [:]
@@ -190,18 +196,7 @@ final class AppModel: @unchecked Sendable {
     }
 
     func worktrees(for repository: ManagedRepository) -> [WorktreeRecord] {
-        let worktrees: [WorktreeRecord]
-        if let modelContext = storedModelContext {
-            let repositoryID = repository.id
-            let descriptor = FetchDescriptor<WorktreeRecord>(
-                predicate: #Predicate { $0.repository?.id == repositoryID }
-            )
-            worktrees = (try? modelContext.fetch(descriptor)) ?? []
-        } else {
-            worktrees = repository.worktrees
-        }
-
-        return worktrees.sorted { lhs, rhs in
+        repository.worktrees.sorted { lhs, rhs in
             if lhs.isDefaultBranchWorkspace != rhs.isDefaultBranchWorkspace {
                 return lhs.isDefaultBranchWorkspace
             }
@@ -225,7 +220,7 @@ final class AppModel: @unchecked Sendable {
 
     func selectedWorktree(for repository: ManagedRepository) -> WorktreeRecord? {
         if let selectedID = selectedWorktreeID(for: repository) {
-            return worktreeRecord(with: selectedID)
+            return worktrees(for: repository).first(where: { $0.id == selectedID })
         }
         return nil
     }

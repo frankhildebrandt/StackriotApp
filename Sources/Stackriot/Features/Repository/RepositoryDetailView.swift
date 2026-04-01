@@ -1,6 +1,40 @@
 import SwiftData
 import SwiftUI
 
+private struct WorktreeBuckets {
+    var defaultWorktree: WorktreeRecord?
+    var pinnedWorktrees: [WorktreeRecord] = []
+    var ideaTrees: [WorktreeRecord] = []
+    var regularWorktrees: [WorktreeRecord] = []
+    var featureWorktrees: [WorktreeRecord] = []
+
+    init(worktrees: [WorktreeRecord]) {
+        pinnedWorktrees.reserveCapacity(worktrees.count)
+        ideaTrees.reserveCapacity(worktrees.count)
+        regularWorktrees.reserveCapacity(worktrees.count)
+        featureWorktrees.reserveCapacity(worktrees.count)
+
+        for worktree in worktrees {
+            if worktree.isDefaultBranchWorkspace {
+                defaultWorktree = worktree
+                continue
+            }
+
+            if !worktree.isIdeaTree {
+                featureWorktrees.append(worktree)
+            }
+
+            if worktree.isPinned {
+                pinnedWorktrees.append(worktree)
+            } else if worktree.isIdeaTree {
+                ideaTrees.append(worktree)
+            } else {
+                regularWorktrees.append(worktree)
+            }
+        }
+    }
+}
+
 struct RepositoryDetailView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
@@ -20,10 +54,11 @@ struct RepositoryDetailView: View {
 
     var body: some View {
         let worktrees = appModel.worktrees(for: repository)
+        let worktreeBuckets = WorktreeBuckets(worktrees: worktrees)
 
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                worktreeSection(worktrees: worktrees)
+                worktreeSection(worktrees: worktrees, buckets: worktreeBuckets)
 
                 if selectedWorktree == nil {
                     emptyWorktreeState
@@ -130,12 +165,12 @@ struct RepositoryDetailView: View {
         }
     }
 
-    private func worktreeSection(worktrees: [WorktreeRecord]) -> some View {
-        let defaultWorktree = worktrees.first(where: \.isDefaultBranchWorkspace)
-        let pinnedWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace && $0.isPinned }
-        let ideaTrees = worktrees.filter { !$0.isDefaultBranchWorkspace && !$0.isPinned && $0.isIdeaTree }
-        let regularWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace && !$0.isPinned && !$0.isIdeaTree }
-        let featureWorktrees = worktrees.filter { !$0.isDefaultBranchWorkspace && !$0.isIdeaTree }
+    private func worktreeSection(worktrees: [WorktreeRecord], buckets: WorktreeBuckets) -> some View {
+        let defaultWorktree = buckets.defaultWorktree
+        let pinnedWorktrees = buckets.pinnedWorktrees
+        let ideaTrees = buckets.ideaTrees
+        let regularWorktrees = buckets.regularWorktrees
+        let featureWorktrees = buckets.featureWorktrees
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {

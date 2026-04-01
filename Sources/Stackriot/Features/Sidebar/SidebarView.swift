@@ -2,6 +2,56 @@ import CoreTransferable
 import SwiftUI
 import UniformTypeIdentifiers
 
+private struct SidebarRepositoryLayout {
+    let projectsInNamespace: [RepositoryProject]
+    let repositoriesByProjectID: [UUID: [ManagedRepository]]
+    let ungroupedRepositories: [ManagedRepository]
+
+    init(
+        currentNamespace: RepositoryNamespace?,
+        projects: [RepositoryProject],
+        repositories: [ManagedRepository]
+    ) {
+        guard let currentNamespace else {
+            projectsInNamespace = []
+            repositoriesByProjectID = [:]
+            ungroupedRepositories = []
+            return
+        }
+
+        let projectSort: (RepositoryProject, RepositoryProject) -> Bool = { lhs, rhs in
+            if lhs.sortOrder != rhs.sortOrder {
+                return lhs.sortOrder < rhs.sortOrder
+            }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+        let repositorySort: (ManagedRepository, ManagedRepository) -> Bool = {
+            $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+        }
+
+        projectsInNamespace = projects
+            .filter { $0.namespace?.id == currentNamespace.id }
+            .sorted(by: projectSort)
+
+        let allowedProjectIDs = Set(projectsInNamespace.map(\.id))
+        var groupedRepositories: [UUID: [ManagedRepository]] = [:]
+        var rootRepositories: [ManagedRepository] = []
+        groupedRepositories.reserveCapacity(projectsInNamespace.count)
+        rootRepositories.reserveCapacity(repositories.count)
+
+        for repository in repositories {
+            if let projectID = repository.project?.id, allowedProjectIDs.contains(projectID) {
+                groupedRepositories[projectID, default: []].append(repository)
+            } else if repository.project == nil {
+                rootRepositories.append(repository)
+            }
+        }
+
+        repositoriesByProjectID = groupedRepositories.mapValues { $0.sorted(by: repositorySort) }
+        ungroupedRepositories = rootRepositories.sorted(by: repositorySort)
+    }
+}
+
 struct SidebarView: View {
     let namespaces: [RepositoryNamespace]
     let projects: [RepositoryProject]
@@ -30,10 +80,16 @@ struct SidebarView: View {
     @State private var showNamespacePicker = false
 
     var body: some View {
+        let layout = SidebarRepositoryLayout(
+            currentNamespace: currentNamespace,
+            projects: projects,
+            repositories: repositories
+        )
+
         List(selection: $selectedRepositoryID) {
             if let currentNamespace {
-                let namespaceProjects = projectsInCurrentNamespace
-                let rootRepositories = ungroupedRepositories
+                let namespaceProjects = layout.projectsInNamespace
+                let rootRepositories = layout.ungroupedRepositories
 
                 if !currentNamespace.isDefault {
                     Section {
@@ -41,7 +97,7 @@ struct SidebarView: View {
                             let isExpanded = expandedProjectIDs.contains(project.id)
                             ProjectHeaderRow(
                                 project: project,
-                                repositoryCount: repositories(in: project).count,
+                                repositoryCount: layout.repositoriesByProjectID[project.id, default: []].count,
                                 isExpanded: isExpanded,
                                 onToggle: {
                                     toggleProject(project)
@@ -56,7 +112,7 @@ struct SidebarView: View {
                             .draggable(SidebarDragItem(kind: .project, id: project.id))
 
                             if isExpanded {
-                                ForEach(repositories(in: project)) { repository in
+                                ForEach(layout.repositoriesByProjectID[project.id, default: []]) { repository in
                                     RepositoryRow(
                                         repository: repository,
                                         isRefreshing: refreshingRepositoryIDs.contains(repository.id),
@@ -110,8 +166,8 @@ struct SidebarView: View {
             footer
         }
         .navigationTitle("Stackriot")
-        .task(id: projectsInCurrentNamespace.map(\.id)) {
-            expandedProjectIDs.formUnion(projectsInCurrentNamespace.map(\.id))
+        .task(id: layout.projectsInNamespace.map(\.id)) {
+            expandedProjectIDs.formUnion(layout.projectsInNamespace.map(\.id))
         }
     }
 
@@ -198,34 +254,6 @@ struct SidebarView: View {
         }
         .padding()
         .background(.ultraThinMaterial)
-    }
-
-    private var projectsInCurrentNamespace: [RepositoryProject] {
-        guard let currentNamespace else { return [] }
-        return projects
-            .filter { $0.namespace?.id == currentNamespace.id }
-            .sorted { lhs, rhs in
-                if lhs.sortOrder != rhs.sortOrder {
-                    return lhs.sortOrder < rhs.sortOrder
-                }
-                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-            }
-    }
-
-    private var ungroupedRepositories: [ManagedRepository] {
-        repositories
-            .filter { $0.project == nil }
-            .sorted { lhs, rhs in
-                lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
-            }
-    }
-
-    private func repositories(in project: RepositoryProject) -> [ManagedRepository] {
-        repositories
-            .filter { $0.project?.id == project.id }
-            .sorted { lhs, rhs in
-                lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
-            }
     }
 
     @ViewBuilder

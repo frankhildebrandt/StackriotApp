@@ -1682,7 +1682,7 @@ struct StackriotTests {
         let appModel = AppModel(services: services)
         appModel.storedModelContext = modelContext
 
-        appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
+        await appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
         for _ in 0..<20 where run.aiSummaryTitle == nil {
             try? await Task.sleep(for: .milliseconds(50))
         }
@@ -1730,7 +1730,7 @@ struct StackriotTests {
 
         let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
-        appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
+        await appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
 
         #expect(!appModel.shouldAutoHideCompletedRun(run, retentionMode: .runningOnly))
     }
@@ -1761,7 +1761,7 @@ struct StackriotTests {
 
         let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
-        appModel.handleRunTermination(runID: run.id, exitCode: 1, wasCancelled: false)
+        await appModel.handleRunTermination(runID: run.id, exitCode: 1, wasCancelled: false)
 
         #expect(run.isFixableBuildFailure)
         #expect(!appModel.shouldAutoHideCompletedRun(run, retentionMode: .runningOnly))
@@ -1792,7 +1792,7 @@ struct StackriotTests {
 
         let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
-        appModel.handleRunTermination(runID: run.id, exitCode: 2, wasCancelled: false)
+        await appModel.handleRunTermination(runID: run.id, exitCode: 2, wasCancelled: false)
 
         #expect(appModel.shouldAutoHideCompletedRun(run, retentionMode: .runningOnly))
     }
@@ -1871,7 +1871,7 @@ struct StackriotTests {
         modelContext.insert(run)
         try modelContext.save()
 
-        appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
+        await appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
         try? await Task.sleep(for: .milliseconds(50))
 
         let notifications = await recorder.deliveredRequests
@@ -1909,7 +1909,7 @@ struct StackriotTests {
         modelContext.insert(run)
         try modelContext.save()
 
-        appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: true)
+        await appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: true)
         try? await Task.sleep(for: .milliseconds(50))
 
         #expect(await recorder.deliveredRequests.isEmpty)
@@ -2064,7 +2064,7 @@ struct StackriotTests {
         let appModel = AppModel(services: services)
         appModel.storedModelContext = modelContext
 
-        appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
+        await appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
         try? await Task.sleep(for: .milliseconds(50))
 
         #expect(run.aiSummaryTitle == nil)
@@ -2124,7 +2124,7 @@ struct StackriotTests {
         let run = try #require(appModel.startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext))
         appModel.handleRunOutput(runID: run.id, chunk: "{\"event\":\"delta\"}\n")
         appModel.handleRunOutput(runID: run.id, chunk: "{\"event\":\"done\"}\n")
-        appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
+        await appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
 
         let records = try modelContext.fetch(FetchDescriptor<AgentRawLogRecord>())
         #expect(records.count == 1)
@@ -2147,7 +2147,7 @@ struct StackriotTests {
 
     @MainActor
     @Test
-    func deletingArchivedRawLogsRemovesMetadataAndFile() throws {
+    func deletingArchivedRawLogsRemovesMetadataAndFile() async throws {
         let modelContext = try makeInMemoryModelContext()
         let archiveRoot = try temporaryDirectory(named: "raw-log-delete")
         let services = AppServices(rawLogArchive: AgentRawLogArchiveService(rootDirectoryProvider: { archiveRoot }))
@@ -2178,7 +2178,7 @@ struct StackriotTests {
         modelContext.insert(record)
         try modelContext.save()
 
-        appModel.deleteRawLog(record, in: modelContext)
+        await appModel.deleteRawLog(record, in: modelContext)
 
         #expect(!FileManager.default.fileExists(atPath: logURL.path))
         #expect(!FileManager.default.fileExists(atPath: logDirectory.path))
