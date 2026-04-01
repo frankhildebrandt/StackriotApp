@@ -2781,6 +2781,24 @@ struct StackriotTests {
 
     @MainActor
     @Test
+    func presentWorktreeSheetDefaultsToIdeaTreeCreationMode() {
+        let repository = ManagedRepository(
+            displayName: "Demo",
+            remoteURL: "https://github.com/example/demo.git",
+            bareRepositoryPath: "/tmp/demo.git",
+            defaultBranch: "main"
+        )
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+
+        appModel.presentWorktreeSheet(for: repository)
+
+        #expect(appModel.isWorktreeSheetPresented)
+        #expect(appModel.worktreeDraft.creationMode == .ideaTree)
+        #expect(appModel.worktreeDraft.sourceBranch == "main")
+    }
+
+    @MainActor
+    @Test
     func ticketWorktreeCreationNormalizesBranchSetsIssueContextAndWritesPlan() async throws {
         let remote = try await createSeededRemote(named: "ticket-worktree")
         let cloneInfo = try await RepositoryManager().cloneBareRepository(
@@ -2933,6 +2951,65 @@ struct StackriotTests {
         #expect(plan.contains("Kommentar aus Jira."))
 
         try? FileManager.default.removeItem(at: intentURL)
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
+    @MainActor
+    @Test
+    func createFullWorktreeMaterializesImmediatelyAndPersistsRegularRecord() async throws {
+        let remote = try await createSeededRemote(named: "full-worktree")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Full-Worktree-\(UUID().uuidString)"
+        )
+        let destinationRoot = try temporaryDirectory(named: "full-worktree-root")
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: cloneInfo.displayName,
+            remoteURL: remote.remote.absoluteString,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath.path,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        let recorder = RecordingNotificationService()
+        let appModel = AppModel(services: AppServices(notificationService: recorder))
+        appModel.storedModelContext = modelContext
+        appModel.worktreeDraft = WorktreeDraft(
+            sourceBranch: cloneInfo.defaultBranch,
+            creationMode: .fullWorktree
+        )
+        appModel.worktreeDraft.branchName = "Feature Materialized"
+        appModel.worktreeDraft.issueContext = "Manual context"
+        appModel.worktreeDraft.destinationRootPath = destinationRoot.path
+
+        await appModel.createWorktree(for: repository, in: modelContext)
+
+        #expect(appModel.pendingErrorMessage == nil)
+        #expect(repository.worktrees.count == 1)
+
+        guard let worktree = repository.worktrees.first else {
+            Issue.record("Expected created full worktree record")
+            return
+        }
+
+        #expect(worktree.kind == .regular)
+        #expect(worktree.sourceBranch == cloneInfo.defaultBranch)
+        #expect(worktree.issueContext == "Manual context")
+        #expect(worktree.destinationRootPath == destinationRoot.path)
+        #expect(worktree.materializedPath?.hasPrefix(destinationRoot.path + "/") == true)
+        #expect(worktree.materializedAt != nil)
+        #expect(FileManager.default.fileExists(atPath: worktree.materializedPath ?? ""))
+
+        try? await Task.sleep(for: .milliseconds(100))
+        let deliveredRequests = await recorder.deliveredRequests
+        #expect(deliveredRequests.contains(where: { $0.title == "Worktree created" }))
+
+        if let worktreeURL = worktree.materializedURL {
+            try? FileManager.default.removeItem(at: worktreeURL)
+        }
+        try? FileManager.default.removeItem(at: destinationRoot)
         try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
     }
 

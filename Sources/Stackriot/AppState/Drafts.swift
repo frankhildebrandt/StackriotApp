@@ -5,7 +5,60 @@ struct CloneRepositoryDraft {
     var displayName = ""
 }
 
+enum WorktreeCreationMode: String, CaseIterable, Identifiable {
+    case ideaTree
+    case fullWorktree
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .ideaTree:
+            "IdeaTree"
+        case .fullWorktree:
+            "Worktree"
+        }
+    }
+
+    var formDescription: String {
+        switch self {
+        case .ideaTree:
+            "Speichert zuerst nur Intent, Ticket-Kontext und Zielpfad. Die Arbeitskopie wird erst bei Bedarf materialisiert."
+        case .fullWorktree:
+            "Legt sofort einen echten Git-Worktree im Dateisystem an und speichert denselben Kontext direkt am Worktree."
+        }
+    }
+
+    var sheetTitle: String {
+        switch self {
+        case .ideaTree:
+            "Create IdeaTree"
+        case .fullWorktree:
+            "Create Worktree"
+        }
+    }
+
+    var primaryActionTitle: String {
+        switch self {
+        case .ideaTree:
+            "Create IdeaTree"
+        case .fullWorktree:
+            "Create Worktree"
+        }
+    }
+
+    var progressTitle: String {
+        switch self {
+        case .ideaTree:
+            "IdeaTree wird erstellt…"
+        case .fullWorktree:
+            "Worktree wird erstellt…"
+        }
+    }
+}
+
 struct WorktreeDraft {
+    var creationMode: WorktreeCreationMode = .ideaTree
     var branchName = ""
     var issueContext = ""
     var sourceBranch = ""
@@ -19,9 +72,9 @@ struct WorktreeDraft {
     var ticketProviderStatuses: [TicketProviderStatus] = []
     var hasConfirmedTicket = false
     var isGeneratingSuggestedName = false
-    var isTicketSectionExpanded = false
 
-    init(sourceBranch: String = "") {
+    init(sourceBranch: String = "", creationMode: WorktreeCreationMode = .ideaTree) {
+        self.creationMode = creationMode
         self.sourceBranch = sourceBranch
     }
 
