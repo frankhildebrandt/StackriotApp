@@ -12,6 +12,13 @@ struct StackriotAppCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
+            Button("Quick Intent") {
+                appModel.presentQuickIntentFromSystemTrigger()
+            }
+            .keyboardShortcut("i", modifiers: [.command, .option])
+
+            Divider()
+
             Button("Clone Bare Repository") {
                 appModel.presentCloneSheet()
             }
@@ -31,6 +38,13 @@ struct StackriotAppCommands: Commands {
         }
 
         CommandMenu("Repositories") {
+            Button("Quick Intent") {
+                appModel.presentQuickIntentFromSystemTrigger()
+            }
+            .keyboardShortcut("i", modifiers: [.command, .option, .shift])
+
+            Divider()
+
             Button("Clone Bare Repository") {
                 appModel.presentCloneSheet()
             }
@@ -59,6 +73,11 @@ struct StackriotAppCommands: Commands {
                 openWindow(id: "raw-logs")
             }
             .keyboardShortcut("2", modifiers: [.command])
+
+            Button("Quick Intent") {
+                openWindow(id: "quick-intent")
+            }
+            .keyboardShortcut("3", modifiers: [.command])
 
             Button("Show About") {
                 openWindow(id: "about")

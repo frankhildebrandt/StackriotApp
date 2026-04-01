@@ -2,6 +2,12 @@ import Foundation
 import SwiftData
 
 extension AppModel {
+    private struct IntegrationTarget {
+        let worktree: WorktreeRecord
+        let branchName: String
+        let isDefaultTarget: Bool
+    }
+
     func ensureDefaultBranchWorkspace(
         for repository: ManagedRepository,
         in modelContext: ModelContext
@@ -196,6 +202,39 @@ extension AppModel {
         return sourceBranch.isEmpty ? repository.defaultBranch : sourceBranch
     }
 
+    func childWorktrees(of parent: WorktreeRecord, in repository: ManagedRepository) -> [WorktreeRecord] {
+        orderedWorktrees(
+            repository.worktrees.filter { normalizedParentWorktreeID(for: $0, in: repository) == parent.id }
+        )
+    }
+
+    func groupedRootWorktrees(from worktrees: [WorktreeRecord], in repository: ManagedRepository) -> [WorktreeRecord] {
+        orderedWorktrees(
+            worktrees.filter { worktree in
+                guard let parentID = normalizedParentWorktreeID(for: worktree, in: repository) else { return true }
+                return worktrees.contains(where: { $0.id == parentID }) == false
+            }
+        )
+    }
+
+    func canAssignParentWorktree(_ parent: WorktreeRecord?, to child: WorktreeRecord, in repository: ManagedRepository) -> Bool {
+        guard let parent else { return true }
+        if parent.id == child.id {
+            return false
+        }
+
+        var visited: Set<UUID> = [child.id]
+        var currentParentID = parent.parentWorktreeID
+        while let resolvedParentID = currentParentID {
+            if visited.contains(resolvedParentID) {
+                return false
+            }
+            visited.insert(resolvedParentID)
+            currentParentID = repository.worktrees.first(where: { $0.id == resolvedParentID })?.parentWorktreeID
+        }
+        return true
+    }
+
     private func compactIssueContext(for ticket: TicketDetails) -> String {
         let title = ticket.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if title.isEmpty {
@@ -277,10 +316,146 @@ extension AppModel {
         }
     }
 
+    func summarizeQuickIntent() async {
+        guard var session = quickIntentSession else { return }
+        let input = session.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty else {
+            pendingErrorMessage = "Quick Intent ist leer."
+            return
+        }
+
+        session.isSummarizing = true
+        quickIntentSession = session
+        do {
+            let summary = try await services.aiProviderService.summarizeTextForIntent(input)
+            guard var updated = quickIntentSession, updated.id == session.id else { return }
+            updated.summaryTitle = summary.title
+            updated.text = summary.summary
+            updated.branchName = WorktreeManager.normalizedWorktreeName(from: summary.title)
+            updated.isSummarizing = false
+            quickIntentSession = updated
+        } catch {
+            guard var updated = quickIntentSession, updated.id == session.id else { return }
+            updated.isSummarizing = false
+            quickIntentSession = updated
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    func createIdeaTreeFromQuickIntent(
+        repository: ManagedRepository,
+        branchName: String,
+        sourceBranch: String,
+        parentWorktreeID: UUID?,
+        initialIntentText: String,
+        in modelContext: ModelContext
+    ) throws -> WorktreeRecord {
+        let normalizedBranchName = WorktreeManager.normalizedWorktreeName(from: branchName)
+        guard !normalizedBranchName.isEmpty else {
+            throw StackriotError.branchNameRequired
+        }
+
+        let worktree = try persistIdeaTree(
+            branchName: normalizedBranchName,
+            repository: repository,
+            sourceBranch: sourceBranch,
+            parentWorktreeID: parentWorktreeID,
+            destinationRootPath: nil,
+            ticketDetails: nil,
+            issueContext: nil,
+            initialPlanText: initialIntentText,
+            in: modelContext
+        )
+        finishCreatedWorktree(worktree, in: repository)
+        return worktree
+    }
+
+    func runQuickIntentCreateAction(
+        planningAgent: AIAgentTool? = nil,
+        executionAgent: AIAgentTool? = nil
+    ) async {
+        guard var session = quickIntentSession else { return }
+        guard let modelContext = storedModelContext else {
+            pendingErrorMessage = "Model context unavailable."
+            return
+        }
+
+        let context = quickIntentRepositoryContext()
+        guard let repository = context.repository else {
+            pendingErrorMessage = "Waehle zuerst ein Repository aus."
+            return
+        }
+
+        let initialIntentText = session.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !initialIntentText.isEmpty else {
+            pendingErrorMessage = "Quick Intent ist leer."
+            return
+        }
+
+        let requestedParent = session.useCurrentWorktreeAsParent ? context.worktree : nil
+        let parentWorktreeID = requestedParent?.isDefaultBranchWorkspace == false ? requestedParent?.id : nil
+        let sourceBranch = session.useCurrentWorktreeAsParent
+            ? requestedParent?.branchName.nonEmpty ?? repository.defaultBranch
+            : repository.defaultBranch
+        let branchSeed = session.branchName.nonEmpty ?? session.summaryTitle.nonEmpty ?? initialIntentText
+        let normalizedBranch = WorktreeManager.normalizedWorktreeName(from: branchSeed)
+
+        session.isPerformingAction = true
+        quickIntentSession = session
+
+        do {
+            let worktree = try createIdeaTreeFromQuickIntent(
+                repository: repository,
+                branchName: normalizedBranch,
+                sourceBranch: sourceBranch,
+                parentWorktreeID: parentWorktreeID,
+                initialIntentText: initialIntentText,
+                in: modelContext
+            )
+
+            if let planningAgent {
+                await startAgentPlanDraft(
+                    using: planningAgent,
+                    for: worktree,
+                    in: repository,
+                    currentIntentText: initialIntentText,
+                    modelContext: modelContext
+                )
+            } else if let executionAgent {
+                if executionAgent == .githubCopilot {
+                    await prepareCopilotExecutionWithPlan(for: worktree, in: repository)
+                } else {
+                    await launchAgentWithPlan(executionAgent, for: worktree, in: modelContext)
+                }
+            }
+
+            quickIntentSession = nil
+            notifyOperationSuccess(
+                title: "IdeaTree created",
+                subtitle: repository.displayName,
+                body: "\(worktree.branchName) wurde aus dem Quick Intent angelegt.",
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": worktree.id.uuidString,
+                ]
+            )
+        } catch {
+            guard var updated = quickIntentSession, updated.id == session.id else {
+                pendingErrorMessage = error.localizedDescription
+                return
+            }
+            updated.isPerformingAction = false
+            quickIntentSession = updated
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
     private func persistIdeaTree(
         branchName: String,
         repository: ManagedRepository,
         sourceBranch: String,
+        parentWorktreeID: UUID? = nil,
         destinationRootPath: String?,
         ticketDetails: TicketDetails?,
         issueContext: String?,
@@ -295,6 +470,7 @@ extension AppModel {
             ticketIdentifier: ticketDetails?.reference.id,
             ticketURL: ticketDetails?.url,
             sourceBranch: sourceBranch,
+            parentWorktreeID: parentWorktreeID,
             destinationRootPath: destinationRootPath,
             repository: repository,
             primaryContext: ticketDetails.map {
@@ -437,6 +613,9 @@ extension AppModel {
             let worktreePath = worktree.materializedPath
             let repositoryID = repository.id
             let bareRepositoryPath = repository.bareRepositoryPath
+            for child in repository.childWorktrees(of: worktree) {
+                child.parentWorktreeID = nil
+            }
             let remainingWorktreeID = try modelContext.fetch(
                 FetchDescriptor<WorktreeRecord>(
                     predicate: #Predicate {
@@ -545,11 +724,12 @@ extension AppModel {
         guard !sourceWorktree.isDefaultBranchWorkspace else { return }
         let outcome = await performLocalMerge(sourceWorktree, repository: repository, modelContext: modelContext)
         if case .committed = outcome {
-            pendingErrorMessage = "Integrated \(sourceWorktree.branchName) into \(repository.defaultBranch)."
+            let targetBranch = (try? await resolvedIntegrationTarget(for: sourceWorktree, repository: repository, modelContext: modelContext).branchName) ?? repository.defaultBranch
+            pendingErrorMessage = "Integrated \(sourceWorktree.branchName) into \(targetBranch)."
             notifyOperationSuccess(
                 title: "Integration finished",
                 subtitle: repository.displayName,
-                body: "\(sourceWorktree.branchName) was merged into \(repository.defaultBranch).",
+                body: "\(sourceWorktree.branchName) was merged into \(targetBranch).",
                 userInfo: [
                     "repositoryID": repository.id.uuidString,
                     "worktreeID": sourceWorktree.id.uuidString,
@@ -572,16 +752,18 @@ extension AppModel {
 
         switch draft.method {
         case .localMerge:
+            let target = try? await resolvedIntegrationTarget(for: worktree, repository: repository, modelContext: modelContext)
             let outcome = await performLocalMerge(worktree, repository: repository, modelContext: modelContext)
             await refreshWorktreeStatuses(for: repository)
             if case .committed = outcome {
-                pendingErrorMessage = "Integrated \(worktree.branchName) into \(repository.defaultBranch)."
+                let targetBranch = target?.branchName ?? repository.defaultBranch
+                pendingErrorMessage = "Integrated \(worktree.branchName) into \(targetBranch)."
                 worktree.lifecycleState = .merged
                 save(modelContext)
                 notifyOperationSuccess(
                     title: "Integration finished",
                     subtitle: repository.displayName,
-                    body: "\(worktree.branchName) was merged into \(repository.defaultBranch).",
+                    body: "\(worktree.branchName) was merged into \(targetBranch).",
                     userInfo: [
                         "repositoryID": repository.id.uuidString,
                         "worktreeID": worktree.id.uuidString,
@@ -594,6 +776,7 @@ extension AppModel {
 
         case .githubPR:
             do {
+                let target = try await resolvedIntegrationTarget(for: worktree, repository: repository, modelContext: modelContext)
                 guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
                       let worktreeURL = worktree.materializedURL
                 else {
@@ -603,7 +786,7 @@ extension AppModel {
                     worktreePath: worktreeURL,
                     title: draft.prTitle,
                     body: draft.prBody,
-                    baseBranch: repository.defaultBranch
+                    baseBranch: target.branchName
                 )
                 worktree.prNumber = prInfo.number
                 worktree.prURL = prInfo.url
@@ -658,40 +841,93 @@ extension AppModel {
         modelContext: ModelContext
     ) async -> LocalMergeOutcome {
         guard !sourceWorktree.isDefaultBranchWorkspace else { return .failed }
-        guard let defaultWorktree = await ensureDefaultBranchWorkspace(for: repository, in: modelContext) else {
+        let target: IntegrationTarget
+        do {
+            target = try await resolvedIntegrationTarget(for: sourceWorktree, repository: repository, modelContext: modelContext)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
             return .failed
         }
         guard await materializeIdeaTreeIfNeeded(sourceWorktree, in: repository, modelContext: modelContext) != nil,
-              let defaultWorktreeURL = defaultWorktree.materializedURL
+              let targetWorktreeURL = target.worktree.materializedURL
         else {
             return .failed
         }
         do {
             let result = try await services.worktreeStatusService.integrate(
                 sourceBranch: sourceWorktree.branchName,
-                defaultBranch: repository.defaultBranch,
-                defaultWorktreePath: defaultWorktreeURL
+                targetBranch: target.branchName,
+                targetWorktreePath: targetWorktreeURL
             )
             switch result {
             case .committed:
                 pendingIntegrationConflict = nil
-                selectedWorktreeIDsByRepository[repository.id] = defaultWorktree.id
+                selectedWorktreeIDsByRepository[repository.id] = target.worktree.id
                 return .committed
             case let .conflicts(message):
                 pendingIntegrationConflict = IntegrationConflictDraft(
                     repositoryID: repository.id,
                     sourceWorktreeID: sourceWorktree.id,
-                    defaultWorktreeID: defaultWorktree.id,
+                    defaultWorktreeID: target.worktree.id,
                     sourceBranch: sourceWorktree.branchName,
-                    defaultBranch: repository.defaultBranch,
+                    defaultBranch: target.branchName,
                     message: message
                 )
-                selectedWorktreeIDsByRepository[repository.id] = defaultWorktree.id
+                selectedWorktreeIDsByRepository[repository.id] = target.worktree.id
                 return .conflict
             }
         } catch {
             pendingErrorMessage = error.localizedDescription
             return .failed
+        }
+    }
+
+    private func resolvedIntegrationTarget(
+        for sourceWorktree: WorktreeRecord,
+        repository: ManagedRepository,
+        modelContext: ModelContext
+    ) async throws -> IntegrationTarget {
+        if let parentID = sourceWorktree.parentWorktreeID,
+           let parentWorktree = repository.worktrees.first(where: { $0.id == parentID })
+        {
+            guard let parentURL = parentWorktree.materializedURL else {
+                throw StackriotError.commandFailed("Der Parent-Worktree \(parentWorktree.branchName) muss materialisiert sein, bevor ein Sub-Worktree integriert oder als PR gegen ihn angelegt wird.")
+            }
+            _ = parentURL
+            return IntegrationTarget(
+                worktree: parentWorktree,
+                branchName: parentWorktree.branchName,
+                isDefaultTarget: false
+            )
+        }
+
+        guard let defaultWorktree = await ensureDefaultBranchWorkspace(for: repository, in: modelContext) else {
+            throw StackriotError.worktreeUnavailable
+        }
+        return IntegrationTarget(
+            worktree: defaultWorktree,
+            branchName: repository.defaultBranch,
+            isDefaultTarget: true
+        )
+    }
+
+    private func normalizedParentWorktreeID(for worktree: WorktreeRecord, in repository: ManagedRepository) -> UUID? {
+        guard let parentID = worktree.parentWorktreeID, parentID != worktree.id else { return nil }
+        return repository.worktrees.contains(where: { $0.id == parentID }) ? parentID : nil
+    }
+
+    private func orderedWorktrees(_ worktrees: [WorktreeRecord]) -> [WorktreeRecord] {
+        worktrees.sorted { lhs, rhs in
+            if lhs.isDefaultBranchWorkspace != rhs.isDefaultBranchWorkspace {
+                return lhs.isDefaultBranchWorkspace
+            }
+            if lhs.isPinned != rhs.isPinned {
+                return lhs.isPinned
+            }
+            if lhs.isIdeaTree != rhs.isIdeaTree {
+                return lhs.isIdeaTree
+            }
+            return lhs.createdAt > rhs.createdAt
         }
     }
 

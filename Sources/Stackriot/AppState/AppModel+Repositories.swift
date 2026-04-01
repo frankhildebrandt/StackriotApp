@@ -202,6 +202,7 @@ extension AppModel {
     /// Lightweight status refresh when the app returns to the foreground (no full `git fetch` for every repo).
     func handleAppDidBecomeActive() async {
         let now = Date.now
+        configureQuickIntentHotKey()
         if let last = lastForegroundLightRefreshAt, now.timeIntervalSince(last) < 2 {
             return
         }

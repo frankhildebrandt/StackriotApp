@@ -26,6 +26,28 @@ struct IntegrateWorktreeSheet: View {
         worktree?.isPinned ?? false
     }
 
+    private var parentWorktree: WorktreeRecord? {
+        guard let parentID = worktree?.parentWorktreeID else { return nil }
+        return repository.worktrees.first(where: { $0.id == parentID })
+    }
+
+    private var targetBranchName: String {
+        parentWorktree?.branchName ?? repository.defaultBranch
+    }
+
+    private var targetSummary: String {
+        if let parentWorktree {
+            return "Parent-Worktree \(parentWorktree.branchName)"
+        }
+        return "Main / Default"
+    }
+
+    private var targetUnavailableMessage: String? {
+        guard let parentWorktree else { return nil }
+        guard parentWorktree.materializedURL == nil else { return nil }
+        return "Der Parent-Worktree \(parentWorktree.branchName) ist noch nicht materialisiert. Materialisiere ihn zuerst, bevor du diesen Sub-Worktree integrierst oder als PR gegen ihn oeffnest."
+    }
+
     private var hasGitHubRemote: Bool {
         repository.remotes.contains { GitHubCLIService.isGitHubRemote(url: $0.url) }
     }
@@ -56,7 +78,7 @@ struct IntegrateWorktreeSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Integrieren in \(repository.defaultBranch)")
+                Text("Integrieren in \(targetBranchName)")
                     .font(.title2.weight(.semibold))
                 Text(branchName)
                     .font(.subheadline)
@@ -72,6 +94,30 @@ struct IntegrateWorktreeSheet: View {
             }
             .padding(12)
             .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            HStack(spacing: 10) {
+                Image(systemName: parentWorktree == nil ? "arrow.triangle.merge" : "arrowshape.turn.up.left.fill")
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(targetSummary)
+                        .font(.caption.weight(.medium))
+                    Text("Ziel-Branch: \(targetBranchName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let targetUnavailableMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(targetUnavailableMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(10)
+                .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Integrations-Methode")
@@ -166,7 +212,7 @@ struct IntegrateWorktreeSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isRunning || (draft.method == .githubPR && !canUseGitHubPR) || (draft.method == .githubPR && draft.prTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                .disabled(isRunning || targetUnavailableMessage != nil || (draft.method == .githubPR && !canUseGitHubPR) || (draft.method == .githubPR && draft.prTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
             }
         }
         .padding(24)

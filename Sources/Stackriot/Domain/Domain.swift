@@ -183,6 +183,55 @@ struct AIRunSummary: Sendable, Equatable {
     let summary: String
 }
 
+struct AIIntentSummary: Sendable, Equatable {
+    let title: String
+    let summary: String
+}
+
+struct QuickIntentModifierSet: OptionSet, Codable, Hashable, Sendable {
+    let rawValue: Int
+
+    static let shift = QuickIntentModifierSet(rawValue: 1 << 0)
+    static let control = QuickIntentModifierSet(rawValue: 1 << 1)
+    static let option = QuickIntentModifierSet(rawValue: 1 << 2)
+    static let command = QuickIntentModifierSet(rawValue: 1 << 3)
+}
+
+enum QuickIntentCaptureSource: String, Codable, Sendable {
+    case accessibilitySelection
+    case clipboard
+    case sharedText
+    case sharedFile
+    case empty
+
+    var displayName: String {
+        switch self {
+        case .accessibilitySelection:
+            "Markierung"
+        case .clipboard:
+            "Zwischenablage"
+        case .sharedText:
+            "Geteilter Text"
+        case .sharedFile:
+            "Geteilte Datei"
+        case .empty:
+            "Leer"
+        }
+    }
+}
+
+struct QuickIntentHotkeyConfiguration: Codable, Equatable, Sendable {
+    var isEnabled: Bool
+    var keyCode: UInt16
+    var modifiers: QuickIntentModifierSet
+
+    static let `default` = QuickIntentHotkeyConfiguration(
+        isEnabled: true,
+        keyCode: 34,
+        modifiers: [.command, .option]
+    )
+}
+
 struct AgentLaunchOptions: Sendable, Equatable {
     let copilotModelOverride: String?
 
@@ -1213,6 +1262,9 @@ struct NodeRuntimeStatusSnapshot: Codable, Sendable {
 enum AppPreferences {
     static let selectedNamespaceIDKey = "navigation.selectedNamespaceID"
     static let selectedSettingsCategoryKey = "settings.selectedCategory"
+    static let quickIntentHotkeyEnabledKey = "shortcuts.quickIntent.enabled"
+    static let quickIntentHotkeyKeyCodeKey = "shortcuts.quickIntent.keyCode"
+    static let quickIntentHotkeyModifiersKey = "shortcuts.quickIntent.modifiers"
     static let autoRefreshEnabledKey = "repositories.autoRefreshEnabled"
     static let autoRefreshIntervalKey = "repositories.autoRefreshIntervalSeconds"
     static let worktreeStatusPollingEnabledKey = "repositories.worktreeStatusPollingEnabled"
@@ -1221,6 +1273,7 @@ enum AppPreferences {
     static let defaultAutoRefreshInterval: Double = 900
     static let defaultWorktreeStatusPollingEnabled = true
     static let defaultWorktreeStatusPollingInterval: Double = 120
+    static let defaultQuickIntentHotkey = QuickIntentHotkeyConfiguration.default
     static let terminalTabRetentionModeKey = "terminal.tabs.retentionMode"
     static let nodeAutoUpdateEnabledKey = "node.autoUpdateEnabled"
     static let nodeAutoUpdateIntervalKey = "node.autoUpdateIntervalSeconds"
@@ -1251,6 +1304,28 @@ enum AppPreferences {
             return defaultAutoRefreshEnabled
         }
         return defaults.bool(forKey: autoRefreshEnabledKey)
+    }
+
+    static var quickIntentHotkeyConfiguration: QuickIntentHotkeyConfiguration {
+        let defaults = UserDefaults.standard
+        let isEnabled: Bool
+        if defaults.object(forKey: quickIntentHotkeyEnabledKey) == nil {
+            isEnabled = defaultQuickIntentHotkey.isEnabled
+        } else {
+            isEnabled = defaults.bool(forKey: quickIntentHotkeyEnabledKey)
+        }
+
+        let storedKeyCode = defaults.object(forKey: quickIntentHotkeyKeyCodeKey) as? NSNumber
+        let keyCode = storedKeyCode.map(\.uint16Value) ?? defaultQuickIntentHotkey.keyCode
+
+        let storedModifiers = defaults.object(forKey: quickIntentHotkeyModifiersKey) as? NSNumber
+        let modifiers = QuickIntentModifierSet(rawValue: storedModifiers.map(\.intValue) ?? defaultQuickIntentHotkey.modifiers.rawValue)
+
+        return QuickIntentHotkeyConfiguration(
+            isEnabled: isEnabled,
+            keyCode: keyCode,
+            modifiers: modifiers
+        )
     }
 
     static var autoRefreshInterval: TimeInterval {

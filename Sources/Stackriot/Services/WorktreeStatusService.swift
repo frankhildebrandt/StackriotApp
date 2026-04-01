@@ -80,18 +80,18 @@ struct WorktreeStatusService {
 
     func integrate(
         sourceBranch: String,
-        defaultBranch: String,
-        defaultWorktreePath: URL
+        targetBranch: String,
+        targetWorktreePath: URL
     ) async throws -> WorktreeIntegrationResult {
-        let cleanStatus = await fetchStatus(worktreePath: defaultWorktreePath, defaultBranch: defaultBranch)
+        let cleanStatus = await fetchStatus(worktreePath: targetWorktreePath, defaultBranch: targetBranch)
         guard !cleanStatus.hasUncommittedChanges, !cleanStatus.hasConflicts else {
-            throw StackriotError.commandFailed("The default workspace has uncommitted changes or unresolved conflicts.")
+            throw StackriotError.commandFailed("The target workspace has uncommitted changes or unresolved conflicts.")
         }
 
         let mergeResult = try await CommandRunner.runCollected(
             executable: "git",
             arguments: [
-                "-C", defaultWorktreePath.path,
+                "-C", targetWorktreePath.path,
                 "merge", "--no-ff", "--no-commit", sourceBranch
             ]
         )
@@ -99,7 +99,7 @@ struct WorktreeStatusService {
         if mergeResult.exitCode != 0 {
             let conflictCheck = try await CommandRunner.runCollected(
                 executable: "git",
-                arguments: ["-C", defaultWorktreePath.path, "diff", "--name-only", "--diff-filter=U"]
+                arguments: ["-C", targetWorktreePath.path, "diff", "--name-only", "--diff-filter=U"]
             )
             if conflictCheck.exitCode == 0, conflictCheck.stdout.nonEmpty != nil {
                 let message = mergeResult.stderr.isEmpty ? mergeResult.stdout : mergeResult.stderr
@@ -108,10 +108,10 @@ struct WorktreeStatusService {
             throw StackriotError.commandFailed(mergeResult.stderr.isEmpty ? mergeResult.stdout : mergeResult.stderr)
         }
 
-        let commitMessage = "Integrate \(sourceBranch) into \(defaultBranch)"
+        let commitMessage = "Integrate \(sourceBranch) into \(targetBranch)"
         let commitResult = try await CommandRunner.runCollected(
             executable: "git",
-            arguments: ["-C", defaultWorktreePath.path, "commit", "-m", commitMessage]
+            arguments: ["-C", targetWorktreePath.path, "commit", "-m", commitMessage]
         )
         guard commitResult.exitCode == 0 else {
             throw StackriotError.commandFailed(commitResult.stderr.isEmpty ? commitResult.stdout : commitResult.stderr)

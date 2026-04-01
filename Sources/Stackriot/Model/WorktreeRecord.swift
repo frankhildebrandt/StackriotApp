@@ -16,6 +16,7 @@ final class WorktreeRecord {
     var path: String
     var materializedPathRaw: String?
     var sourceBranch: String?
+    var parentWorktreeID: UUID?
     var destinationRootPath: String?
     var materializedAt: Date?
     @Transient var assignedAgentRawValue: String = AIAgentTool.none.rawValue
@@ -54,6 +55,7 @@ final class WorktreeRecord {
         path: String = "",
         materializedPath: String? = nil,
         sourceBranch: String? = nil,
+        parentWorktreeID: UUID? = nil,
         destinationRootPath: String? = nil,
         materializedAt: Date? = nil,
         assignedAgentRawValue: String = AIAgentTool.none.rawValue,
@@ -80,6 +82,7 @@ final class WorktreeRecord {
         self.path = resolvedMaterializedPath ?? ""
         self.materializedPathRaw = resolvedMaterializedPath
         self.sourceBranch = sourceBranch?.nilIfBlank
+        self.parentWorktreeID = parentWorktreeID
         self.destinationRootPath = destinationRootPath?.nilIfBlank
         self.materializedAt = resolvedMaterializedPath == nil ? nil : (materializedAt ?? createdAt)
         self.assignedAgentRawValue = assignedAgentRawValue
@@ -160,6 +163,10 @@ final class WorktreeRecord {
 
     var sourceBranchName: String? {
         sourceBranch?.nilIfBlank
+    }
+
+    var hasParentWorktree: Bool {
+        parentWorktreeID != nil
     }
 
     func markMaterialized(at path: String, kind: WorktreeKind = .regular, timestamp: Date = .now) {
