@@ -269,6 +269,18 @@ final class AppModel: @unchecked Sendable {
         terminalTabs.activate(runID: run.id, worktreeID: worktreeID)
     }
 
+    func navigateToRun(_ run: RunRecord) {
+        guard let repository = run.repository else { return }
+
+        if let namespaceID = repository.namespace?.id {
+            selectedNamespaceID = namespaceID
+        }
+        selectedRepositoryID = repository.id
+
+        guard run.worktree != nil else { return }
+        selectTab(run)
+    }
+
     func closeTab(_ run: RunRecord) {
         guard !activeRunIDs.contains(run.id) else { return }
         cancelAutoHide(for: run.id)

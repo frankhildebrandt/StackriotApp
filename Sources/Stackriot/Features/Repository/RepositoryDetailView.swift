@@ -50,6 +50,7 @@ struct RepositoryDetailView: View {
     @State private var isIntegrationSheetPresented = false
     @State private var integrationTargetWorktreeID: UUID?
     @State private var integrationTargetBranchName = ""
+    @State private var isActiveJobsPopoverPresented = false
     @AppStorage("hasSeenWorktreeOnboarding") private var hasSeenWorktreeOnboarding = false
 
     var body: some View {
@@ -67,6 +68,19 @@ struct RepositoryDetailView: View {
             .padding(24)
         }
         .navigationTitle(repository.displayName)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    isActiveJobsPopoverPresented.toggle()
+                } label: {
+                    Label(activeJobsButtonTitle, systemImage: activeJobsButtonSystemImage)
+                }
+                .help("Show running jobs")
+                .popover(isPresented: $isActiveJobsPopoverPresented, arrowEdge: .top) {
+                    ActiveJobsPopover()
+                }
+            }
+        }
         .task(id: repository.id) {
             _ = await appModel.ensureDefaultBranchWorkspace(for: repository, in: modelContext)
             appModel.ensureSelectedWorktree(in: repository)
@@ -105,10 +119,7 @@ struct RepositoryDetailView: View {
                 worktreePendingMove = nil
             }
         } message: { draft in
-            Text("""
-            \(draft.branchName) wird nach \(draft.destinationPath) verschoben.
-            Branch, Run-Historie und Zuordnung bleiben erhalten, nur der lokale Pfad wird aktualisiert.
-            """)
+            Text(worktreeMoveConfirmationMessage(for: draft))
         }
         .alert("Rebase fehlgeschlagen", isPresented: Binding(
             get: { appModel.worktreePendingMergeOfferID != nil },
@@ -257,6 +268,20 @@ struct RepositoryDetailView: View {
     private var emptyWorktreeState: some View {
         ContentUnavailableView("Select a Worktree", systemImage: "point.3.connected.trianglepath.dotted", description: Text("Choose or create a worktree to launch editors and run discovered configurations from native tools and supported IDEs."))
             .frame(maxWidth: .infinity, minHeight: 280)
+    }
+
+    private var activeJobsButtonTitle: String {
+        let activeRunCount = appModel.activeRunIDs.count
+        return activeRunCount == 0 ? "Jobs" : "Jobs \(activeRunCount)"
+    }
+
+    private var activeJobsButtonSystemImage: String {
+        appModel.activeRunIDs.isEmpty ? "list.bullet.circle" : "list.bullet.circle.fill"
+    }
+
+    private func worktreeMoveConfirmationMessage(for draft: WorktreeMoveDraft) -> String {
+        "\(draft.branchName) wird nach \(draft.destinationPath) verschoben.\n" +
+            "Branch, Run-Historie und Zuordnung bleiben erhalten, nur der lokale Pfad wird aktualisiert."
     }
 
     private var selectedWorktree: WorktreeRecord? {
@@ -961,6 +986,118 @@ struct RepositoryDetailView: View {
                 }
             }
         }
+    }
+}
+
+private struct ActiveJobsPopover: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Running Jobs")
+                    .font(.headline)
+                Spacer()
+                Text("\(activeRuns.count)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            if activeRuns.isEmpty {
+                ContentUnavailableView(
+                    "No Running Jobs",
+                    systemImage: "checkmark.circle",
+                    description: Text("All jobs are currently idle.")
+                )
+                .frame(width: 360, height: 160)
+            } else {
+                ScrollView {
+                    VStack(spacing: 2) {
+                        ForEach(activeRuns, id: \.id) { run in
+                            ActiveJobRow(run: run) {
+                                appModel.navigateToRun(run)
+                                dismiss()
+                            }
+                        }
+                    }
+                    .padding(6)
+                }
+                .frame(width: 360)
+                .frame(maxHeight: 320)
+            }
+        }
+        .frame(minWidth: 360)
+    }
+
+    private var activeRuns: [RunRecord] {
+        appModel.activeRunIDs
+            .compactMap(appModel.runRecord(with:))
+            .filter { $0.status == .running }
+            .sorted { lhs, rhs in
+                if lhs.startedAt != rhs.startedAt {
+                    return lhs.startedAt > rhs.startedAt
+                }
+                return lhs.id.uuidString > rhs.id.uuidString
+            }
+    }
+}
+
+private struct ActiveJobRow: View {
+    let run: RunRecord
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(alignment: .top, spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(run.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    HStack(spacing: 10) {
+                        metadataLabel(
+                            text: run.repository?.namespace?.name ?? "Unknown Namespace",
+                            systemImage: "square.stack.3d.up"
+                        )
+                        metadataLabel(
+                            text: run.repository?.displayName ?? "Unknown Repository",
+                            systemImage: "shippingbox"
+                        )
+                    }
+
+                    if let branchName = run.worktree?.branchName {
+                        metadataLabel(text: branchName, systemImage: "point.3.connected.trianglepath.dotted")
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+            .background(
+                Color.accentColor.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 6)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func metadataLabel(text: String, systemImage: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 }
 
