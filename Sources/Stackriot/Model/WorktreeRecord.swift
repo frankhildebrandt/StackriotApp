@@ -133,6 +133,10 @@ final class WorktreeRecord {
         materializedPath.map { URL(fileURLWithPath: $0) }
     }
 
+    var projectedMaterializationURL: URL? {
+        projectedMaterializationPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
+    }
+
     var destinationRootURL: URL? {
         destinationRootPath?.nilIfBlank.map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
