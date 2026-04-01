@@ -314,7 +314,10 @@ final class AppModel: @unchecked Sendable {
     }
 
     func presentWorktreeSheet(for repository: ManagedRepository) {
-        worktreeDraft = WorktreeDraft(sourceBranch: repository.defaultBranch)
+        worktreeDraft = WorktreeDraft(
+            sourceBranch: repository.defaultBranch,
+            creationMode: .ideaTree
+        )
         isWorktreeSheetPresented = true
     }
 

@@ -8,6 +8,16 @@ extension AppModel {
         let isDefaultTarget: Bool
     }
 
+    private struct WorktreeCreationRequest {
+        let mode: WorktreeCreationMode
+        let branchName: String
+        let sourceBranch: String
+        let destinationRootPath: String?
+        let ticketDetails: TicketDetails?
+        let issueContext: String?
+        let initialPlanText: String?
+    }
+
     func ensureDefaultBranchWorkspace(
         for repository: ManagedRepository,
         in modelContext: ModelContext
@@ -148,44 +158,69 @@ extension AppModel {
 
     func createWorktree(for repository: ManagedRepository, in modelContext: ModelContext) async {
         do {
-            let normalizedName = WorktreeManager.normalizedWorktreeName(from: worktreeDraft.branchName)
-            guard !normalizedName.isEmpty else {
-                throw StackriotError.branchNameRequired
+            let request = try makeWorktreeCreationRequest(for: repository)
+            let worktree: WorktreeRecord
+
+            switch request.mode {
+            case .ideaTree:
+                worktree = try persistIdeaTree(
+                    branchName: request.branchName,
+                    repository: repository,
+                    sourceBranch: request.sourceBranch,
+                    destinationRootPath: request.destinationRootPath,
+                    ticketDetails: request.ticketDetails,
+                    issueContext: request.issueContext,
+                    initialPlanText: request.initialPlanText,
+                    in: modelContext
+                )
+                notifyOperationSuccess(
+                    title: "IdeaTree created",
+                    subtitle: repository.displayName,
+                    body: "\(worktree.branchName) will materialize when a filesystem checkout is needed.",
+                    userInfo: [
+                        "repositoryID": repository.id.uuidString,
+                        "worktreeID": worktree.id.uuidString,
+                    ]
+                )
+            case .fullWorktree:
+                let info = try await services.worktreeManager.createWorktree(
+                    bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
+                    repositoryName: repository.displayName,
+                    branchName: request.branchName,
+                    sourceBranch: request.sourceBranch,
+                    directoryName: request.branchName,
+                    destinationRoot: request.destinationRootPath?.nilIfBlank.map {
+                        URL(fileURLWithPath: $0, isDirectory: true)
+                    }
+                )
+                worktree = try persistMaterializedWorktree(
+                    branchName: request.branchName,
+                    materializedPath: info.path.path,
+                    repository: repository,
+                    sourceBranch: request.sourceBranch,
+                    destinationRootPath: request.destinationRootPath,
+                    ticketDetails: request.ticketDetails,
+                    issueContext: request.issueContext,
+                    initialPlanText: request.initialPlanText,
+                    in: modelContext
+                )
+                await refreshWorktreeStatuses(for: repository)
+                notifyOperationSuccess(
+                    title: "Worktree created",
+                    subtitle: repository.displayName,
+                    body: "\(worktree.branchName) is now available as a filesystem worktree.",
+                    userInfo: [
+                        "repositoryID": repository.id.uuidString,
+                        "worktreeID": worktree.id.uuidString,
+                    ]
+                )
             }
-            let createFromConfirmedTicket = worktreeDraft.hasConfirmedTicket && worktreeDraft.selectedIssueDetails != nil
-            let sourceBranch = resolvedSourceBranch(for: repository)
 
-            let issueContext = createFromConfirmedTicket
-                ? worktreeDraft.selectedIssueDetails.map(compactIssueContext(for:))
-                : worktreeDraft.issueContext.nilIfBlank
-            let initialPlanText = createFromConfirmedTicket
-                ? worktreeDraft.selectedIssueDetails.map(initialPlan(from:))
-                : nil
-
-            let worktree = try persistIdeaTree(
-                branchName: normalizedName,
-                repository: repository,
-                sourceBranch: sourceBranch,
-                destinationRootPath: worktreeDraft.destinationRootPath,
-                ticketDetails: createFromConfirmedTicket ? worktreeDraft.selectedIssueDetails : nil,
-                issueContext: issueContext,
-                initialPlanText: initialPlanText,
-                in: modelContext
-            )
             finishCreatedWorktree(worktree, in: repository)
-            notifyOperationSuccess(
-                title: "IdeaTree created",
-                subtitle: repository.displayName,
-                body: "\(worktree.branchName) will materialize when a filesystem checkout is needed.",
-                userInfo: [
-                    "repositoryID": repository.id.uuidString,
-                    "worktreeID": worktree.id.uuidString,
-                ]
-            )
         } catch {
             pendingErrorMessage = error.localizedDescription
             notifyOperationFailure(
-                title: "IdeaTree creation failed",
+                title: worktreeDraft.creationMode == .ideaTree ? "IdeaTree creation failed" : "Worktree creation failed",
                 subtitle: repository.displayName,
                 body: error.localizedDescription,
                 userInfo: ["repositoryID": repository.id.uuidString]
@@ -200,6 +235,24 @@ extension AppModel {
     private func resolvedSourceBranch(for repository: ManagedRepository) -> String {
         let sourceBranch = worktreeDraft.sourceBranch.trimmingCharacters(in: .whitespacesAndNewlines)
         return sourceBranch.isEmpty ? repository.defaultBranch : sourceBranch
+    }
+
+    private func makeWorktreeCreationRequest(for repository: ManagedRepository) throws -> WorktreeCreationRequest {
+        let normalizedName = WorktreeManager.normalizedWorktreeName(from: worktreeDraft.branchName)
+        guard !normalizedName.isEmpty else {
+            throw StackriotError.branchNameRequired
+        }
+
+        let ticketDetails = worktreeDraft.hasConfirmedTicket ? worktreeDraft.selectedIssueDetails : nil
+        return WorktreeCreationRequest(
+            mode: worktreeDraft.creationMode,
+            branchName: normalizedName,
+            sourceBranch: resolvedSourceBranch(for: repository),
+            destinationRootPath: worktreeDraft.destinationRootPath,
+            ticketDetails: ticketDetails,
+            issueContext: ticketDetails.map(compactIssueContext(for:)) ?? worktreeDraft.issueContext.nilIfBlank,
+            initialPlanText: ticketDetails.map(initialPlan(from:))
+        )
     }
 
     func childWorktrees(of parent: WorktreeRecord, in repository: ManagedRepository) -> [WorktreeRecord] {
@@ -462,13 +515,69 @@ extension AppModel {
         initialPlanText: String?,
         in modelContext: ModelContext
     ) throws -> WorktreeRecord {
-        let worktree = WorktreeRecord(
+        try persistWorktreeRecord(
             branchName: branchName,
             kind: .idea,
+            materializedPath: nil,
+            repository: repository,
+            sourceBranch: sourceBranch,
+            parentWorktreeID: parentWorktreeID,
+            destinationRootPath: destinationRootPath,
+            ticketDetails: ticketDetails,
+            issueContext: issueContext,
+            initialPlanText: initialPlanText,
+            in: modelContext
+        )
+    }
+
+    private func persistMaterializedWorktree(
+        branchName: String,
+        materializedPath: String,
+        repository: ManagedRepository,
+        sourceBranch: String,
+        destinationRootPath: String?,
+        ticketDetails: TicketDetails?,
+        issueContext: String?,
+        initialPlanText: String?,
+        in modelContext: ModelContext
+    ) throws -> WorktreeRecord {
+        try persistWorktreeRecord(
+            branchName: branchName,
+            kind: .regular,
+            materializedPath: materializedPath,
+            repository: repository,
+            sourceBranch: sourceBranch,
+            parentWorktreeID: nil,
+            destinationRootPath: destinationRootPath,
+            ticketDetails: ticketDetails,
+            issueContext: issueContext,
+            initialPlanText: initialPlanText,
+            in: modelContext
+        )
+    }
+
+    private func persistWorktreeRecord(
+        branchName: String,
+        kind: WorktreeKind,
+        materializedPath: String?,
+        repository: ManagedRepository,
+        sourceBranch: String,
+        parentWorktreeID: UUID? = nil,
+        destinationRootPath: String?,
+        ticketDetails: TicketDetails?,
+        issueContext: String?,
+        initialPlanText: String?,
+        in modelContext: ModelContext
+    ) throws -> WorktreeRecord {
+        let worktree = WorktreeRecord(
+            branchName: branchName,
+            kind: kind,
             issueContext: issueContext,
             ticketProvider: ticketDetails?.provider,
             ticketIdentifier: ticketDetails?.reference.id,
             ticketURL: ticketDetails?.url,
+            path: materializedPath ?? "",
+            materializedPath: materializedPath,
             sourceBranch: sourceBranch,
             parentWorktreeID: parentWorktreeID,
             destinationRootPath: destinationRootPath,
