@@ -4,12 +4,14 @@ import SwiftData
 
 extension AppModel {
     func copyRawLogContents(_ record: AgentRawLogRecord) {
-        do {
-            let contents = try services.rawLogArchive.readContents(of: record)
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(contents, forType: .string)
-        } catch {
-            pendingErrorMessage = "RAW log could not be copied: \(error.localizedDescription)"
+        Task {
+            do {
+                let contents = try await rawLogContents(record)
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(contents, forType: .string)
+            } catch {
+                pendingErrorMessage = "RAW log could not be copied: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -21,20 +23,42 @@ extension AppModel {
         NSWorkspace.shared.activateFileViewerSelecting([record.logFileURL])
     }
 
-    func rawLogContents(_ record: AgentRawLogRecord) throws -> String {
-        try services.rawLogArchive.readContents(of: record)
+    func rawLogContents(_ record: AgentRawLogRecord) async throws -> String {
+        let logURL = record.logFileURL
+        return try await Task.detached(priority: .utility) {
+            try String(contentsOf: logURL, encoding: .utf8)
+        }.value
     }
 
-    func deleteRawLog(_ record: AgentRawLogRecord, in modelContext: ModelContext) {
+    func deleteRawLog(_ record: AgentRawLogRecord, in modelContext: ModelContext) async {
         guard record.status != .running else {
             pendingErrorMessage = "Active RAW logs can only be deleted after the run has finished."
             return
         }
 
+        let logURL = record.logFileURL
+        let runID = record.runID
+
         do {
-            try services.rawLogArchive.delete(record)
-            if let runID = record.runID {
+            try await Task.detached(priority: .utility) {
+                let fileManager = FileManager.default
+                if fileManager.fileExists(atPath: logURL.path) {
+                    try fileManager.removeItem(at: logURL)
+                }
+
+                let directoryURL = logURL.deletingLastPathComponent()
+                if fileManager.fileExists(atPath: directoryURL.path) {
+                    let remainingEntries = try fileManager.contentsOfDirectory(atPath: directoryURL.path)
+                    if remainingEntries.isEmpty {
+                        try fileManager.removeItem(at: directoryURL)
+                    }
+                }
+            }.value
+
+            if let runID {
                 rawLogRecordIDsByRunID.removeValue(forKey: runID)
+                rawLogFileURLsByRunID.removeValue(forKey: runID)
+                await rawLogAppendCoordinator.close(runID: runID)
             }
             modelContext.delete(record)
             try modelContext.save()

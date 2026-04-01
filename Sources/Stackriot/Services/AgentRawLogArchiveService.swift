@@ -1,10 +1,8 @@
 import Foundation
 
-@MainActor
 final class AgentRawLogArchiveService {
     private let fileManager: FileManager
     private let rootDirectoryProvider: () -> URL
-    private var handlesByRecordID: [UUID: FileHandle] = [:]
 
     init(
         fileManager: FileManager = .default,
@@ -35,7 +33,8 @@ final class AgentRawLogArchiveService {
         )
         let fileExtension = fileExtension(for: descriptor.outputInterpreter)
         let logURL = directory.appendingPathComponent("raw.\(fileExtension)", isDirectory: false)
-        fileManager.createFile(atPath: logURL.path, contents: Data())
+        let initialData = Data(initialOutput.utf8)
+        fileManager.createFile(atPath: logURL.path, contents: initialData)
 
         let record = AgentRawLogRecord(
             runID: runID,
@@ -53,31 +52,20 @@ final class AgentRawLogArchiveService {
             status: .running
         )
 
-        do {
-            let handle = try FileHandle(forWritingTo: logURL)
-            handlesByRecordID[record.id] = handle
-            if !initialOutput.isEmpty {
-                try append(initialOutput, to: record)
-            }
-            record.fileSize = try currentFileSize(at: logURL)
-            return record
-        } catch {
-            closeHandle(for: record.id)
-            try? fileManager.removeItem(at: directory)
-            throw error
-        }
+        record.fileSize = try currentFileSize(at: logURL)
+        return record
     }
 
     func append(_ chunk: String, to record: AgentRawLogRecord) throws {
         guard !chunk.isEmpty else { return }
-        let handle = try fileHandle(for: record)
+        let handle = try FileHandle(forWritingTo: record.logFileURL)
+        defer { try? handle.close() }
         try handle.seekToEnd()
         try handle.write(contentsOf: Data(chunk.utf8))
         record.fileSize = try currentFileSize(at: record.logFileURL)
     }
 
     func finalize(_ record: AgentRawLogRecord, endedAt: Date, status: RunStatusKind) throws {
-        closeHandle(for: record.id)
         record.endedAt = endedAt
         record.durationSeconds = max(0, endedAt.timeIntervalSince(record.startedAt))
         record.status = status
@@ -89,7 +77,6 @@ final class AgentRawLogArchiveService {
     }
 
     func delete(_ record: AgentRawLogRecord) throws {
-        closeHandle(for: record.id)
         let logURL = record.logFileURL
         if fileManager.fileExists(atPath: logURL.path) {
             try fileManager.removeItem(at: logURL)
@@ -102,21 +89,6 @@ final class AgentRawLogArchiveService {
                 try fileManager.removeItem(at: directoryURL)
             }
         }
-    }
-
-    private func fileHandle(for record: AgentRawLogRecord) throws -> FileHandle {
-        if let existing = handlesByRecordID[record.id] {
-            return existing
-        }
-
-        let handle = try FileHandle(forWritingTo: record.logFileURL)
-        handlesByRecordID[record.id] = handle
-        return handle
-    }
-
-    private func closeHandle(for recordID: UUID) {
-        guard let handle = handlesByRecordID.removeValue(forKey: recordID) else { return }
-        try? handle.close()
     }
 
     private func makeLogDirectory(

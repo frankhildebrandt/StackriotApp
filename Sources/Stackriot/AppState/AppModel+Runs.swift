@@ -1,6 +1,84 @@
 import Foundation
 import SwiftData
 
+actor RunOutputThrottle {
+    typealias Delivery = @MainActor @Sendable (String) -> Void
+
+    private let interval: Duration
+    private var bufferedChunks: [UUID: String] = [:]
+    private var scheduledFlushes: [UUID: Task<Void, Never>] = [:]
+
+    init(interval: Duration = .milliseconds(50)) {
+        self.interval = interval
+    }
+
+    func enqueue(_ chunk: String, for runID: UUID, deliver: @escaping Delivery) {
+        guard !chunk.isEmpty else { return }
+        bufferedChunks[runID, default: ""] += chunk
+        guard scheduledFlushes[runID] == nil else { return }
+
+        scheduledFlushes[runID] = Task { [interval] in
+            try? await Task.sleep(for: interval)
+            guard !Task.isCancelled else { return }
+            await flush(runID: runID, deliver: deliver)
+        }
+    }
+
+    func flush(runID: UUID, deliver: @escaping Delivery) async {
+        scheduledFlushes[runID]?.cancel()
+        scheduledFlushes[runID] = nil
+        guard let merged = bufferedChunks.removeValue(forKey: runID), !merged.isEmpty else { return }
+        await deliver(merged)
+    }
+
+    func cancel(runID: UUID) {
+        scheduledFlushes[runID]?.cancel()
+        scheduledFlushes.removeValue(forKey: runID)
+        bufferedChunks.removeValue(forKey: runID)
+    }
+}
+
+actor RawLogAppendCoordinator {
+    private let fileManager = FileManager.default
+    private var handlesByRunID: [UUID: FileHandle] = [:]
+
+    func register(runID: UUID, logURL: URL) throws {
+        guard handlesByRunID[runID] == nil else { return }
+        handlesByRunID[runID] = try FileHandle(forWritingTo: logURL)
+    }
+
+    func append(_ chunk: String, runID: UUID, logURL: URL) throws {
+        guard !chunk.isEmpty else { return }
+        let handle = try fileHandle(for: runID, logURL: logURL)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(chunk.utf8))
+    }
+
+    func finalize(runID: UUID, logURL: URL) throws -> Int64 {
+        if let handle = handlesByRunID.removeValue(forKey: runID) {
+            try handle.synchronize()
+            try handle.close()
+        }
+        let attributes = try fileManager.attributesOfItem(atPath: logURL.path)
+        return (attributes[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    func close(runID: UUID) {
+        guard let handle = handlesByRunID.removeValue(forKey: runID) else { return }
+        try? handle.close()
+    }
+
+    private func fileHandle(for runID: UUID, logURL: URL) throws -> FileHandle {
+        if let existing = handlesByRunID[runID] {
+            return existing
+        }
+
+        let handle = try FileHandle(forWritingTo: logURL)
+        handlesByRunID[runID] = handle
+        return handle
+    }
+}
+
 extension AppModel {
     func requestCloseTab(_ run: RunRecord, in modelContext: ModelContext) {
         Task { @MainActor [weak self] in
@@ -98,6 +176,10 @@ extension AppModel {
             let runID = run.id
             if let rawLogRecord {
                 rawLogRecordIDsByRunID[runID] = rawLogRecord.id
+                rawLogFileURLsByRunID[runID] = rawLogRecord.logFileURL
+                Task {
+                    try? await rawLogAppendCoordinator.register(runID: runID, logURL: rawLogRecord.logFileURL)
+                }
             }
             activeRunIDs.insert(runID)
             if descriptor.actionKind == .aiAgent {
@@ -167,6 +249,10 @@ extension AppModel {
             if let rawLogRecord {
                 try modelContext.save()
                 rawLogRecordIDsByRunID[run.id] = rawLogRecord.id
+                rawLogFileURLsByRunID[run.id] = rawLogRecord.logFileURL
+                Task {
+                    try? await rawLogAppendCoordinator.register(runID: run.id, logURL: rawLogRecord.logFileURL)
+                }
             }
         } catch {
             pendingErrorMessage = "RAW log archive could not be created: \(error.localizedDescription)"
@@ -218,7 +304,7 @@ extension AppModel {
         scheduleRunOutputFlush(runID: runID)
     }
 
-    func handleRunTermination(runID: UUID, exitCode: Int32, wasCancelled: Bool) {
+    func handleRunTermination(runID: UUID, exitCode: Int32, wasCancelled: Bool) async {
         guard let run = runRecord(with: runID), let modelContext = storedModelContext else { return }
         flushPendingRunOutput(runID: runID)
         flushBufferedRunOutputIfNeeded(runID: runID)
@@ -231,7 +317,7 @@ extension AppModel {
         let finalStatus: RunStatusKind = wasCancelled ? .cancelled : (exitCode == 0 ? .succeeded : .failed)
         run.status = finalStatus
         notifyRunCompletionIfNeeded(run)
-        finalizeRawLogIfNeeded(runID: runID, endedAt: endedAt, status: finalStatus)
+        await finalizeRawLogIfNeeded(runID: runID, endedAt: endedAt, status: finalStatus)
         activeRunIDs.remove(runID)
         delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
@@ -265,12 +351,12 @@ extension AppModel {
         }
     }
 
-    func handleRunFailure(runID: UUID, message: String) {
+    func handleRunFailure(runID: UUID, message: String) async {
         guard let run = runRecord(with: runID), let modelContext = storedModelContext else { return }
         let renderedMessage = "\n\(message)\n"
         flushPendingRunOutput(runID: runID)
-        flushRawLogBuffer(for: runID)
-        writeRawLogChunkToDisk(runID: runID, chunk: renderedMessage)
+        await flushRawLogBufferForFinalization(runID: runID)
+        await writeRawLogChunkToDisk(runID: runID, chunk: renderedMessage)
         if let parser = structuredOutputParsersByRunID[runID] {
             run.outputText += renderedMessage
             applyStructuredParsedChunk(parser.consume(renderedMessage), to: runID)
@@ -285,7 +371,7 @@ extension AppModel {
         run.endedAt = endedAt
         run.status = .failed
         notifyRunCompletionIfNeeded(run, failureMessage: message)
-        finalizeRawLogIfNeeded(runID: runID, endedAt: endedAt, status: .failed)
+        await finalizeRawLogIfNeeded(runID: runID, endedAt: endedAt, status: .failed)
         activeRunIDs.remove(runID)
         delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
@@ -359,6 +445,11 @@ extension AppModel {
 
     func launchRun(runID: UUID, descriptor: CommandExecutionDescriptor) async {
         do {
+            let deliverBufferedOutput: RunOutputThrottle.Delivery = { [weak self] merged in
+                guard let self else { return }
+                self.handleRunOutput(runID: runID, chunk: merged)
+            }
+
             if descriptor.actionKind == .aiAgent && descriptor.usesTerminalSession {
                 let environment = await ShellEnvironment.resolvedEnvironment(
                     additional: [
@@ -371,10 +462,17 @@ extension AppModel {
                 let session = AgentTerminalSession(
                     runID: runID,
                     onData: { [weak self] chunk in
-                        self?.handleRunOutput(runID: runID, chunk: chunk)
+                        guard let self else { return }
+                        Task {
+                            await self.incomingRunOutputThrottle.enqueue(chunk, for: runID, deliver: deliverBufferedOutput)
+                        }
                     },
                     onTermination: { [weak self] exitCode, wasCancelled in
-                        self?.handleRunTermination(runID: runID, exitCode: exitCode, wasCancelled: wasCancelled)
+                        guard let self else { return }
+                        Task {
+                            await self.incomingRunOutputThrottle.flush(runID: runID, deliver: deliverBufferedOutput)
+                            await self.handleRunTermination(runID: runID, exitCode: exitCode, wasCancelled: wasCancelled)
+                        }
                     }
                 )
                 terminalSessions[runID] = session
@@ -407,15 +505,16 @@ extension AppModel {
                 currentDirectoryURL: descriptor.currentDirectoryURL,
                 environment: environment,
                 onOutput: { [weak self] chunk in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        self.handleRunOutput(runID: runID, chunk: chunk)
+                    guard let self else { return }
+                    Task {
+                        await self.incomingRunOutputThrottle.enqueue(chunk, for: runID, deliver: deliverBufferedOutput)
                     }
                 },
                 onTermination: { [weak self] exitCode, wasCancelled in
                     Task { @MainActor in
                         guard let self else { return }
-                        self.handleRunTermination(runID: runID, exitCode: exitCode, wasCancelled: wasCancelled)
+                        await self.incomingRunOutputThrottle.flush(runID: runID, deliver: deliverBufferedOutput)
+                        await self.handleRunTermination(runID: runID, exitCode: exitCode, wasCancelled: wasCancelled)
                     }
                 }
             )
@@ -423,7 +522,7 @@ extension AppModel {
             runningProcesses[runID] = handle
         } catch {
             nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
-            handleRunFailure(runID: runID, message: error.localizedDescription)
+            await handleRunFailure(runID: runID, message: error.localizedDescription)
         }
     }
 
@@ -582,29 +681,40 @@ extension AppModel {
         rawLogFlushTasks[runID]?.cancel()
         rawLogFlushTasks[runID] = nil
         guard let text = rawLogDiskBuffer.removeValue(forKey: runID), !text.isEmpty else { return }
-        writeRawLogChunkToDisk(runID: runID, chunk: text)
+        Task {
+            await writeRawLogChunkToDisk(runID: runID, chunk: text)
+        }
     }
 
-    private func writeRawLogChunkToDisk(runID: UUID, chunk: String) {
-        guard let record = rawLogRecordForRunID(runID) else { return }
+    private func flushRawLogBufferForFinalization(runID: UUID) async {
+        rawLogFlushTasks[runID]?.cancel()
+        rawLogFlushTasks[runID] = nil
+        guard let text = rawLogDiskBuffer.removeValue(forKey: runID), !text.isEmpty else { return }
+        await writeRawLogChunkToDisk(runID: runID, chunk: text)
+    }
+
+    private func writeRawLogChunkToDisk(runID: UUID, chunk: String) async {
+        guard let logURL = rawLogFileURLsByRunID[runID] else { return }
         do {
-            try services.rawLogArchive.append(chunk, to: record)
+            try await rawLogAppendCoordinator.append(chunk, runID: runID, logURL: logURL)
         } catch {
             pendingErrorMessage = "RAW log archive could not be updated: \(error.localizedDescription)"
         }
     }
 
-    private func finalizeRawLogIfNeeded(runID: UUID, endedAt: Date, status: RunStatusKind) {
-        flushRawLogBuffer(for: runID)
-        defer {
-            rawLogRecordIDsByRunID.removeValue(forKey: runID)
-        }
+    private func finalizeRawLogIfNeeded(runID: UUID, endedAt: Date, status: RunStatusKind) async {
+        await flushRawLogBufferForFinalization(runID: runID)
         guard let record = rawLogRecordForRunID(runID) else { return }
         do {
+            if let logURL = rawLogFileURLsByRunID[runID] {
+                record.fileSize = try await rawLogAppendCoordinator.finalize(runID: runID, logURL: logURL)
+            }
             try services.rawLogArchive.finalize(record, endedAt: endedAt, status: status)
         } catch {
             pendingErrorMessage = "RAW log archive could not be finalized: \(error.localizedDescription)"
         }
+        rawLogRecordIDsByRunID.removeValue(forKey: runID)
+        rawLogFileURLsByRunID.removeValue(forKey: runID)
     }
 
     private func rawLogRecordForRunID(_ runID: UUID) -> AgentRawLogRecord? {
