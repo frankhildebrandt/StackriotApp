@@ -74,6 +74,7 @@ struct CopilotExecutionFlowTests {
         #expect(draft.tool == .githubCopilot)
         #expect(draft.promptSourceTitle == "Implementation Plan")
         #expect(draft.promptText == "Ship the plan")
+        #expect(draft.activatesTerminalTab)
         #expect(draft.selectedCopilotModelID == CopilotModelOption.auto.id)
         #expect(draft.availableCopilotModels == [
             .auto,
@@ -108,10 +109,46 @@ struct CopilotExecutionFlowTests {
 
         let draft = appModel.pendingCopilotExecutionDraft
         #expect(draft != nil)
+        #expect(draft?.activatesTerminalTab == true)
         #expect(draft?.selectedCopilotModelID == CopilotModelOption.auto.id)
         #expect(draft?.availableCopilotModels == [.auto])
         #expect(draft?.modelDiscoveryErrorMessage == "GitHub Copilot models could not be loaded: copilot auth status is not successful")
         #expect(draft?.isLoadingCopilotModels == false)
+    }
+
+    @MainActor
+    @Test
+    func prepareCopilotExecutionWithPlanKeepsBackgroundLaunchPreference() async throws {
+        let discovery = CopilotModelDiscoveryService(
+            runCommand: { _, _, _, _ in
+                CommandResult(
+                    stdout: "",
+                    stderr: #"Error: Invalid value for option "--model" (choices: "gpt-5.4-mini")"#,
+                    exitCode: 1
+                )
+            },
+            environmentProvider: { [:] }
+        )
+        let appModel = AppModel(services: AppServices(
+            copilotModelDiscovery: discovery,
+            notificationService: NoopNotificationService()
+        ))
+        appModel.availableAgents = [.githubCopilot]
+
+        let repository = makeRepository(name: "CopilotBackground")
+        let worktree = WorktreeRecord(branchName: "feature/copilot-background", path: "/tmp/copilot-background", repository: repository)
+        repository.worktrees = [worktree]
+        appModel.saveIntent("Keep editing while Copilot runs", for: worktree.id)
+
+        await appModel.prepareCopilotExecutionWithPlan(
+            for: worktree,
+            in: repository,
+            options: AgentLaunchOptions(activatesTerminalTab: false)
+        )
+
+        let draft = try #require(appModel.pendingCopilotExecutionDraft)
+        #expect(draft.activatesTerminalTab == false)
+        #expect(draft.promptText == "Keep editing while Copilot runs")
     }
 
     private func makeRepository(name: String) -> ManagedRepository {

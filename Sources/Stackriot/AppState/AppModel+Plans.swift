@@ -179,11 +179,14 @@ extension AppModel {
         }
         guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil else { return }
         let promptText = promptOverride ?? planExecutionPrompt(for: worktree).text
-        terminalTabs.deselectPlanTab(for: worktree.id)
         _ = await launchAgent(tool, for: worktree, in: modelContext, initialPrompt: promptText, options: options)
     }
 
-    func prepareCopilotExecutionWithPlan(for worktree: WorktreeRecord, in repository: ManagedRepository) async {
+    func prepareCopilotExecutionWithPlan(
+        for worktree: WorktreeRecord,
+        in repository: ManagedRepository,
+        options: AgentLaunchOptions = AgentLaunchOptions()
+    ) async {
         guard availableAgents.contains(.githubCopilot) else {
             pendingErrorMessage = "GitHub Copilot is not available on this machine."
             return
@@ -209,6 +212,7 @@ extension AppModel {
             repositoryID: repository.id,
             promptSourceTitle: prompt.sourceTitle,
             promptText: prompt.text,
+            activatesTerminalTab: options.activatesTerminalTab,
             availableCopilotModels: [.auto],
             selectedCopilotModelID: CopilotModelOption.auto.id,
             isLoadingCopilotModels: true,
@@ -254,17 +258,18 @@ extension AppModel {
 
         let selectedModel = draft.availableCopilotModels.first(where: { $0.id == draft.selectedCopilotModelID })
         let options = AgentLaunchOptions(
-            copilotModelOverride: selectedModel?.isAuto == false ? selectedModel?.id : nil
+            copilotModelOverride: selectedModel?.isAuto == false ? selectedModel?.id : nil,
+            activatesTerminalTab: draft.activatesTerminalTab
         )
 
         pendingCopilotExecutionDraft = nil
         Task {
             await launchAgentWithPlan(
-            .githubCopilot,
-            for: worktree,
-            in: modelContext,
-            options: options,
-            promptOverride: draft.promptText
+                .githubCopilot,
+                for: worktree,
+                in: modelContext,
+                options: options,
+                promptOverride: draft.promptText
             )
         }
     }

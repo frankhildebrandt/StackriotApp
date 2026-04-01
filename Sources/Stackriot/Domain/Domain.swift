@@ -234,8 +234,9 @@ struct QuickIntentHotkeyConfiguration: Codable, Equatable, Sendable {
 
 struct AgentLaunchOptions: Sendable, Equatable {
     let copilotModelOverride: String?
+    let activatesTerminalTab: Bool
 
-    init(copilotModelOverride: String? = nil) {
+    init(copilotModelOverride: String? = nil, activatesTerminalTab: Bool = true) {
         let trimmedOverride = copilotModelOverride?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .nonEmpty
@@ -244,6 +245,7 @@ struct AgentLaunchOptions: Sendable, Equatable {
         } else {
             self.copilotModelOverride = nil
         }
+        self.activatesTerminalTab = activatesTerminalTab
     }
 }
 
@@ -862,6 +864,7 @@ struct CommandExecutionDescriptor: Sendable {
     let title: String
     let actionKind: ActionKind
     let showsAgentIndicator: Bool
+    let activatesTerminalTab: Bool
     let runConfigurationID: String?
     let executable: String
     let arguments: [String]
@@ -881,6 +884,7 @@ struct CommandExecutionDescriptor: Sendable {
         title: String,
         actionKind: ActionKind,
         showsAgentIndicator: Bool = false,
+        activatesTerminalTab: Bool = true,
         runConfigurationID: String? = nil,
         executable: String,
         arguments: [String],
@@ -899,6 +903,7 @@ struct CommandExecutionDescriptor: Sendable {
         self.title = title
         self.actionKind = actionKind
         self.showsAgentIndicator = showsAgentIndicator
+        self.activatesTerminalTab = activatesTerminalTab
         self.runConfigurationID = runConfigurationID
         self.executable = executable
         self.arguments = arguments
@@ -1140,6 +1145,16 @@ struct TerminalTabBookkeeping: Sendable {
         tab.lastViewedAt = viewedAt
         tabs[runID] = tab
         selectedRunIDsByWorktree[worktreeID] = runID
+    }
+
+    mutating func showInBackground(runID: UUID, worktreeID: UUID, openedAt: Date = .now) {
+        var tab = tabs[runID] ?? TerminalTabState(runID: runID, worktreeID: worktreeID)
+        if tab.isVisible == false || tab.openedAt == nil {
+            tab.openedAt = openedAt
+        }
+        tab.isVisible = true
+        tab.closedAt = nil
+        tabs[runID] = tab
     }
 
     mutating func markCompleted(runID: UUID, at: Date = .now) {

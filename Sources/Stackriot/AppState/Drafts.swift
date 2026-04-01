@@ -195,6 +195,7 @@ struct PendingAgentExecutionDraft: Identifiable {
     let repositoryID: UUID
     let promptSourceTitle: String
     let promptText: String
+    let activatesTerminalTab: Bool
     var availableCopilotModels: [CopilotModelOption]
     var selectedCopilotModelID: String
     var isLoadingCopilotModels = false

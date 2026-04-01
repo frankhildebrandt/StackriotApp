@@ -85,6 +85,7 @@ struct PlanEditorView: View {
                 createPlanButton
             }
             agentDispatchMenu
+            backgroundDispatchMenu
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -142,32 +143,23 @@ struct PlanEditorView: View {
     }
 
     private var agentDispatchMenu: some View {
-        let agents = availableAgents
-        return Menu {
-            if agents.isEmpty {
-                Text("No agents installed")
-            } else {
-                ForEach(agents) { tool in
-                    Button("Execute with \(tool.displayName)") {
-                        saveTask?.cancel()
-                        persistCurrentBodyText()
-                        if tool == .githubCopilot {
-                            Task {
-                                await appModel.prepareCopilotExecutionWithPlan(for: worktree, in: repository)
-                            }
-                        } else {
-                            Task {
-                                await appModel.launchAgentWithPlan(tool, for: worktree, in: modelContext)
-                            }
-                        }
-                    }
-                }
-            }
+        Menu {
+            dispatchAgentButtons(sendToBackground: false)
         } label: {
             Label("Execute with Agent", systemImage: "sparkles")
         }
         .disabled(agents.isEmpty || bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         .help(executeHelp)
+    }
+
+    private var backgroundDispatchMenu: some View {
+        Menu {
+            dispatchAgentButtons(sendToBackground: true)
+        } label: {
+            Label("Send to Background", systemImage: "arrow.down.circle")
+        }
+        .disabled(agents.isEmpty || bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .help(backgroundExecuteHelp)
     }
 
     private var executeHelp: String {
@@ -187,8 +179,21 @@ struct PlanEditorView: View {
         appModel.availablePlanningAgents()
     }
 
+    private var agents: [AIAgentTool] {
+        availableAgents
+    }
+
     private var canCreatePlan: Bool {
         !worktree.isDefaultBranchWorkspace && !availablePlanningAgents.isEmpty
+    }
+
+    private var backgroundExecuteHelp: String {
+        switch role {
+        case .intent:
+            "Intent mit AI-Agent im Hintergrund ausführen"
+        case .implementationPlan:
+            "Implementierungsplan mit AI-Agent im Hintergrund ausführen"
+        }
     }
 
     private func persistCurrentBodyText() {
@@ -197,6 +202,41 @@ struct PlanEditorView: View {
             appModel.saveIntent(bodyText, for: worktree.id)
         case .implementationPlan:
             appModel.saveImplementationPlan(bodyText, for: worktree.id)
+        }
+    }
+
+    @ViewBuilder
+    private func dispatchAgentButtons(sendToBackground: Bool) -> some View {
+        if agents.isEmpty {
+            Text("No agents installed")
+        } else {
+            ForEach(agents) { tool in
+                Button(dispatchTitle(for: tool, sendToBackground: sendToBackground)) {
+                    runPlan(with: tool, sendToBackground: sendToBackground)
+                }
+            }
+        }
+    }
+
+    private func dispatchTitle(for tool: AIAgentTool, sendToBackground: Bool) -> String {
+        if sendToBackground {
+            return "Send \(tool.displayName) to Background"
+        }
+        return "Execute with \(tool.displayName)"
+    }
+
+    private func runPlan(with tool: AIAgentTool, sendToBackground: Bool) {
+        saveTask?.cancel()
+        persistCurrentBodyText()
+        let options = AgentLaunchOptions(activatesTerminalTab: !sendToBackground)
+        if tool == .githubCopilot {
+            Task {
+                await appModel.prepareCopilotExecutionWithPlan(for: worktree, in: repository, options: options)
+            }
+        } else {
+            Task {
+                await appModel.launchAgentWithPlan(tool, for: worktree, in: modelContext, options: options)
+            }
         }
     }
 }

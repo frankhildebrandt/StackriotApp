@@ -388,6 +388,22 @@ struct StackriotTests {
     }
 
     @Test
+    func terminalTabBookkeepingShowsBackgroundRunWithoutStealingSelection() {
+        let worktreeID = UUID()
+        let foregroundRun = UUID()
+        let backgroundRun = UUID()
+        var tabs = TerminalTabBookkeeping()
+
+        tabs.activate(runID: foregroundRun, worktreeID: worktreeID, viewedAt: Date(timeIntervalSince1970: 10))
+        tabs.selectPlanTab(for: worktreeID)
+        tabs.showInBackground(runID: backgroundRun, worktreeID: worktreeID, openedAt: Date(timeIntervalSince1970: 20))
+
+        #expect(tabs.isPlanTabSelected(for: worktreeID))
+        #expect(tabs.visibleRunIDs(for: worktreeID) == [backgroundRun, foregroundRun])
+        #expect(tabs.selectedVisibleRunID(for: worktreeID) == foregroundRun)
+    }
+
+    @Test
     @MainActor
     func ensureSelectedWorktreeActivatesSpecialTabForInitialSelection() {
         let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
