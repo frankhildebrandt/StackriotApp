@@ -178,6 +178,18 @@ struct StackriotTests {
     }
 
     @Test
+    func planningSupportAddsCopilotAndClaudeWithoutResume() {
+        #expect(AIAgentTool.codex.supportsPlanning)
+        #expect(AIAgentTool.cursorCLI.supportsPlanning)
+        #expect(AIAgentTool.claudeCode.supportsPlanning)
+        #expect(AIAgentTool.githubCopilot.supportsPlanning)
+        #expect(AIAgentTool.codex.supportsPlanResume)
+        #expect(AIAgentTool.cursorCLI.supportsPlanResume)
+        #expect(!AIAgentTool.claudeCode.supportsPlanResume)
+        #expect(!AIAgentTool.githubCopilot.supportsPlanResume)
+    }
+
+    @Test
     func shellEnvironmentUsesLoginPathUnlessOverridden() async {
         let loginPath = await ShellEnvironment.loginShellPath()
 
@@ -1141,7 +1153,10 @@ struct StackriotTests {
 
         defaults.set(workspaceNamespace.id.uuidString, forKey: AppPreferences.selectedNamespaceIDKey)
 
-        let appModel = AppModel(userDefaults: defaults)
+        let appModel = AppModel(
+            services: AppServices(notificationService: RecordingNotificationService()),
+            userDefaults: defaults
+        )
         appModel.selectInitialNamespace(from: appModel.namespaces(in: modelContext))
 
         #expect(appModel.selectedNamespaceID == workspaceNamespace.id)
@@ -1160,7 +1175,10 @@ struct StackriotTests {
 
         defaults.set(UUID().uuidString, forKey: AppPreferences.selectedNamespaceIDKey)
 
-        let appModel = AppModel(userDefaults: defaults)
+        let appModel = AppModel(
+            services: AppServices(notificationService: RecordingNotificationService()),
+            userDefaults: defaults
+        )
         appModel.selectInitialNamespace(from: appModel.namespaces(in: modelContext))
 
         #expect(appModel.selectedNamespaceID == defaultNamespace.id)
@@ -3422,11 +3440,72 @@ struct StackriotTests {
         """)
     }
 
+    @Test
+    func copilotPromptParserCapturesLastAssistantPlanResponse() {
+        let parser = CopilotPromptJSONLParser()
+        let responseText = """
+        I checked the worktree.
+        {"status":"ready","summary":"Copilot plan ready.","questions":null,"plan_markdown":"# Copilot Plan\\n- Inspect flow"}
+        """
+        let line = String(
+            data: try! JSONSerialization.data(withJSONObject: [
+                "type": "assistant.message",
+                "data": [
+                    "messageId": "copilot-msg-1",
+                    "content": responseText,
+                    "session_id": "copilot-session-1",
+                ],
+            ]),
+            encoding: .utf8
+        )! + "\n"
+
+        _ = parser.consume(line)
+
+        #expect(parser.currentSessionID == "copilot-session-1")
+        #expect(parser.latestAssistantMessageText == responseText)
+        let structuredResponse = AppModel.parseAgentPlanResponse(from: parser.latestAssistantMessageText ?? "")
+        #expect(structuredResponse?.summary == "Copilot plan ready.")
+        #expect(structuredResponse?.planMarkdown == "# Copilot Plan\n- Inspect flow")
+    }
+
+    @Test
+    func claudePrintParserCapturesLastAssistantPlanResponse() {
+        let parser = ClaudePrintStreamJSONParser()
+        let responseText = """
+        Here is the plan.
+        {"status":"ready","summary":"Claude plan ready.","questions":null,"plan_markdown":"# Claude Plan\\n- Inspect flow"}
+        """
+        let line = String(
+            data: try! JSONSerialization.data(withJSONObject: [
+                "type": "assistant",
+                "session_id": "claude-session-1",
+                "message": [
+                    "role": "assistant",
+                    "content": [
+                        ["type": "text", "text": responseText],
+                    ],
+                ],
+            ]),
+            encoding: .utf8
+        )! + "\n"
+
+        _ = parser.consume(line)
+
+        #expect(parser.currentSessionID == "claude-session-1")
+        #expect(parser.latestAssistantMessageText == responseText)
+        let structuredResponse = AppModel.parseAgentPlanResponse(from: parser.latestAssistantMessageText ?? "")
+        #expect(structuredResponse?.summary == "Claude plan ready.")
+        #expect(structuredResponse?.planMarkdown == "# Claude Plan\n- Inspect flow")
+    }
+
     @MainActor
     @Test
     func cursorPlanImportUsesSharedStructuredSchema() throws {
         let defaults = try makeUserDefaultsSuite()
-        let appModel = AppModel(userDefaults: defaults)
+        let appModel = AppModel(
+            services: AppServices(notificationService: RecordingNotificationService()),
+            userDefaults: defaults
+        )
         let repository = makeRepository(name: "CursorPlanStructuredImport")
         let worktree = WorktreeRecord(
             branchName: "feature/cursor-plan",
@@ -3488,9 +3567,85 @@ struct StackriotTests {
 
     @MainActor
     @Test
+    func backgroundCursorPlanImportWritesImplementationPlanAndNotifies() async throws {
+        let defaults = try makeUserDefaultsSuite()
+        let recorder = RecordingNotificationService()
+        let appModel = AppModel(
+            services: AppServices(notificationService: recorder),
+            userDefaults: defaults
+        )
+        let repository = makeRepository(name: "BackgroundCursorPlan")
+        let worktree = WorktreeRecord(
+            branchName: "feature/background-cursor-plan",
+            issueContext: "Create the feature plan",
+            path: "/tmp/background-cursor-plan",
+            repository: repository
+        )
+        repository.worktrees = [worktree]
+        let responseURL = URL(fileURLWithPath: "/tmp/background-cursor-plan-\(UUID().uuidString).json")
+        try """
+        {
+          "status": "ready",
+          "summary": "Plan is ready.",
+          "questions": null,
+          "plan_markdown": "# Background Cursor Plan\\n- Import without sheet\\n- Notify the user"
+        }
+        """.write(to: responseURL, atomically: true, encoding: .utf8)
+        defer {
+            try? FileManager.default.removeItem(at: AppPaths.implementationPlanFile(for: worktree.id))
+            try? FileManager.default.removeItem(at: responseURL)
+        }
+
+        let run = RunRecord(
+            actionKind: .aiAgent,
+            title: "Cursor Plan",
+            commandLine: "cursor-agent --print --output-format stream-json --stream-partial-output",
+            outputText: "Noise only\n",
+            status: .succeeded,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        run.isTransientPlanRun = true
+        appModel.agentPlanDraftsByWorktreeID[worktree.id] = AgentPlanDraft(
+            tool: .cursorCLI,
+            worktreeID: worktree.id,
+            repositoryID: repository.id,
+            branchName: worktree.branchName,
+            issueContext: worktree.issueContext ?? "",
+            run: run,
+            responseFilePath: responseURL.path,
+            presentation: .background
+        )
+
+        appModel.importCompletedAgentPlanIfAvailable(forRunID: run.id)
+
+        let importedPlan = try String(contentsOf: AppPaths.implementationPlanFile(for: worktree.id), encoding: .utf8)
+        #expect(importedPlan == """
+        # Background Cursor Plan
+        - Import without sheet
+        - Notify the user
+        """)
+        #expect(appModel.agentPlanDraft(for: worktree.id) == nil)
+        #expect(appModel.activeAgentPlanDraftWorktreeID == nil)
+
+        try await Task.sleep(for: .milliseconds(50))
+        let notifications = await recorder.deliveredRequests
+        #expect(notifications.contains(where: {
+            $0.title == "Cursor plan imported"
+                && $0.subtitle == worktree.branchName
+                && $0.body.contains("updated the Implementation Plan")
+        }))
+    }
+
+    @MainActor
+    @Test
     func codexPlanImportReplacesPersistedPlanWithExtractedMarkdown() throws {
         let defaults = try makeUserDefaultsSuite()
-        let appModel = AppModel(userDefaults: defaults)
+        let appModel = AppModel(
+            services: AppServices(notificationService: RecordingNotificationService()),
+            userDefaults: defaults
+        )
         let repository = makeRepository(name: "CodexPlanImport")
         let worktree = WorktreeRecord(
             branchName: "feature/codex-plan",
@@ -3549,7 +3704,10 @@ struct StackriotTests {
     @Test
     func codexPlanImportPrefersStructuredResponseFile() throws {
         let defaults = try makeUserDefaultsSuite()
-        let appModel = AppModel(userDefaults: defaults)
+        let appModel = AppModel(
+            services: AppServices(notificationService: RecordingNotificationService()),
+            userDefaults: defaults
+        )
         let repository = makeRepository(name: "CodexPlanStructuredImport")
         let worktree = WorktreeRecord(
             branchName: "feature/structured-plan",
@@ -3609,7 +3767,10 @@ struct StackriotTests {
     @Test
     func codexPlanImportKeepsExistingPlanWhenNoCompleteBlockExists() throws {
         let defaults = try makeUserDefaultsSuite()
-        let appModel = AppModel(userDefaults: defaults)
+        let appModel = AppModel(
+            services: AppServices(notificationService: RecordingNotificationService()),
+            userDefaults: defaults
+        )
         let repository = makeRepository(name: "CodexPlanNoImport")
         let worktree = WorktreeRecord(
             branchName: "feature/no-import",
@@ -3660,6 +3821,55 @@ struct StackriotTests {
 
     @MainActor
     @Test
+    func dismissingPresentedPlanDraftSendsItToBackground() {
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        let repository = makeRepository(name: "DraftPresentation")
+        let worktree = WorktreeRecord(
+            branchName: "feature/draft-presentation",
+            issueContext: "Track planner visibility",
+            path: "/tmp/draft-presentation",
+            repository: repository
+        )
+        repository.worktrees = [worktree]
+
+        let run = RunRecord(
+            actionKind: .aiAgent,
+            title: "Claude Plan",
+            commandLine: "claude -p",
+            outputText: "",
+            status: .running,
+            worktreeID: worktree.id,
+            repository: repository,
+            worktree: worktree
+        )
+        run.isTransientPlanRun = true
+
+        appModel.agentPlanDraftsByWorktreeID[worktree.id] = AgentPlanDraft(
+            tool: .claudeCode,
+            worktreeID: worktree.id,
+            repositoryID: repository.id,
+            branchName: worktree.branchName,
+            issueContext: worktree.issueContext ?? "",
+            run: run
+        )
+
+        appModel.presentAgentPlanDraft(for: worktree.id)
+        #expect(appModel.activeAgentPlanDraftWorktreeID == worktree.id)
+        #expect(appModel.agentPlanDraft(for: worktree.id)?.presentation == .foreground)
+
+        appModel.dismissPresentedAgentPlanDraft()
+
+        #expect(appModel.activeAgentPlanDraftWorktreeID == nil)
+        #expect(appModel.agentPlanDraft(for: worktree.id)?.presentation == .background)
+
+        appModel.presentAgentPlanDraft(for: worktree.id)
+
+        #expect(appModel.activeAgentPlanDraftWorktreeID == worktree.id)
+        #expect(appModel.agentPlanDraft(for: worktree.id)?.presentation == .foreground)
+    }
+
+    @MainActor
+    @Test
     func moveWorktreeUpdatesPersistedPath() async throws {
         let remote = try await createSeededRemote(named: "appmodel-move-worktree")
         let cloneInfo = try await RepositoryManager().cloneBareRepository(
@@ -3690,7 +3900,7 @@ struct StackriotTests {
         modelContext.insert(worktree)
         try modelContext.save()
 
-        let appModel = AppModel()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
         let destinationRoot = try temporaryDirectory(named: "appmodel-move-root")
 

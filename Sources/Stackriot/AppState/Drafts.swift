@@ -223,6 +223,11 @@ struct ProjectEditorDraft: Identifiable {
 }
 
 struct AgentPlanDraft: Identifiable {
+    enum Presentation {
+        case foreground
+        case background
+    }
+
     let tool: AIAgentTool
     let worktreeID: UUID
     let repositoryID: UUID
@@ -237,12 +242,37 @@ struct AgentPlanDraft: Identifiable {
     var didImportPlan = false
     var importErrorMessage: String?
     var requestedSessionTermination = false
+    var presentation: Presentation = .foreground
 
     var id: UUID { worktreeID }
     var runID: UUID { run.id }
 }
 
+enum PendingCopilotDraftPurpose {
+    case execution
+    case planning
+
+    var title: String {
+        switch self {
+        case .execution:
+            "Execute with GitHub Copilot"
+        case .planning:
+            "Create Plan with GitHub Copilot"
+        }
+    }
+
+    var backgroundTitle: String {
+        switch self {
+        case .execution:
+            "Send to Background with GitHub Copilot"
+        case .planning:
+            "Create Plan with GitHub Copilot"
+        }
+    }
+}
+
 struct PendingAgentExecutionDraft: Identifiable {
+    let purpose: PendingCopilotDraftPurpose
     let tool: AIAgentTool
     let worktreeID: UUID
     let repositoryID: UUID

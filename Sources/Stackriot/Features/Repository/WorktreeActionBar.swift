@@ -65,6 +65,21 @@ struct WorktreeActionBar: View {
 
             Spacer()
 
+            if let draft = appModel.agentPlanDraft(for: worktree.id) {
+                Button {
+                    appModel.presentAgentPlanDraft(for: worktree.id)
+                } label: {
+                    Label(
+                        appModel.activeRunIDs.contains(draft.runID) ? "Plan Run" : "Open Plan Run",
+                        systemImage: appModel.activeRunIDs.contains(draft.runID)
+                            ? (draft.presentation == .background ? "moon.stars.fill" : "sparkles.rectangle.stack.fill")
+                            : "sparkles.rectangle.stack"
+                    )
+                }
+                .buttonStyle(.bordered)
+                .help("Aktiven Planungslauf für diesen Worktree öffnen")
+            }
+
             if appModel.isAgentRunning(for: worktree) {
                 HStack(spacing: 6) {
                     Text("Agent")

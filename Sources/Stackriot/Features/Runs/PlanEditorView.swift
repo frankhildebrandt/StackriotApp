@@ -82,10 +82,12 @@ struct PlanEditorView: View {
                 .font(.subheadline.weight(.semibold))
             Spacer()
             if role == .intent {
+                if let draft = appModel.agentPlanDraft(for: worktree.id) {
+                    reopenPlanRunButton(for: draft)
+                }
                 createPlanButton
             }
             agentDispatchMenu
-            backgroundDispatchMenu
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -113,6 +115,15 @@ struct PlanEditorView: View {
     private var createPlanButton: some View {
         let planningAgents = availablePlanningAgents
         return Menu {
+            if let draft = appModel.agentPlanDraft(for: worktree.id) {
+                Button {
+                    appModel.presentAgentPlanDraft(for: worktree.id)
+                } label: {
+                    Label("Open \(draft.tool.displayName) Planning Run", systemImage: "arrow.up.right.square")
+                }
+
+                Divider()
+            }
             if planningAgents.isEmpty {
                 Text("No planning agents installed")
             } else {
@@ -121,13 +132,22 @@ struct PlanEditorView: View {
                         saveTask?.cancel()
                         persistCurrentBodyText()
                         Task {
-                            await appModel.startAgentPlanDraft(
-                                using: tool,
-                                for: worktree,
-                                in: repository,
-                                currentIntentText: bodyText,
-                                modelContext: modelContext
-                            )
+                            if tool == .githubCopilot {
+                                await appModel.prepareCopilotPlanningWithIntent(
+                                    for: worktree,
+                                    in: repository,
+                                    currentIntentText: bodyText,
+                                    modelContext: modelContext
+                                )
+                            } else {
+                                await appModel.startAgentPlanDraft(
+                                    using: tool,
+                                    for: worktree,
+                                    in: repository,
+                                    currentIntentText: bodyText,
+                                    modelContext: modelContext
+                                )
+                            }
                         }
                     } label: {
                         Label(tool.displayName, systemImage: tool.systemImageName)
@@ -144,22 +164,12 @@ struct PlanEditorView: View {
 
     private var agentDispatchMenu: some View {
         Menu {
-            dispatchAgentButtons(sendToBackground: false)
+            dispatchAgentButtons()
         } label: {
             Label("Execute with Agent", systemImage: "sparkles")
         }
         .disabled(agents.isEmpty || bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         .help(executeHelp)
-    }
-
-    private var backgroundDispatchMenu: some View {
-        Menu {
-            dispatchAgentButtons(sendToBackground: true)
-        } label: {
-            Label("Send to Background", systemImage: "arrow.down.circle")
-        }
-        .disabled(agents.isEmpty || bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        .help(backgroundExecuteHelp)
     }
 
     private var executeHelp: String {
@@ -187,15 +197,6 @@ struct PlanEditorView: View {
         !worktree.isDefaultBranchWorkspace && !availablePlanningAgents.isEmpty
     }
 
-    private var backgroundExecuteHelp: String {
-        switch role {
-        case .intent:
-            "Intent mit AI-Agent im Hintergrund ausführen"
-        case .implementationPlan:
-            "Implementierungsplan mit AI-Agent im Hintergrund ausführen"
-        }
-    }
-
     private func persistCurrentBodyText() {
         switch role {
         case .intent:
@@ -206,29 +207,22 @@ struct PlanEditorView: View {
     }
 
     @ViewBuilder
-    private func dispatchAgentButtons(sendToBackground: Bool) -> some View {
+    private func dispatchAgentButtons() -> some View {
         if agents.isEmpty {
             Text("No agents installed")
         } else {
             ForEach(agents) { tool in
-                Button(dispatchTitle(for: tool, sendToBackground: sendToBackground)) {
-                    runPlan(with: tool, sendToBackground: sendToBackground)
+                Button("Execute with \(tool.displayName)") {
+                    runPlan(with: tool)
                 }
             }
         }
     }
 
-    private func dispatchTitle(for tool: AIAgentTool, sendToBackground: Bool) -> String {
-        if sendToBackground {
-            return "Send \(tool.displayName) to Background"
-        }
-        return "Execute with \(tool.displayName)"
-    }
-
-    private func runPlan(with tool: AIAgentTool, sendToBackground: Bool) {
+    private func runPlan(with tool: AIAgentTool) {
         saveTask?.cancel()
         persistCurrentBodyText()
-        let options = AgentLaunchOptions(activatesTerminalTab: !sendToBackground)
+        let options = AgentLaunchOptions()
         if tool == .githubCopilot {
             Task {
                 await appModel.prepareCopilotExecutionWithPlan(for: worktree, in: repository, options: options)
@@ -238,5 +232,45 @@ struct PlanEditorView: View {
                 await appModel.launchAgentWithPlan(tool, for: worktree, in: modelContext, options: options)
             }
         }
+    }
+
+    private func reopenPlanRunButton(for draft: AgentPlanDraft) -> some View {
+        Button {
+            appModel.presentAgentPlanDraft(for: draft.worktreeID)
+        } label: {
+            Label(planRunStatusTitle(for: draft), systemImage: planRunStatusSymbol(for: draft))
+        }
+        .buttonStyle(.bordered)
+        .help(planRunStatusHelp(for: draft))
+    }
+
+    private func planRunStatusTitle(for draft: AgentPlanDraft) -> String {
+        if appModel.activeRunIDs.contains(draft.runID) {
+            return draft.presentation == .background ? "Plan Running" : "Planning"
+        }
+        if draft.didImportPlan {
+            return "Plan Imported"
+        }
+        return draft.tool.supportsPlanResume && !draft.latestQuestions.isEmpty ? "Plan Needs Reply" : "Open Plan Run"
+    }
+
+    private func planRunStatusSymbol(for draft: AgentPlanDraft) -> String {
+        if appModel.activeRunIDs.contains(draft.runID) {
+            return draft.presentation == .background ? "moon.stars.fill" : "sparkles.rectangle.stack.fill"
+        }
+        if draft.didImportPlan {
+            return "checkmark.circle"
+        }
+        return draft.importErrorMessage == nil ? "sparkles.rectangle.stack" : "exclamationmark.triangle"
+    }
+
+    private func planRunStatusHelp(for draft: AgentPlanDraft) -> String {
+        if appModel.activeRunIDs.contains(draft.runID) {
+            return "\(draft.tool.displayName) is still creating a plan for this worktree."
+        }
+        if draft.didImportPlan {
+            return "Open the latest planning run details."
+        }
+        return "Reopen the current planning run for this worktree."
     }
 }

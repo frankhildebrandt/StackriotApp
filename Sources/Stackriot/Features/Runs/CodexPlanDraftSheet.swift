@@ -37,6 +37,14 @@ struct AgentPlanDraftSheet: View {
                 Text("Planner output is written to the Implementation Plan page; Intent is the input.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    planStatusBadge(for: draft)
+                    if draft.presentation == .background {
+                        Label("Background", systemImage: "moon.stars.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Text(draft.branchName)
                     .font(.subheadline.weight(.medium))
                 Text(draft.issueContext)
@@ -45,8 +53,22 @@ struct AgentPlanDraftSheet: View {
                     .textSelection(.enabled)
             }
             Spacer()
-            Button(activeButtonTitle(for: draft), role: activeButtonRole(for: draft)) {
-                appModel.cancelAgentPlanDraft(for: draft.worktreeID)
+            HStack(spacing: 10) {
+                if appModel.activeRunIDs.contains(draft.runID) {
+                    Button("In den Hintergrund") {
+                        appModel.sendAgentPlanDraftToBackground(for: draft.worktreeID)
+                    }
+                }
+
+                Button("Close") {
+                    appModel.dismissPresentedAgentPlanDraft()
+                }
+
+                if !draft.didImportPlan {
+                    Button("Cancel", role: .destructive) {
+                        appModel.cancelAgentPlanDraft(for: draft.worktreeID)
+                    }
+                }
             }
         }
         .padding(20)
@@ -115,26 +137,23 @@ struct AgentPlanDraftSheet: View {
             && !draft.latestQuestions.isEmpty
     }
 
-    private func activeButtonTitle(for draft: AgentPlanDraft) -> String {
-        appModel.activeRunIDs.contains(draft.runID) ? "Cancel" : "Close"
-    }
-
-    private func activeButtonRole(for draft: AgentPlanDraft) -> ButtonRole? {
-        appModel.activeRunIDs.contains(draft.runID) ? .destructive : nil
-    }
-
     private func statusMessage(for draft: AgentPlanDraft) -> String {
         if let importErrorMessage = draft.importErrorMessage?.nonEmpty {
             return "Import failed: \(importErrorMessage)"
         }
         if draft.didImportPlan {
-            return "The proposed plan was imported. The sheet will close automatically."
+            return "The proposed plan was imported into the Implementation Plan page."
         }
         if appModel.activeRunIDs.contains(draft.runID) {
-            return "\(draft.tool.displayName) is inspecting the worktree and preparing the next planning response."
+            return draft.presentation == .background
+                ? "\(draft.tool.displayName) keeps running in the background. Reopen this sheet at any time from the worktree context."
+                : "\(draft.tool.displayName) is inspecting the worktree and preparing the next planning response."
         }
         if canSendReply(for: draft) {
             return "Answer the follow-up questions here. After your reply, Stackriot resumes the same \(draft.tool.displayName) session and replaces the worktree plan as soon as the final plan returns."
+        }
+        if !draft.tool.supportsPlanResume && !draft.latestQuestions.isEmpty {
+            return "\(draft.tool.displayName) needs additional input, but this planning flow cannot resume automatically yet. Review the questions below and start a fresh planning run after updating the intent."
         }
         return "No final plan was imported. You can close this draft and start a new planning run."
     }
@@ -144,5 +163,31 @@ struct AgentPlanDraftSheet: View {
             return .red
         }
         return .secondary
+    }
+
+    private func planStatusBadge(for draft: AgentPlanDraft) -> some View {
+        let isRunning = appModel.activeRunIDs.contains(draft.runID)
+        let title: String
+        let symbol: String
+
+        if isRunning {
+            title = "Running"
+            symbol = "sparkles"
+        } else if draft.didImportPlan {
+            title = "Imported"
+            symbol = "checkmark.circle"
+        } else if !draft.latestQuestions.isEmpty {
+            title = draft.tool.supportsPlanResume ? "Needs Reply" : "Needs Input"
+            symbol = "questionmark.circle"
+        } else {
+            title = "Stopped"
+            symbol = "pause.circle"
+        }
+
+        return Label(title, systemImage: symbol)
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.regularMaterial, in: Capsule())
     }
 }
