@@ -680,6 +680,34 @@ struct StackriotTests {
     }
 
     @Test
+    func publishCurrentBranchIfNeededSkipsPushWhenUpstreamExists() async throws {
+        let remoteOne = try await createSeededRemote(named: "publish-if-needed")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remoteOne.remote, preferredName: "Sample")
+
+        let worktreeInfo = try await WorktreeManager().createWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            branchName: "feature/upstream",
+            sourceBranch: cloneInfo.defaultBranch
+        )
+
+        try "more".write(to: worktreeInfo.path.appendingPathComponent("CHANGELOG.md"), atomically: true, encoding: .utf8)
+        try await runGit(["-C", worktreeInfo.path.path, "add", "."], currentDirectoryURL: worktreeInfo.path)
+        try await runGit(["-C", worktreeInfo.path.path, "config", "user.email", "tests@example.com"], currentDirectoryURL: worktreeInfo.path)
+        try await runGit(["-C", worktreeInfo.path.path, "config", "user.name", "Stackriot Tests"], currentDirectoryURL: worktreeInfo.path)
+        try await runGit(["-C", worktreeInfo.path.path, "config", "commit.gpgsign", "false"], currentDirectoryURL: worktreeInfo.path)
+        try await runGit(["-C", worktreeInfo.path.path, "commit", "-m", "Publish"], currentDirectoryURL: worktreeInfo.path)
+
+        let manager = RepositoryManager()
+        let remote = RemoteExecutionContext(name: "origin", url: remoteOne.remote.path, fetchEnabled: true, privateKeyRef: nil)
+        let firstPublish = try await manager.publishCurrentBranchIfNeeded(worktreePath: worktreeInfo.path, remote: remote)
+        let secondPublish = try await manager.publishCurrentBranchIfNeeded(worktreePath: worktreeInfo.path, remote: remote)
+
+        #expect(firstPublish == PublishBranchResult(branch: "feature/upstream", didPush: true))
+        #expect(secondPublish == PublishBranchResult(branch: "feature/upstream", didPush: false))
+    }
+
+    @Test
     func integrateIntoDefaultBranchCreatesCommit() async throws {
         let remote = try await createSeededRemote(named: "integrate")
         let cloneInfo = try await RepositoryManager().cloneBareRepository(
@@ -2461,6 +2489,50 @@ struct StackriotTests {
     }
 
     @Test
+    func gitHubCreatePRCanPinHeadBranchForAutoPublishedBranches() async throws {
+        let worktree = try temporaryDirectory(named: "gh-create-pr-head")
+        let service = GitHubCLIService(
+            runCommand: { executable, arguments, _, _ in
+                if executable == "gh",
+                   arguments == [
+                       "pr", "create",
+                       "--title", "Feature title",
+                       "--body", "PR body",
+                       "--base", "main",
+                       "--head", "feature/auto-pushed",
+                   ]
+                {
+                    return CommandResult(stdout: "https://github.com/octo/example/pull/99", stderr: "", exitCode: 0)
+                }
+                if executable == "gh",
+                   arguments == ["pr", "view", "https://github.com/octo/example/pull/99", "--json", "number,url"]
+                {
+                    return CommandResult(
+                        stdout: #"{"number":99,"url":"https://github.com/octo/example/pull/99"}"#,
+                        stderr: "",
+                        exitCode: 0
+                    )
+                }
+
+                Issue.record("Unexpected command: \(executable) \(arguments.joined(separator: " "))")
+                return CommandResult(stdout: "", stderr: "", exitCode: 1)
+            },
+            environmentProvider: { ["PATH": "/opt/homebrew/bin:/usr/bin:/bin"] }
+        )
+
+        let prInfo = try await service.createPR(
+            worktreePath: worktree,
+            title: "Feature title",
+            body: "PR body",
+            baseBranch: "main",
+            headBranch: "feature/auto-pushed"
+        )
+
+        #expect(prInfo.number == 99)
+        #expect(prInfo.url == "https://github.com/octo/example/pull/99")
+    }
+
+    @Test
     func gitHubCreatePRPropagatesCreateFailures() async throws {
         let worktree = try temporaryDirectory(named: "gh-create-pr-error")
         let service = GitHubCLIService(
@@ -4078,6 +4150,44 @@ struct StackriotTests {
         try? FileManager.default.removeItem(at: intentURL)
     }
 
+    @MainActor
+    @Test
+    func refreshWorktreeStatusesCoalescesPendingRefreshes() async throws {
+        let tempRoot = try temporaryDirectory(named: "status-coalescing")
+        let repository = makeRepository(name: "StatusCoalescing")
+        let worktree = WorktreeRecord(branchName: "feature/status", path: tempRoot.path, repository: repository)
+        repository.worktrees = [worktree]
+
+        let recorder = StatusRefreshCommandRecorder()
+        let statusService = WorktreeStatusService(
+            runCommand: { executable, arguments, _, _ in
+                await recorder.beginCommand()
+                try? await Task.sleep(for: .milliseconds(40))
+                await recorder.endCommand()
+
+                if executable == "git", arguments.contains("rev-list") {
+                    return CommandResult(stdout: "0\t0\n", stderr: "", exitCode: 0)
+                }
+                return CommandResult(stdout: "", stderr: "", exitCode: 0)
+            }
+        )
+
+        let appModel = AppModel(services: AppServices(
+            worktreeStatusService: statusService,
+            notificationService: RecordingNotificationService()
+        ))
+
+        let firstRefresh = Task { @MainActor in
+            await appModel.refreshWorktreeStatuses(for: repository)
+        }
+        try? await Task.sleep(for: .milliseconds(10))
+        await appModel.refreshWorktreeStatuses(for: repository)
+        await firstRefresh.value
+
+        #expect(await recorder.maxConcurrent == 1)
+        #expect(await recorder.commandCount == 6)
+    }
+
     private func createSeededRemote(named name: String) async throws -> (root: URL, remote: URL) {
         let origin = try temporaryDirectory(named: name)
         let remote = origin.appendingPathComponent("\(name).git")
@@ -4246,6 +4356,25 @@ private actor RecordingNotificationService: AppNotificationServing {
         deliveredRequests.append(request)
         return .delivered
     }
+}
+
+private actor StatusRefreshCommandRecorder {
+    private var inFlight = 0
+    private var maxInFlightValue = 0
+    private var commandCountValue = 0
+
+    func beginCommand() {
+        inFlight += 1
+        commandCountValue += 1
+        maxInFlightValue = max(maxInFlightValue, inFlight)
+    }
+
+    func endCommand() {
+        inFlight -= 1
+    }
+
+    var maxConcurrent: Int { maxInFlightValue }
+    var commandCount: Int { commandCountValue }
 }
 
 private extension NSLock {

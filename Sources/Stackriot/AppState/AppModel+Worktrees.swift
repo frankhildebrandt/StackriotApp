@@ -789,40 +789,44 @@ extension AppModel {
     }
 
     func refreshWorktreeStatuses(for repository: ManagedRepository) async {
-        let defaultBranch = repository.defaultBranch
-        let defaultRemoteName = resolvedDefaultRemote(for: repository)?.name ?? "origin"
-        var statuses: [UUID: WorktreeStatus] = [:]
+        let repositoryID = repository.id
+        if worktreeStatusRefreshTasksByRepositoryID[repositoryID] != nil {
+            pendingWorktreeStatusRefreshRepositoryIDs.insert(repositoryID)
+            worktreeStatusRefreshGenerationByRepositoryID[repositoryID, default: 0] += 1
+            return
+        }
 
-        let statusService = services.worktreeStatusService
-        await withTaskGroup(of: (UUID, WorktreeStatus)?.self) { group in
-            for worktree in repository.worktrees {
-                guard let worktreeURL = worktree.materializedURL else { continue }
-                let worktreeID = worktree.id
-                let isDefault = worktree.isDefaultBranchWorkspace
-                let compareBranch = isDefault ? "\(defaultRemoteName)/\(defaultBranch)" : defaultBranch
-                group.addTask { [statusService] in
-                    let status = await statusService.fetchStatus(
-                        worktreePath: worktreeURL,
-                        defaultBranch: compareBranch
-                    )
-                    return (worktreeID, status)
-                }
+        while true {
+            pendingWorktreeStatusRefreshRepositoryIDs.remove(repositoryID)
+            let generation = worktreeStatusRefreshGenerationByRepositoryID[repositoryID, default: 0] + 1
+            worktreeStatusRefreshGenerationByRepositoryID[repositoryID] = generation
+
+            let snapshot = makeWorktreeStatusRefreshSnapshot(for: repository, generation: generation)
+            let statusService = services.worktreeStatusService
+            let worktreeManager = services.worktreeManager
+            let gitHubService = services.gitHubCLIService
+
+            let task = Task.detached(priority: .utility) {
+                await AppModel.computeWorktreeStatusRefresh(
+                    snapshot: snapshot,
+                    statusService: statusService,
+                    worktreeManager: worktreeManager,
+                    gitHubService: gitHubService
+                )
+            }
+            worktreeStatusRefreshTasksByRepositoryID[repositoryID] = task
+
+            let result = await task.value
+            worktreeStatusRefreshTasksByRepositoryID[repositoryID] = nil
+
+            if worktreeStatusRefreshGenerationByRepositoryID[repositoryID] == result.generation {
+                applyWorktreeStatusRefreshResult(result, to: repository)
             }
 
-            for await result in group {
-                if let (worktreeID, status) = result {
-                    statuses[worktreeID] = status
-                }
+            guard pendingWorktreeStatusRefreshRepositoryIDs.contains(repositoryID) else {
+                break
             }
         }
-
-        for worktree in repository.worktrees where worktree.materializedURL == nil {
-            worktreeStatuses.removeValue(forKey: worktree.id)
-        }
-        for (worktreeID, status) in statuses {
-            worktreeStatuses[worktreeID] = status
-        }
-        await refreshPullRequestUpstreamStatuses(for: repository)
     }
 
     func integrateIntoDefaultBranch(
@@ -891,12 +895,50 @@ extension AppModel {
                 else {
                     return
                 }
-                let prInfo = try await services.gitHubCLIService.createPR(
-                    worktreePath: worktreeURL,
-                    title: draft.prTitle,
-                    body: draft.prBody,
-                    baseBranch: target.branchName
-                )
+
+                let publishResult: PublishBranchResult
+                do {
+                    publishResult = try await ensurePublishedBranchForPullRequest(
+                        worktreeURL: worktreeURL,
+                        repository: repository
+                    )
+                } catch {
+                    pendingErrorMessage = error.localizedDescription
+                    notifyOperationFailure(
+                        title: "Branch publish failed",
+                        subtitle: repository.displayName,
+                        body: error.localizedDescription,
+                        userInfo: [
+                            "repositoryID": repository.id.uuidString,
+                            "worktreeID": worktree.id.uuidString,
+                        ]
+                    )
+                    return
+                }
+
+                let prInfo: GitHubCLIService.PRInfo
+                do {
+                    prInfo = try await services.gitHubCLIService.createPR(
+                        worktreePath: worktreeURL,
+                        title: draft.prTitle,
+                        body: draft.prBody,
+                        baseBranch: target.branchName,
+                        headBranch: publishResult.branch
+                    )
+                } catch {
+                    pendingErrorMessage = error.localizedDescription
+                    notifyOperationFailure(
+                        title: "Pull request creation failed",
+                        subtitle: repository.displayName,
+                        body: error.localizedDescription,
+                        userInfo: [
+                            "repositoryID": repository.id.uuidString,
+                            "worktreeID": worktree.id.uuidString,
+                        ]
+                    )
+                    return
+                }
+
                 worktree.prNumber = prInfo.number
                 worktree.prURL = prInfo.url
                 worktree.lifecycleState = .integrating
@@ -914,6 +956,8 @@ extension AppModel {
                 )
                 save(modelContext)
                 startPRMonitoring(for: worktree, repository: repository, in: modelContext)
+                repository.updatedAt = .now
+                scheduleWorktreeStatusRefresh(for: repository)
                 notifyOperationSuccess(
                     title: "Pull request created",
                     subtitle: repository.displayName,
@@ -925,15 +969,6 @@ extension AppModel {
                 )
             } catch {
                 pendingErrorMessage = error.localizedDescription
-                notifyOperationFailure(
-                    title: "Pull request creation failed",
-                    subtitle: repository.displayName,
-                    body: error.localizedDescription,
-                    userInfo: [
-                        "repositoryID": repository.id.uuidString,
-                        "worktreeID": worktree.id.uuidString,
-                    ]
-                )
             }
         }
     }
@@ -1155,5 +1190,192 @@ extension AppModel {
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
+    }
+
+    func scheduleWorktreeStatusRefresh(for repository: ManagedRepository) {
+        Task { @MainActor [weak self] in
+            await self?.refreshWorktreeStatuses(for: repository)
+        }
+    }
+
+    private func makeWorktreeStatusRefreshSnapshot(
+        for repository: ManagedRepository,
+        generation: Int
+    ) -> WorktreeStatusRefreshSnapshot {
+        let defaultBranch = repository.defaultBranch
+        let defaultRemoteName = resolvedDefaultRemote(for: repository)?.name ?? "origin"
+        let remotes = repository.remotes.map(remoteExecutionContext(for:))
+
+        let statusItems = repository.worktrees.compactMap { worktree -> WorktreeStatusRefreshItem? in
+            guard let worktreeURL = worktree.materializedURL else { return nil }
+            let compareBranch = worktree.isDefaultBranchWorkspace ? "\(defaultRemoteName)/\(defaultBranch)" : defaultBranch
+            return WorktreeStatusRefreshItem(
+                worktreeID: worktree.id,
+                worktreePath: worktreeURL.path,
+                compareBranch: compareBranch
+            )
+        }
+
+        let pullRequestItems = repository.worktrees.compactMap { worktree -> PullRequestStatusRefreshItem? in
+            guard let prNumber = worktree.resolvedPrimaryContext?.prNumber ?? worktree.prNumber else { return nil }
+            return PullRequestStatusRefreshItem(
+                worktreeID: worktree.id,
+                prNumber: prNumber,
+                storedHeadSHA: worktree.resolvedPrimaryContext?.upstreamSHA,
+                worktreePath: worktree.materializedURL?.path
+            )
+        }
+
+        return WorktreeStatusRefreshSnapshot(
+            repositoryID: repository.id,
+            generation: generation,
+            githubRepositoryTarget: GitHubCLIService.repositoryTarget(
+                remotes: remotes,
+                defaultRemoteName: repository.defaultRemoteName
+            ),
+            materializedWorktreeIDs: Set(statusItems.map(\.worktreeID)),
+            statusItems: statusItems,
+            pullRequestItems: pullRequestItems
+        )
+    }
+
+    private func applyWorktreeStatusRefreshResult(
+        _ result: WorktreeStatusRefreshResult,
+        to repository: ManagedRepository
+    ) {
+        let repositoryWorktreeIDs = Set(repository.worktrees.map(\.id))
+
+        for worktreeID in repositoryWorktreeIDs.subtracting(result.materializedWorktreeIDs) {
+            worktreeStatuses.removeValue(forKey: worktreeID)
+        }
+        for (worktreeID, status) in result.statuses {
+            worktreeStatuses[worktreeID] = status
+        }
+
+        let pullRequestWorktreeIDs = Set(repository.worktrees.compactMap { worktree in
+            (worktree.resolvedPrimaryContext?.kind == .pullRequest || worktree.prNumber != nil) ? worktree.id : nil
+        })
+        for worktreeID in repositoryWorktreeIDs.subtracting(pullRequestWorktreeIDs) {
+            pullRequestUpstreamStatuses.removeValue(forKey: worktreeID)
+        }
+        for (worktreeID, status) in result.pullRequestStatuses {
+            pullRequestUpstreamStatuses[worktreeID] = status
+        }
+    }
+
+    private func pullRequestCreationRemote(for repository: ManagedRepository) throws -> RemoteExecutionContext {
+        if let remote = resolvedDefaultRemote(for: repository) {
+            return remoteExecutionContext(for: remote)
+        }
+        throw StackriotError.remoteNameRequired
+    }
+
+    private func ensurePublishedBranchForPullRequest(
+        worktreeURL: URL,
+        repository: ManagedRepository
+    ) async throws -> PublishBranchResult {
+        let remote = try pullRequestCreationRemote(for: repository)
+        return try await services.repositoryManager.publishCurrentBranchIfNeeded(
+            worktreePath: worktreeURL,
+            remote: remote
+        )
+    }
+
+    nonisolated static func computeWorktreeStatusRefresh(
+        snapshot: WorktreeStatusRefreshSnapshot,
+        statusService: WorktreeStatusService,
+        worktreeManager: WorktreeManager,
+        gitHubService: GitHubCLIService
+    ) async -> WorktreeStatusRefreshResult {
+        let statuses = await withTaskGroup(of: (UUID, WorktreeStatus).self, returning: [UUID: WorktreeStatus].self) { group in
+            for item in snapshot.statusItems {
+                group.addTask {
+                    let status = await statusService.fetchStatus(
+                        worktreePath: URL(fileURLWithPath: item.worktreePath),
+                        defaultBranch: item.compareBranch
+                    )
+                    return (item.worktreeID, status)
+                }
+            }
+
+            var statuses: [UUID: WorktreeStatus] = [:]
+            for await (worktreeID, status) in group {
+                statuses[worktreeID] = status
+            }
+            return statuses
+        }
+
+        let pullRequestStatuses = await withTaskGroup(
+            of: (UUID, PullRequestUpstreamStatus).self,
+            returning: [UUID: PullRequestUpstreamStatus].self
+        ) { group in
+            for item in snapshot.pullRequestItems {
+                group.addTask {
+                    guard let repositoryTarget = snapshot.githubRepositoryTarget else {
+                        return (
+                            item.worktreeID,
+                            PullRequestUpstreamStatus(
+                                state: .open,
+                                remoteHeadSHA: item.storedHeadSHA ?? "",
+                                localHeadSHA: nil,
+                                storedHeadSHA: item.storedHeadSHA,
+                                errorMessage: "Kein GitHub-Remote fuer dieses Repository konfiguriert."
+                            )
+                        )
+                    }
+
+                    do {
+                        let pr = try await gitHubService.loadPullRequest(
+                            number: item.prNumber,
+                            repositoryTarget: repositoryTarget
+                        )
+                        let localHead: String?
+                        if let worktreePath = item.worktreePath {
+                            localHead = try? await worktreeManager.currentRevision(
+                                worktreePath: URL(fileURLWithPath: worktreePath)
+                            )
+                        } else {
+                            localHead = nil
+                        }
+
+                        return (
+                            item.worktreeID,
+                            PullRequestUpstreamStatus(
+                                state: pr.status,
+                                remoteHeadSHA: pr.headRefOID,
+                                localHeadSHA: localHead,
+                                storedHeadSHA: item.storedHeadSHA,
+                                errorMessage: nil
+                            )
+                        )
+                    } catch {
+                        return (
+                            item.worktreeID,
+                            PullRequestUpstreamStatus(
+                                state: .open,
+                                remoteHeadSHA: item.storedHeadSHA ?? "",
+                                localHeadSHA: nil,
+                                storedHeadSHA: item.storedHeadSHA,
+                                errorMessage: error.localizedDescription
+                            )
+                        )
+                    }
+                }
+            }
+
+            var statuses: [UUID: PullRequestUpstreamStatus] = [:]
+            for await (worktreeID, status) in group {
+                statuses[worktreeID] = status
+            }
+            return statuses
+        }
+
+        return WorktreeStatusRefreshResult(
+            repositoryID: snapshot.repositoryID,
+            generation: snapshot.generation,
+            materializedWorktreeIDs: snapshot.materializedWorktreeIDs,
+            statuses: statuses,
+            pullRequestStatuses: pullRequestStatuses
+        )
     }
 }

@@ -142,7 +142,9 @@ extension AppModel {
             )
             pendingErrorMessage = "Published \(branch) to \(remote.name)."
             dismissPublishSheet()
+            repository.updatedAt = .now
             _ = modelContext
+            scheduleWorktreeStatusRefresh(for: repository)
             notifyOperationSuccess(
                 title: "Branch published",
                 subtitle: repository.displayName,

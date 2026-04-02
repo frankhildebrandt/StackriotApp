@@ -1,12 +1,22 @@
 import Foundation
 struct WorktreeStatusService {
+    typealias CommandExecutor = @Sendable (_ executable: String, _ arguments: [String], _ currentDirectoryURL: URL?, _ environment: [String: String]) async throws -> CommandResult
+
+    private let runCommand: CommandExecutor
+
+    init(runCommand: @escaping CommandExecutor = WorktreeStatusService.liveCommand) {
+        self.runCommand = runCommand
+    }
+
     func fetchStatus(worktreePath: URL, defaultBranch: String) async -> WorktreeStatus {
         var status = WorktreeStatus()
 
         do {
-            let revListResult = try await CommandRunner.runCollected(
-                executable: "git",
-                arguments: ["-C", worktreePath.path, "rev-list", "--left-right", "--count", "\(defaultBranch)...HEAD"]
+            let revListResult = try await runCommand(
+                "git",
+                ["-C", worktreePath.path, "rev-list", "--left-right", "--count", "\(defaultBranch)...HEAD"],
+                nil,
+                [:]
             )
 
             if revListResult.exitCode == 0 {
@@ -19,9 +29,11 @@ struct WorktreeStatusService {
                 }
             }
 
-            let diffResult = try await CommandRunner.runCollected(
-                executable: "git",
-                arguments: ["-C", worktreePath.path, "diff", "--numstat", "HEAD"]
+            let diffResult = try await runCommand(
+                "git",
+                ["-C", worktreePath.path, "diff", "--numstat", "HEAD"],
+                nil,
+                [:]
             )
 
             if diffResult.exitCode == 0 {
@@ -38,9 +50,11 @@ struct WorktreeStatusService {
                 status.hasUncommittedChanges = !lines.isEmpty
             }
 
-            let conflictResult = try await CommandRunner.runCollected(
-                executable: "git",
-                arguments: ["-C", worktreePath.path, "diff", "--name-only", "--diff-filter=U"]
+            let conflictResult = try await runCommand(
+                "git",
+                ["-C", worktreePath.path, "diff", "--name-only", "--diff-filter=U"],
+                nil,
+                [:]
             )
             if conflictResult.exitCode == 0 {
                 status.hasConflicts = conflictResult.stdout.nonEmpty != nil
@@ -215,5 +229,19 @@ struct WorktreeStatusService {
             return trimmed
         }
         return "\(status.displayName): \(fallbackPath)"
+    }
+
+    private static func liveCommand(
+        executable: String,
+        arguments: [String],
+        currentDirectoryURL: URL?,
+        environment: [String: String]
+    ) async throws -> CommandResult {
+        try await CommandRunner.runCollected(
+            executable: executable,
+            arguments: arguments,
+            currentDirectoryURL: currentDirectoryURL,
+            environment: environment
+        )
     }
 }

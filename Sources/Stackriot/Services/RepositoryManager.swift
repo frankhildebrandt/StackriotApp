@@ -1,4 +1,10 @@
 import Foundation
+
+struct PublishBranchResult: Sendable, Equatable {
+    let branch: String
+    let didPush: Bool
+}
+
 struct RepositoryManager {
     private let sshEnvironmentBuilder = GitSSHEnvironmentBuilder()
 
@@ -273,12 +279,66 @@ struct RepositoryManager {
         return branch
     }
 
+    func publishCurrentBranchIfNeeded(
+        worktreePath: URL,
+        remote: RemoteExecutionContext
+    ) async throws -> PublishBranchResult {
+        let branch = try await currentBranch(in: worktreePath)
+        if try await hasUpstreamBranch(worktreePath: worktreePath) {
+            return PublishBranchResult(branch: branch, didPush: false)
+        }
+        if try await remoteBranchMatchesHEAD(
+            worktreePath: worktreePath,
+            remoteName: remote.name,
+            branch: branch
+        ) {
+            return PublishBranchResult(branch: branch, didPush: false)
+        }
+
+        let publishedBranch = try await publishCurrentBranch(
+            worktreePath: worktreePath,
+            remote: remote
+        )
+        return PublishBranchResult(branch: publishedBranch, didPush: true)
+    }
+
     func hasUpstreamBranch(worktreePath: URL) async throws -> Bool {
         let result = try await CommandRunner.runCollected(
             executable: "git",
             arguments: ["-C", worktreePath.path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
         )
         return result.exitCode == 0
+    }
+
+    private func remoteBranchMatchesHEAD(
+        worktreePath: URL,
+        remoteName: String,
+        branch: String
+    ) async throws -> Bool {
+        let headResult = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["-C", worktreePath.path, "rev-parse", "HEAD"]
+        )
+        guard headResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(headResult.stderr.isEmpty ? headResult.stdout : headResult.stderr)
+        }
+
+        let remoteResult = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["-C", worktreePath.path, "ls-remote", "--heads", remoteName, branch]
+        )
+        guard remoteResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(remoteResult.stderr.isEmpty ? remoteResult.stdout : remoteResult.stderr)
+        }
+
+        let headSHA = headResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let remoteSHA = remoteResult.stdout
+            .split(whereSeparator: \.isWhitespace)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return remoteSHA == headSHA && remoteSHA?.isEmpty == false
     }
 
     private func configureRemoteIfNeeded(_ remote: RemoteExecutionContext, in bareRepositoryPath: URL) async throws {

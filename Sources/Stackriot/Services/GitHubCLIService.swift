@@ -248,12 +248,16 @@ struct GitHubCLIService: TicketProviderService {
     @MainActor
     func loadPullRequest(number: Int, in repository: ManagedRepository) async throws -> PullRequestDetails {
         let target = try repositoryTargetOrThrow(for: repository)
+        return try await loadPullRequest(number: number, repositoryTarget: target)
+    }
+
+    func loadPullRequest(number: Int, repositoryTarget: String) async throws -> PullRequestDetails {
         let environment = await commandEnvironment()
         let result = try await runCommand(
             "gh",
             [
                 "pr", "view", "\(number)",
-                "--repo", target,
+                "--repo", repositoryTarget,
                 "--json", "number,title,url,headRefName,headRefOid,baseRefName,state,isDraft,isCrossRepository,headRepositoryOwner",
             ],
             nil,
@@ -304,17 +308,22 @@ struct GitHubCLIService: TicketProviderService {
         worktreePath: URL,
         title: String,
         body: String,
-        baseBranch: String
+        baseBranch: String,
+        headBranch: String? = nil
     ) async throws -> PRInfo {
         let environment = await commandEnvironment()
+        var arguments = [
+            "pr", "create",
+            "--title", title,
+            "--body", body.isEmpty ? " " : body,
+            "--base", baseBranch,
+        ]
+        if let headBranch, headBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            arguments += ["--head", headBranch]
+        }
         let createResult = try await runCommand(
             "gh",
-            [
-                "pr", "create",
-                "--title", title,
-                "--body", body.isEmpty ? " " : body,
-                "--base", baseBranch,
-            ],
+            arguments,
             worktreePath,
             environment
         )
@@ -459,7 +468,6 @@ struct GitHubCLIService: TicketProviderService {
         return try decodePullRequestSearchResults(from: Data("[\(result.stdout)]".utf8)).first
     }
 
-    @MainActor
     private func repositoryTargetOrThrow(for repository: ManagedRepository) throws -> String {
         guard let target = repositoryTarget(for: repository) else {
             throw StackriotError.commandFailed("Kein GitHub-Remote fuer dieses Repository konfiguriert.")
@@ -467,22 +475,37 @@ struct GitHubCLIService: TicketProviderService {
         return target
     }
 
-    @MainActor
     private func repositoryTarget(for repository: ManagedRepository) -> String? {
-        let preferredRemote: RepositoryRemote?
-        if let defaultRemote = repository.defaultRemote, Self.isGitHubRemote(url: defaultRemote.url) {
+        Self.repositoryTarget(
+            remotes: repository.remotes.map {
+                RemoteExecutionContext(
+                    name: $0.name,
+                    url: $0.url,
+                    fetchEnabled: $0.fetchEnabled,
+                    privateKeyRef: $0.sshKey?.privateKeyRef
+                )
+            },
+            defaultRemoteName: repository.defaultRemoteName
+        )
+    }
+
+    static func repositoryTarget(remotes: [RemoteExecutionContext], defaultRemoteName: String?) -> String? {
+        let preferredRemote: RemoteExecutionContext?
+        if let defaultRemoteName,
+           let defaultRemote = remotes.first(where: { $0.name == defaultRemoteName && isGitHubRemote(url: $0.url) })
+        {
             preferredRemote = defaultRemote
-        } else if let originRemote = repository.remotes.first(where: { $0.name == "origin" && Self.isGitHubRemote(url: $0.url) }) {
+        } else if let originRemote = remotes.first(where: { $0.name == "origin" && isGitHubRemote(url: $0.url) }) {
             preferredRemote = originRemote
         } else {
-            preferredRemote = nil
+            preferredRemote = remotes.first(where: { isGitHubRemote(url: $0.url) })
         }
 
         guard let remote = preferredRemote else { return nil }
         return repositorySlug(from: remote.url)
     }
 
-    private func repositorySlug(from remoteURL: String) -> String? {
+    private static func repositorySlug(from remoteURL: String) -> String? {
         guard let canonicalURL = RepositoryManager.canonicalRemoteURL(from: remoteURL) else {
             return nil
         }
