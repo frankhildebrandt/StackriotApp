@@ -30,11 +30,6 @@ struct DevContainerConsolePanel: View {
                 .padding(.vertical, 1)
             }
 
-            if let message = state.detailsErrorMessage?.nonEmpty {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -51,11 +46,6 @@ struct DevContainerConsolePanel: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
-                }
-                if let lastUpdatedAt = state.lastUpdatedAt {
-                    Text("Last checked \(lastUpdatedAt, format: .dateTime.hour().minute().second())")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
                 }
             }
 
