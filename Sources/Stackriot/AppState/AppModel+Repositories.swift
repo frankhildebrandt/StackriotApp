@@ -218,6 +218,9 @@ extension AppModel {
         }
 
         await refreshWorktreeStatuses(for: repository)
+        if AppPreferences.devContainerMonitoringEnabled {
+            await refreshAllDevContainerStates()
+        }
     }
 
     func revealWorktreeInFinder(_ worktree: WorktreeRecord) async {

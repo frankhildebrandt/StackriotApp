@@ -3,9 +3,11 @@ import Foundation
 @MainActor
 struct DevContainerService {
     typealias CommandExecutor = @Sendable (_ executable: String, _ arguments: [String], _ currentDirectoryURL: URL?) async throws -> CommandResult
+    typealias CommandLocator = (_ command: String) async -> Bool
 
     private let fileManager: FileManager
     private let commandExecutor: CommandExecutor
+    private let commandLocator: CommandLocator
 
     init(
         fileManager: FileManager = .default,
@@ -15,10 +17,25 @@ struct DevContainerService {
                 arguments: arguments,
                 currentDirectoryURL: currentDirectoryURL
             )
-        }
+        },
+        commandLocator: CommandLocator? = nil
     ) {
         self.fileManager = fileManager
         self.commandExecutor = commandExecutor
+        self.commandLocator = commandLocator ?? { command in
+            guard let pathValue = ProcessInfo.processInfo.environment["PATH"] else {
+                return false
+            }
+
+            for entry in pathValue.split(separator: ":") {
+                let candidate = URL(fileURLWithPath: String(entry)).appendingPathComponent(command)
+                if fileManager.isExecutableFile(atPath: candidate.path) {
+                    return true
+                }
+            }
+
+            return false
+        }
     }
 
     func configuration(at worktreeURL: URL) -> DevContainerConfiguration? {
@@ -39,9 +56,70 @@ struct DevContainerService {
         return nil
     }
 
+    func toolingStatus(
+        strategy: DevContainerCLIStrategy = AppPreferences.devContainerCLIStrategy,
+        isFeatureEnabled: Bool = AppPreferences.devContainerEnabled
+    ) async -> DevContainerToolingStatus {
+        let dockerInstalled = await commandLocator("docker")
+        let devcontainerInstalled = await commandLocator("devcontainer")
+        let npxInstalled = await commandLocator("npx")
+
+        let resolvedCLI: DevContainerResolvedCLIKind?
+        switch strategy {
+        case .auto:
+            if devcontainerInstalled {
+                resolvedCLI = .devcontainerCLI
+            } else if npxInstalled {
+                resolvedCLI = .npx
+            } else {
+                resolvedCLI = nil
+            }
+        case .devcontainerCLI:
+            resolvedCLI = devcontainerInstalled ? .devcontainerCLI : nil
+        case .npx:
+            resolvedCLI = npxInstalled ? .npx : nil
+        }
+
+        return DevContainerToolingStatus(
+            isFeatureEnabled: isFeatureEnabled,
+            cliStrategy: strategy,
+            dockerInstalled: dockerInstalled,
+            devcontainerInstalled: devcontainerInstalled,
+            npxInstalled: npxInstalled,
+            resolvedCLI: resolvedCLI
+        )
+    }
+
     func status(for worktreeURL: URL) async -> DevContainerWorkspaceSnapshot {
-        guard let configuration = configuration(at: worktreeURL) else {
-            return DevContainerWorkspaceSnapshot(configuration: nil)
+        let configuration = configuration(at: worktreeURL)
+        let tooling = await toolingStatus()
+
+        guard tooling.isFeatureEnabled else {
+            return DevContainerWorkspaceSnapshot(
+                configuration: configuration,
+                lastUpdatedAt: .now,
+                toolingStatus: tooling,
+                diagnosticIssue: .featureDisabled
+            )
+        }
+
+        guard let configuration else {
+            return DevContainerWorkspaceSnapshot(
+                configuration: nil,
+                lastUpdatedAt: .now,
+                toolingStatus: tooling,
+                diagnosticIssue: .noConfiguration
+            )
+        }
+
+        guard tooling.dockerInstalled else {
+            return DevContainerWorkspaceSnapshot(
+                configuration: configuration,
+                detailsErrorMessage: "Docker CLI is required to inspect and run devcontainers.",
+                lastUpdatedAt: .now,
+                toolingStatus: tooling,
+                diagnosticIssue: .dockerMissing
+            )
         }
 
         do {
@@ -51,13 +129,14 @@ struct DevContainerService {
                     configuration: configuration,
                     runtimeStatus: .stopped,
                     containerCount: 0,
-                    lastUpdatedAt: .now
+                    lastUpdatedAt: .now,
+                    toolingStatus: tooling
                 )
             }
 
             let runningIDs = try await listContainerIDs(for: configuration, includeStopped: false)
             let runtimeStatus: DevContainerRuntimeStatus = runningIDs.isEmpty ? .stopped : .running
-            let primaryContainerID = (runningIDs.first ?? allContainerIDs.first) ?? allContainerIDs[0]
+            let primaryContainerID = selectPrimaryContainerID(runningIDs: runningIDs, allContainerIDs: allContainerIDs)
             let inspect = try await inspectContainer(id: primaryContainerID)
             let stats = runtimeStatus == .running ? try? await fetchStats(for: primaryContainerID) : nil
 
@@ -69,24 +148,29 @@ struct DevContainerService {
                 imageName: inspect.imageName,
                 resourceUsage: stats,
                 containerCount: allContainerIDs.count,
-                lastUpdatedAt: .now
+                lastUpdatedAt: .now,
+                toolingStatus: tooling
             )
         } catch {
             return DevContainerWorkspaceSnapshot(
                 configuration: configuration,
                 runtimeStatus: .unknown,
                 detailsErrorMessage: friendlyErrorMessage(for: error),
-                lastUpdatedAt: .now
+                lastUpdatedAt: .now,
+                toolingStatus: tooling,
+                diagnosticIssue: diagnosticIssue(for: error)
             )
         }
     }
 
     func start(worktreeURL: URL) async throws -> DevContainerWorkspaceSnapshot {
         let configuration = try requireConfiguration(at: worktreeURL)
+        let tooling = try await requireOperationalTooling()
         _ = try await runCLI(
             command: "up",
             workspaceURL: worktreeURL,
             configuration: configuration,
+            tooling: tooling,
             extraArguments: [
                 "--log-format", "json",
                 "--include-configuration",
@@ -97,10 +181,12 @@ struct DevContainerService {
 
     func rebuild(worktreeURL: URL) async throws -> DevContainerWorkspaceSnapshot {
         let configuration = try requireConfiguration(at: worktreeURL)
+        let tooling = try await requireOperationalTooling()
         _ = try await runCLI(
             command: "up",
             workspaceURL: worktreeURL,
             configuration: configuration,
+            tooling: tooling,
             extraArguments: [
                 "--remove-existing-container",
                 "--build-no-cache",
@@ -113,6 +199,7 @@ struct DevContainerService {
 
     func stop(worktreeURL: URL) async throws -> DevContainerWorkspaceSnapshot {
         let configuration = try requireConfiguration(at: worktreeURL)
+        try await requireDockerInstalled()
         let runningContainerIDs = try await listContainerIDs(for: configuration, includeStopped: false)
         if !runningContainerIDs.isEmpty {
             let result = try await commandExecutor("docker", ["stop"] + runningContainerIDs, nil)
@@ -130,6 +217,7 @@ struct DevContainerService {
 
     func delete(worktreeURL: URL) async throws -> DevContainerWorkspaceSnapshot {
         let configuration = try requireConfiguration(at: worktreeURL)
+        try await requireDockerInstalled()
         let containerIDs = try await listContainerIDs(for: configuration, includeStopped: true)
         if !containerIDs.isEmpty {
             let result = try await commandExecutor("docker", ["rm", "-f"] + containerIDs, nil)
@@ -142,12 +230,44 @@ struct DevContainerService {
 
     func logStreamDescriptor(for worktreeURL: URL, tail: Int = 200) async throws -> (String, [String]) {
         let configuration = try requireConfiguration(at: worktreeURL)
+        try await requireDockerInstalled()
         let runningContainerIDs = try await listContainerIDs(for: configuration, includeStopped: false)
         guard let containerID = runningContainerIDs.first else {
             throw StackriotError.commandFailed("No running devcontainer was found for this workspace.")
         }
 
         return ("docker", ["logs", "-f", "--tail", String(tail), containerID])
+    }
+
+    func terminalDescriptor(
+        for worktreeURL: URL,
+        repositoryID: UUID,
+        worktreeID: UUID
+    ) async throws -> CommandExecutionDescriptor {
+        let configuration = try requireConfiguration(at: worktreeURL)
+        try await requireDockerInstalled()
+        let runningContainerIDs = try await listContainerIDs(for: configuration, includeStopped: false)
+        guard !runningContainerIDs.isEmpty else {
+            throw StackriotError.commandFailed("No running devcontainer was found for this workspace.")
+        }
+        let primaryContainerID = selectPrimaryContainerID(runningIDs: runningContainerIDs, allContainerIDs: runningContainerIDs)
+        let inspect = try await inspectContainer(id: primaryContainerID)
+
+        return CommandExecutionDescriptor(
+            title: "Devcontainer Terminal",
+            actionKind: .devContainer,
+            executable: "docker",
+            arguments: [
+                "exec", "-it", primaryContainerID,
+                "sh", "-lc",
+                "if command -v bash >/dev/null 2>&1; then exec bash -il; elif command -v sh >/dev/null 2>&1; then exec sh; else exec /bin/sh; fi",
+            ],
+            displayCommandLine: "docker exec -it \(inspect.displayName.nonEmpty ?? primaryContainerID) <shell>",
+            currentDirectoryURL: worktreeURL,
+            repositoryID: repositoryID,
+            worktreeID: worktreeID,
+            usesTerminalSession: true
+        )
     }
 
     private func requireConfiguration(at worktreeURL: URL) throws -> DevContainerConfiguration {
@@ -157,13 +277,34 @@ struct DevContainerService {
         return configuration
     }
 
+    private func requireOperationalTooling() async throws -> DevContainerToolingStatus {
+        let tooling = await toolingStatus()
+        guard tooling.isFeatureEnabled else {
+            throw StackriotError.commandFailed("Devcontainer support is disabled in Settings.")
+        }
+        guard tooling.dockerInstalled else {
+            throw StackriotError.executableNotFound("docker")
+        }
+        guard tooling.isCLIAvailable else {
+            throw StackriotError.executableNotFound("devcontainer")
+        }
+        return tooling
+    }
+
+    private func requireDockerInstalled() async throws {
+        guard await commandLocator("docker") else {
+            throw StackriotError.executableNotFound("docker")
+        }
+    }
+
     private func runCLI(
         command: String,
         workspaceURL: URL,
         configuration: DevContainerConfiguration,
+        tooling: DevContainerToolingStatus,
         extraArguments: [String] = []
     ) async throws -> CommandResult {
-        let resolvedCLI = try await resolveCLI()
+        let resolvedCLI = try resolveCLI(tooling: tooling)
         let arguments = resolvedCLI.argumentsPrefix + [
             command,
             "--workspace-folder", workspaceURL.path,
@@ -176,29 +317,15 @@ struct DevContainerService {
         return result
     }
 
-    private func resolveCLI() async throws -> ResolvedCLI {
-        if await commandExists("devcontainer") {
+    private func resolveCLI(tooling: DevContainerToolingStatus) throws -> ResolvedCLI {
+        switch tooling.resolvedCLI {
+        case .devcontainerCLI:
             return ResolvedCLI(executable: "devcontainer", argumentsPrefix: [])
-        }
-        if await commandExists("npx") {
+        case .npx:
             return ResolvedCLI(executable: "npx", argumentsPrefix: ["-y", "@devcontainers/cli"])
+        case nil:
+            throw StackriotError.executableNotFound("devcontainer")
         }
-        throw StackriotError.executableNotFound("devcontainer")
-    }
-
-    private func commandExists(_ command: String) async -> Bool {
-        guard let pathValue = ProcessInfo.processInfo.environment["PATH"] else {
-            return false
-        }
-
-        for entry in pathValue.split(separator: ":") {
-            let candidate = URL(fileURLWithPath: String(entry)).appendingPathComponent(command)
-            if fileManager.isExecutableFile(atPath: candidate.path) {
-                return true
-            }
-        }
-
-        return false
     }
 
     private func listContainerIDs(
@@ -283,6 +410,21 @@ struct DevContainerService {
             memoryUsage: decoded.memoryUsage?.nonEmpty,
             memoryPercent: decoded.memoryPercent?.nonEmpty
         )
+    }
+
+    private func selectPrimaryContainerID(runningIDs: [String], allContainerIDs: [String]) -> String {
+        (runningIDs.first ?? allContainerIDs.first) ?? allContainerIDs[0]
+    }
+
+    private func diagnosticIssue(for error: Error) -> DevContainerDiagnosticIssue? {
+        let rendered = error.localizedDescription
+        if rendered.contains("Cannot connect to the Docker daemon") || rendered.contains("Docker is not reachable") {
+            return .dockerUnreachable
+        }
+        if rendered.localizedCaseInsensitiveContains("inspect the devcontainer") {
+            return .containerUnreachable
+        }
+        return nil
     }
 
     private func friendlyErrorMessage(for error: Error) -> String {
