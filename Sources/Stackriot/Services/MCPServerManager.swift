@@ -25,18 +25,30 @@ actor MCPServerManager {
         let statusText: String
         let headers: [String: String]
         let body: Data
+        let keepConnectionOpen: Bool
 
         func serialized() -> Data {
             var lines = ["HTTP/1.1 \(statusCode) \(statusText)"]
             for (key, value) in headers.sorted(by: { $0.key < $1.key }) {
                 lines.append("\(key): \(value)")
             }
-            lines.append("Content-Length: \(body.count)")
-            lines.append("Connection: close")
+            if keepConnectionOpen {
+                lines.append("Cache-Control: no-cache")
+                lines.append("Connection: keep-alive")
+            } else {
+                lines.append("Content-Length: \(body.count)")
+                lines.append("Connection: close")
+            }
             lines.append("")
             let headerData = lines.joined(separator: "\r\n").data(using: .utf8) ?? Data()
             return headerData + Data("\r\n".utf8) + body
         }
+    }
+
+    private struct SSEStreamState: Sendable {
+        let connectionID: UUID
+        let sessionID: String
+        let openedAt: Date
     }
 
     private struct JSONRPCErrorPayload: Encodable, Sendable {
@@ -60,6 +72,7 @@ actor MCPServerManager {
     private var listener: NWListener?
     private var connections: [UUID: NWConnection] = [:]
     private var sessions: [String: SessionState] = [:]
+    private var sseStreamsBySessionID: [String: SSEStreamState] = [:]
     private var status = MCPServerStatus.idle()
     private var lastIssuedSessionID: String?
 
@@ -169,6 +182,7 @@ actor MCPServerManager {
         }
         connections.removeAll()
         sessions.removeAll()
+        sseStreamsBySessionID.removeAll()
         lastIssuedSessionID = nil
         let configuration = configurationProvider()
         await updateStatus(
@@ -195,8 +209,11 @@ actor MCPServerManager {
 
         do {
             let request = try await readRequest(from: connection)
-            let response = await handle(request: request)
+            let response = await handle(request: request, connectionID: id)
             try await send(response.serialized(), on: connection)
+            if response.keepConnectionOpen {
+                try await awaitSSEDisconnect(on: connection)
+            }
         } catch {
             let response = makePlainResponse(
                 statusCode: 400,
@@ -211,17 +228,20 @@ actor MCPServerManager {
 
         connection.cancel()
         connections.removeValue(forKey: id)
+        removeSSEStream(for: id)
     }
 
     private func handleConnectionState(_ state: NWConnection.State, connectionID: UUID) async {
         switch state {
         case .failed(let error):
             connections.removeValue(forKey: connectionID)
+            removeSSEStream(for: connectionID)
             await emitLog(.warning, category: "connection", message: "MCP connection failed.", metadata: [
                 "error": error.localizedDescription,
             ])
         case .cancelled:
             connections.removeValue(forKey: connectionID)
+            removeSSEStream(for: connectionID)
         default:
             break
         }
@@ -262,7 +282,7 @@ actor MCPServerManager {
         }
     }
 
-    private func handle(request: HTTPRequest) async -> HTTPResponse {
+    private func handle(request: HTTPRequest, connectionID: UUID) async -> HTTPResponse {
         let configuration = configurationProvider()
 
         guard request.path == MCPServerConfiguration.endpointPath else {
@@ -281,11 +301,7 @@ actor MCPServerManager {
         case "DELETE":
             return await handleDelete(headers: request.headers, configuration: configuration)
         case "GET":
-            return makePlainResponse(
-                statusCode: 405,
-                statusText: "Method Not Allowed",
-                body: "Stackriot MCP does not expose an SSE stream. Use POST requests on the MCP endpoint."
-            )
+            return await handleGet(headers: request.headers, connectionID: connectionID, configuration: configuration)
         case "POST":
             return await handlePost(body: request.body, headers: request.headers, configuration: configuration)
         default:
@@ -293,11 +309,65 @@ actor MCPServerManager {
         }
     }
 
+    private func handleGet(
+        headers: [String: String],
+        connectionID: UUID,
+        configuration: MCPServerConfiguration
+    ) async -> HTTPResponse {
+        guard acceptsEventStream(headers) else {
+            return makePlainResponse(
+                statusCode: 406,
+                statusText: "Not Acceptable",
+                body: "GET /mcp requires Accept: text/event-stream."
+            )
+        }
+        guard let sessionID = headers["mcp-session-id"]?.nonEmpty else {
+            return makePlainResponse(statusCode: 400, statusText: "Bad Request", body: "Missing Mcp-Session-Id header.")
+        }
+        guard sessions[sessionID] != nil else {
+            return makePlainResponse(statusCode: 404, statusText: "Not Found", body: "Unknown MCP session. Call initialize again.")
+        }
+
+        if let existingStream = sseStreamsBySessionID[sessionID], existingStream.connectionID != connectionID {
+            connections[existingStream.connectionID]?.cancel()
+            removeSSEStream(for: existingStream.connectionID)
+        }
+
+        sseStreamsBySessionID[sessionID] = SSEStreamState(
+            connectionID: connectionID,
+            sessionID: sessionID,
+            openedAt: .now
+        )
+        await updateStatus(
+            state: status.state,
+            configuration: configuration,
+            lastErrorMessage: status.lastErrorMessage,
+            lastEventMessage: "Opened MCP SSE stream for session \(sessionID)."
+        )
+        await emitLog(.info, category: "session", message: "Opened MCP SSE stream.", metadata: [
+            "sessionId": sessionID,
+        ])
+        return HTTPResponse(
+            statusCode: 200,
+            statusText: "OK",
+            headers: [
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "X-Accel-Buffering": "no",
+            ],
+            body: Data(": connected\n\n".utf8),
+            keepConnectionOpen: true
+        )
+    }
+
     private func handleDelete(headers: [String: String], configuration: MCPServerConfiguration) async -> HTTPResponse {
         guard let sessionID = headers["mcp-session-id"]?.nonEmpty else {
             return makePlainResponse(statusCode: 400, statusText: "Bad Request", body: "Missing Mcp-Session-Id header.")
         }
         sessions.removeValue(forKey: sessionID)
+        if let stream = sseStreamsBySessionID[sessionID] {
+            connections[stream.connectionID]?.cancel()
+            removeSSEStream(for: stream.connectionID)
+        }
         await updateStatus(
             state: status.state,
             configuration: configuration,
@@ -305,7 +375,7 @@ actor MCPServerManager {
             lastEventMessage: "Closed MCP session \(sessionID)."
         )
         await emitLog(.info, category: "session", message: "Closed MCP session.", metadata: ["sessionId": sessionID])
-        return HTTPResponse(statusCode: 204, statusText: "No Content", headers: [:], body: Data())
+        return HTTPResponse(statusCode: 204, statusText: "No Content", headers: [:], body: Data(), keepConnectionOpen: false)
     }
 
     private func handlePost(body: Data, headers: [String: String], configuration: MCPServerConfiguration) async -> HTTPResponse {
@@ -328,9 +398,17 @@ actor MCPServerManager {
             }
             let method = payload.objectValue?["method"]?.stringValue
             guard let response = try await process(jsonrpcObject: payload, headers: headers, configuration: configuration) else {
-                return HTTPResponse(statusCode: 202, statusText: "Accepted", headers: [:], body: Data())
+                return HTTPResponse(statusCode: 202, statusText: "Accepted", headers: [:], body: Data(), keepConnectionOpen: false)
             }
             let bodyValue = try JSONValue.fromEncodable(response)
+            if acceptsEventStream(headers),
+               method != "initialize",
+               let sessionID = headers["mcp-session-id"]?.nonEmpty,
+               sseStreamsBySessionID[sessionID] != nil
+            {
+                try await sendSSEMessage(bodyValue, sessionID: sessionID)
+                return HTTPResponse(statusCode: 202, statusText: "Accepted", headers: [:], body: Data(), keepConnectionOpen: false)
+            }
             var extraHeaders: [String: String] = [:]
             if method == "initialize", let sessionID = lastIssuedSessionID {
                 extraHeaders["Mcp-Session-Id"] = sessionID
@@ -550,7 +628,7 @@ actor MCPServerManager {
 
     private func encodeJSONBody(_ value: JSONValue?, extraHeaders: [String: String] = [:]) -> HTTPResponse {
         guard let value else {
-            return HTTPResponse(statusCode: 202, statusText: "Accepted", headers: [:], body: Data())
+            return HTTPResponse(statusCode: 202, statusText: "Accepted", headers: [:], body: Data(), keepConnectionOpen: false)
         }
         do {
             let encoder = JSONEncoder()
@@ -558,7 +636,7 @@ actor MCPServerManager {
             let body = try encoder.encode(value)
             var headers = extraHeaders
             headers["Content-Type"] = "application/json"
-            return HTTPResponse(statusCode: 200, statusText: "OK", headers: headers, body: body)
+            return HTTPResponse(statusCode: 200, statusText: "OK", headers: headers, body: body, keepConnectionOpen: false)
         } catch {
             return makePlainResponse(statusCode: 500, statusText: "Internal Server Error", body: error.localizedDescription)
         }
@@ -578,8 +656,42 @@ actor MCPServerManager {
             statusCode: statusCode,
             statusText: statusText,
             headers: ["Content-Type": "text/plain; charset=utf-8"],
-            body: Data(body.utf8)
+            body: Data(body.utf8),
+            keepConnectionOpen: false
         )
+    }
+
+    private func acceptsEventStream(_ headers: [String: String]) -> Bool {
+        guard let acceptHeader = headers["accept"]?.lowercased() else { return false }
+        return acceptHeader
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .contains { value in
+                value == "text/event-stream" || value.hasPrefix("text/event-stream;")
+            }
+    }
+
+    private func sendSSEMessage(_ value: JSONValue, sessionID: String) async throws {
+        guard let stream = sseStreamsBySessionID[sessionID] else {
+            throw MCPToolRegistryError.toolFailed("No active SSE stream for MCP session \(sessionID).")
+        }
+        guard let connection = connections[stream.connectionID] else {
+            removeSSEStream(for: stream.connectionID)
+            throw MCPToolRegistryError.toolFailed("SSE connection for MCP session \(sessionID) is no longer available.")
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let payload = try encoder.encode(value)
+        var frame = Data("event: message\n".utf8)
+        frame.append(Data("data: ".utf8))
+        frame.append(payload)
+        frame.append(Data("\n\n".utf8))
+        try await send(frame, on: connection)
+    }
+
+    private func removeSSEStream(for connectionID: UUID) {
+        guard let sessionID = sseStreamsBySessionID.first(where: { $0.value.connectionID == connectionID })?.key else { return }
+        sseStreamsBySessionID.removeValue(forKey: sessionID)
     }
 
     private func updateStatus(
@@ -642,6 +754,15 @@ actor MCPServerManager {
                     continuation.resume()
                 }
             })
+        }
+    }
+
+    private func awaitSSEDisconnect(on connection: NWConnection) async throws {
+        while true {
+            let (data, isComplete) = try await receive(on: connection)
+            if isComplete || data.isEmpty {
+                return
+            }
         }
     }
 

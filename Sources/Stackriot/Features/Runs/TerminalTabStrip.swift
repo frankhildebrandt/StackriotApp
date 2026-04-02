@@ -13,6 +13,7 @@ struct TerminalTabStrip: View {
         let isPrimaryContextSelected = appModel.isPrimaryContextTabSelected(for: worktree)
             || (worktree.isDefaultBranchWorkspace && tabs.isEmpty)
         let selectedPane = appModel.primaryPane(for: worktree)
+        let discovery = appModel.cachedWorktreeDiscoverySnapshot(for: worktree)
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 if worktree.primaryContextTabKind == .readme {
@@ -41,6 +42,15 @@ struct TerminalTabStrip: View {
                             isSelected: isPrimaryContextSelected && selectedPane == .browser
                         ) {
                             appModel.selectPrimaryPane(.browser, for: worktree, in: repository)
+                        }
+                    }
+                    if discovery.hasDevContainerConfiguration {
+                        primaryPaneChip(
+                            title: "Devcontainer Logs",
+                            systemImage: "shippingbox",
+                            isSelected: isPrimaryContextSelected && selectedPane == .devContainerLogs
+                        ) {
+                            appModel.selectPrimaryPane(.devContainerLogs, for: worktree, in: repository)
                         }
                     }
                 }
@@ -129,4 +139,3 @@ struct TerminalTabStrip: View {
         .onTapGesture(perform: onTap)
     }
 }
-

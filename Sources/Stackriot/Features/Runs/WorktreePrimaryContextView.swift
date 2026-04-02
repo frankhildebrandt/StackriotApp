@@ -47,6 +47,8 @@ struct WorktreePrimaryContextView: View {
             } else {
                 PlanEditorView(role: .intent, worktree: worktree, repository: repository)
             }
+        case .devContainerLogs:
+            DevContainerLogsTabView(worktree: worktree)
         }
     }
 }

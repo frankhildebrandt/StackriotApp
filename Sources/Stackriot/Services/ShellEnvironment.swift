@@ -1,13 +1,19 @@
 import Foundation
 enum ShellEnvironment {
-    private static let fallbackPath = [
+    private static let fixedStandardPATHEntries = [
         "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
         "/usr/local/bin",
+        "/usr/local/sbin",
         "/usr/bin",
         "/bin",
         "/usr/sbin",
         "/sbin",
-    ].joined(separator: ":")
+    ]
+
+    private static var fallbackPath: String {
+        standardPATHEntries().joined(separator: ":")
+    }
 
     static func loginShellPath() async -> String {
         if let path = await readLoginShellPath() {
@@ -52,17 +58,43 @@ enum ShellEnvironment {
         }
     }
 
+    static func standardPATHEntries(
+        homeDirectory: String? = ProcessInfo.processInfo.environment["HOME"]?.nonEmpty
+            ?? FileManager.default.homeDirectoryForCurrentUser.path
+    ) -> [String] {
+        var entries = fixedStandardPATHEntries
+
+        if let homeDirectory {
+            entries.append((homeDirectory as NSString).appendingPathComponent("bin"))
+        }
+
+        return mergePATHEntries(
+            primaryEntries: entries,
+            fallbackEntries: []
+        )
+    }
+
     private static func mergePATHEntries(primary: String, fallback: String) -> String {
+        mergePATHEntries(
+            primaryEntries: primary.split(separator: ":").map(String.init),
+            fallbackEntries: fallback.split(separator: ":").map(String.init)
+        ).joined(separator: ":")
+    }
+
+    private static func mergePATHEntries(
+        primaryEntries: [String],
+        fallbackEntries: [String]
+    ) -> [String] {
         var seen: Set<String> = []
         var merged: [String] = []
 
-        for entry in (primary.split(separator: ":") + fallback.split(separator: ":")).map(String.init) {
+        for entry in primaryEntries + fallbackEntries {
             let trimmed = entry.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty, !seen.contains(trimmed) else { continue }
             seen.insert(trimmed)
             merged.append(trimmed)
         }
 
-        return merged.joined(separator: ":")
+        return merged
     }
 }

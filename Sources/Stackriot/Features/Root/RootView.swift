@@ -15,6 +15,11 @@ struct RootView: View {
         let visibleRepositories = appModel.visibleRepositories(from: repositories, in: selectedNamespace)
         let selectedRepository = appModel.repository(for: visibleRepositories)
         let selectedWorktree = selectedRepository.flatMap { appModel.selectedWorktree(for: $0) }
+        let sidebarSnapshots = Dictionary(
+            uniqueKeysWithValues: visibleRepositories.map { repository in
+                (repository.id, appModel.sidebarSnapshot(for: repository))
+            }
+        )
         let editProject: (RepositoryProject) -> Void = { project in
             guard let namespace = project.namespace else { return }
             appModel.presentProjectEditor(in: namespace, project: project)
@@ -26,10 +31,9 @@ struct RootView: View {
                 projects: namespaceProjects,
                 currentNamespace: selectedNamespace,
                 repositories: visibleRepositories,
+                sidebarSnapshotsByRepositoryID: sidebarSnapshots,
                 selectedNamespaceID: $appModel.selectedNamespaceID,
                 selectedRepositoryID: $appModel.selectedRepositoryID,
-                refreshingRepositoryIDs: appModel.refreshingRepositoryIDs,
-                isAgentRunningForRepository: appModel.isAgentRunning(forRepository:),
                 onSelectNamespace: appModel.selectNamespace,
                 onCreateNamespace: {
                     appModel.presentNamespaceEditor()

@@ -28,12 +28,13 @@ struct WorktreeActionBar: View {
     @State private var pendingDevContainerDeletion = false
 
     var body: some View {
+        let discovery = appModel.cachedWorktreeDiscoverySnapshot(for: worktree)
         HStack(spacing: 6) {
             devToolMenuButton
             agentMenuButton
             terminalButton
 
-            if hasDevContainerConfiguration {
+            if discovery.hasDevContainerConfiguration {
                 Divider()
                     .frame(height: 18)
                     .padding(.horizontal, 2)
@@ -372,15 +373,11 @@ struct WorktreeActionBar: View {
     }
 
     private var availableDevTools: [SupportedDevTool] {
-        appModel.availableDevTools(for: worktree)
+        appModel.cachedAvailableDevTools(for: worktree)
     }
 
     private var runConfigurations: [RunConfiguration] {
         appModel.availableRunConfigurations(for: worktree)
-    }
-
-    private var hasDevContainerConfiguration: Bool {
-        appModel.hasDevContainerConfiguration(for: worktree)
     }
 
     private var hasDependencyActions: Bool {

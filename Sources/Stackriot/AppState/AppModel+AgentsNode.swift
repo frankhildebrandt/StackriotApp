@@ -29,9 +29,52 @@ extension AppModel {
         return services.runConfigurationDiscovery.discoverRunConfigurations(in: worktreeURL)
     }
 
+    func cachedAvailableDevTools(for worktree: WorktreeRecord) -> [SupportedDevTool] {
+        let workspacePath = (worktree.materializedURL ?? worktree.projectedMaterializationURL)?.path
+        guard
+            let snapshot = worktreeDiscoverySnapshotsByID[worktree.id],
+            snapshot.workspacePath == workspacePath
+        else {
+            return []
+        }
+        return snapshot.availableDevTools ?? []
+    }
+
+    @discardableResult
+    func refreshAvailableDevToolsCache(for worktree: WorktreeRecord) -> [SupportedDevTool] {
+        let workspaceURL = worktree.materializedURL ?? worktree.projectedMaterializationURL
+        guard let worktreeURL = workspaceURL else { return [] }
+        let currentPath = worktreeURL.path
+
+        recordDevToolDiscovery(for: worktree.id)
+        let tools = services.devToolDiscovery.availableTools(in: worktreeURL)
+        let existing = worktreeDiscoverySnapshotsByID[worktree.id]
+        let configuration = existing?.workspacePath == currentPath
+            ? existing?.configuration
+            : worktree.materializedURL.flatMap { services.devContainerService.configuration(at: $0) }
+        worktreeDiscoverySnapshotsByID[worktree.id] = WorktreeDiscoverySnapshot(
+            worktreeID: worktree.id,
+            workspacePath: currentPath,
+            configuration: configuration,
+            availableDevTools: tools,
+            lastUpdatedAt: .now
+        )
+        return tools
+    }
+
     func availableDevTools(for worktree: WorktreeRecord) -> [SupportedDevTool] {
-        guard let worktreeURL = worktree.materializedURL ?? worktree.projectedMaterializationURL else { return [] }
-        return services.devToolDiscovery.availableTools(in: worktreeURL)
+        let workspaceURL = worktree.materializedURL ?? worktree.projectedMaterializationURL
+        guard let worktreeURL = workspaceURL else { return [] }
+        let currentPath = worktreeURL.path
+
+        if let snapshot = worktreeDiscoverySnapshotsByID[worktree.id],
+           snapshot.workspacePath == currentPath,
+           let cachedTools = snapshot.availableDevTools
+        {
+            return cachedTools
+        }
+
+        return refreshAvailableDevToolsCache(for: worktree)
     }
 
     func openDevTool(_ tool: SupportedDevTool, for worktree: WorktreeRecord, in modelContext: ModelContext) async {

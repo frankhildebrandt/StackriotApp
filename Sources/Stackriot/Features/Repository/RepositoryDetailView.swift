@@ -35,6 +35,50 @@ private struct WorktreeBuckets {
     }
 }
 
+private struct WorktreeTreeLayout {
+    let rootWorktrees: [WorktreeRecord]
+    let childrenByParentID: [UUID: [WorktreeRecord]]
+
+    init(worktrees: [WorktreeRecord]) {
+        let availableIDs = Set(worktrees.map(\.id))
+        var rootWorktrees: [WorktreeRecord] = []
+        var childrenByParentID: [UUID: [WorktreeRecord]] = [:]
+
+        for worktree in worktrees {
+            if let parentID = worktree.parentWorktreeID,
+               parentID != worktree.id,
+               availableIDs.contains(parentID)
+            {
+                childrenByParentID[parentID, default: []].append(worktree)
+            } else {
+                rootWorktrees.append(worktree)
+            }
+        }
+
+        self.rootWorktrees = Self.sort(rootWorktrees)
+        self.childrenByParentID = childrenByParentID.mapValues(Self.sort)
+    }
+
+    func children(of worktreeID: UUID) -> [WorktreeRecord] {
+        childrenByParentID[worktreeID] ?? []
+    }
+
+    private static func sort(_ worktrees: [WorktreeRecord]) -> [WorktreeRecord] {
+        worktrees.sorted { lhs, rhs in
+            if lhs.isDefaultBranchWorkspace != rhs.isDefaultBranchWorkspace {
+                return lhs.isDefaultBranchWorkspace
+            }
+            if lhs.isPinned != rhs.isPinned {
+                return lhs.isPinned
+            }
+            if lhs.isIdeaTree != rhs.isIdeaTree {
+                return lhs.isIdeaTree
+            }
+            return lhs.createdAt > rhs.createdAt
+        }
+    }
+}
+
 struct RepositoryDetailView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
@@ -85,6 +129,9 @@ struct RepositoryDetailView: View {
             _ = await appModel.ensureDefaultBranchWorkspace(for: repository, in: modelContext)
             appModel.ensureSelectedWorktree(in: repository)
             appModel.restoreAllPRMonitoring(in: modelContext)
+            await Task.yield()
+            appModel.markWorktreeListVisible(for: repository.id)
+            appModel.markRepositoryDetailVisible(for: repository.id)
         }
         .sheet(isPresented: $isIntegrationSheetPresented) {
             if let worktreeID = integrationTargetWorktreeID {
@@ -273,7 +320,7 @@ struct RepositoryDetailView: View {
     private var activeJobsButtonTitle: String {
         let activeRunCount = appModel.activeRunIDs.count
         let activeDevContainerCount = AppPreferences.devContainerGlobalVisibilityEnabled
-            ? appModel.activeDevContainerSummaries().filter(\.isActive).count
+            ? appModel.activeDevContainerCount(in: repository)
             : 0
         let total = activeRunCount + activeDevContainerCount
         return total == 0 ? "Jobs" : "Jobs \(total)"
@@ -281,7 +328,7 @@ struct RepositoryDetailView: View {
 
     private var activeJobsButtonSystemImage: String {
         let hasActiveDevContainers = AppPreferences.devContainerGlobalVisibilityEnabled
-            && appModel.activeDevContainerSummaries().contains(where: \.isActive)
+            && appModel.activeDevContainerCount(in: repository) > 0
         return (appModel.activeRunIDs.isEmpty && !hasActiveDevContainers) ? "list.bullet.circle" : "list.bullet.circle.fill"
     }
 
@@ -322,6 +369,7 @@ struct RepositoryDetailView: View {
         subtitle: String? = nil,
         worktrees: [WorktreeRecord]
     ) -> AnyView {
+        let layout = WorktreeTreeLayout(worktrees: worktrees)
         if !worktrees.isEmpty {
             return AnyView(VStack(alignment: .leading, spacing: 10) {
                 if let title {
@@ -337,8 +385,8 @@ struct RepositoryDetailView: View {
                 }
 
                 VStack(spacing: 10) {
-                    ForEach(appModel.groupedRootWorktrees(from: worktrees, in: repository)) { worktree in
-                        worktreeTree(worktree, within: worktrees, indentationLevel: 0)
+                    ForEach(layout.rootWorktrees) { worktree in
+                        worktreeTree(worktree, layout: layout, indentationLevel: 0)
                     }
                 }
             })
@@ -346,19 +394,15 @@ struct RepositoryDetailView: View {
         return AnyView(EmptyView())
     }
 
-    private func worktreeTree(_ worktree: WorktreeRecord, within worktrees: [WorktreeRecord], indentationLevel: Int) -> AnyView {
+    private func worktreeTree(_ worktree: WorktreeRecord, layout: WorktreeTreeLayout, indentationLevel: Int) -> AnyView {
         AnyView(VStack(spacing: 10) {
             worktreeCard(worktree, indentationLevel: indentationLevel)
 
-            let descendants = appModel
-                .childWorktrees(of: worktree, in: repository)
-                .filter { child in
-                    worktrees.contains(where: { $0.id == child.id })
-                }
+            let descendants = layout.children(of: worktree.id)
             if !descendants.isEmpty {
                 VStack(spacing: 10) {
                     ForEach(descendants) { child in
-                        worktreeTree(child, within: worktrees, indentationLevel: indentationLevel + 1)
+                        worktreeTree(child, layout: layout, indentationLevel: indentationLevel + 1)
                     }
                 }
             }
@@ -572,7 +616,7 @@ struct RepositoryDetailView: View {
             hoveredWorktreeID = isHovering ? worktree.id : nil
         }
         .contextMenu {
-            ForEach(appModel.availableDevTools(for: worktree)) { tool in
+            ForEach(appModel.cachedAvailableDevTools(for: worktree)) { tool in
                 Button("Open in \(tool.displayName)") {
                     Task {
                         await appModel.openDevTool(tool, for: worktree, in: modelContext)
@@ -1113,8 +1157,8 @@ private struct ActiveJobsPopover: View {
             appModel.navigateToDevContainer(summary)
             dismiss()
         case .logs:
-            appModel.navigateToDevContainer(summary)
-            appModel.setDevContainerLogsVisible(true, for: summary.worktreeID)
+            guard let repository = worktree.repository else { return }
+            appModel.openDevContainerLogs(for: worktree, in: repository)
             dismiss()
         case .terminal:
             appModel.navigateToDevContainer(summary)

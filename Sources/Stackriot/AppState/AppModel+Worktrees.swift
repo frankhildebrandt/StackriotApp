@@ -326,10 +326,12 @@ extension AppModel {
                 repository.updatedAt = .now
                 save(modelContext)
             }
+            _ = ensureWorktreeDiscoverySnapshot(for: worktree)
             return worktree
         }
 
         do {
+            let previousURL = worktree.materializedURL
             let sourceBranch = worktree.sourceBranchName ?? repository.defaultBranch
             let info = try await services.worktreeManager.createWorktree(
                 bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
@@ -343,6 +345,12 @@ extension AppModel {
             worktree.markMaterialized(at: info.path.path)
             repository.updatedAt = .now
             try modelContext.save()
+            if let previousURL {
+                services.devToolDiscovery.invalidateCache(for: previousURL)
+            }
+            invalidateWorktreeDiscoverySnapshot(for: worktree.id)
+            _ = refreshWorktreeConfigurationSnapshot(for: worktree)
+            refreshRepositorySidebarSnapshot(for: repository)
             await refreshWorktreeStatuses(for: repository)
             notifyOperationSuccess(
                 title: "IdeaTree materialized",
@@ -606,12 +614,23 @@ extension AppModel {
             try writeIntent(initialPlanText, for: worktree.id)
         }
 
+        if worktree.materializedURL != nil {
+            _ = refreshWorktreeConfigurationSnapshot(for: worktree)
+        } else {
+            invalidateWorktreeDiscoverySnapshot(for: worktree.id)
+        }
+        refreshRepositorySidebarSnapshot(for: repository)
+
         return worktree
     }
 
     func finishCreatedWorktree(_ worktree: WorktreeRecord, in repository: ManagedRepository) {
         selectedWorktreeIDsByRepository[repository.id] = worktree.id
         terminalTabs.selectPlanTab(for: worktree.id)
+        beginWorktreeSelectionTrace(repositoryID: repository.id, worktreeID: worktree.id)
+        _ = ensureWorktreeDiscoverySnapshot(for: worktree)
+        _ = refreshAvailableDevToolsCache(for: worktree)
+        refreshRepositorySidebarSnapshot(for: repository)
         isWorktreeSheetPresented = false
     }
 
@@ -643,6 +662,7 @@ extension AppModel {
             guard let worktreeURL = worktree.materializedURL else {
                 throw StackriotError.worktreeUnavailable
             }
+            let previousURL = worktreeURL
 
             let destination = try await services.worktreeManager.moveWorktree(
                 bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
@@ -655,6 +675,10 @@ extension AppModel {
             worktree.lastOpenedAt = .now
             repository.updatedAt = .now
             save(modelContext)
+            services.devToolDiscovery.invalidateCache(for: previousURL)
+            invalidateWorktreeDiscoverySnapshot(for: worktree.id)
+            _ = refreshWorktreeConfigurationSnapshot(for: worktree)
+            refreshRepositorySidebarSnapshot(for: repository)
             await refreshWorktreeStatuses(for: repository)
             notifyOperationSuccess(
                 title: "Worktree moved",
@@ -752,11 +776,16 @@ extension AppModel {
             }
 
             stopPRMonitoring(for: worktreeID)
+            if let worktreeURL = worktree.materializedURL {
+                services.devToolDiscovery.invalidateCache(for: worktreeURL)
+            }
+            invalidateWorktreeDiscoverySnapshot(for: worktreeID)
             modelContext.delete(worktree)
             repository.updatedAt = .now
             try modelContext.save()
             worktreeStatuses.removeValue(forKey: worktreeID)
             pullRequestUpstreamStatuses.removeValue(forKey: worktreeID)
+            devContainerStatesByWorktreeID.removeValue(forKey: worktreeID)
             for runID in runIDsForWorktree {
                 cancelAutoHide(for: runID)
             }
@@ -767,6 +796,7 @@ extension AppModel {
             if worktreePendingMergeOfferID == worktreeID {
                 worktreePendingMergeOfferID = nil
             }
+            refreshRepositorySidebarSnapshot(for: repository)
             await refreshWorktreeStatuses(for: repository)
             notifyOperationSuccess(
                 title: "Worktree removed",
@@ -789,6 +819,7 @@ extension AppModel {
     }
 
     func refreshWorktreeStatuses(for repository: ManagedRepository) async {
+        recordWorktreeStatusRefreshStart(for: repository.id)
         let repositoryID = repository.id
         if worktreeStatusRefreshTasksByRepositoryID[repositoryID] != nil {
             pendingWorktreeStatusRefreshRepositoryIDs.insert(repositoryID)

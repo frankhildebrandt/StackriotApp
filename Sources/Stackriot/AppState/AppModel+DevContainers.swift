@@ -3,34 +3,33 @@ import SwiftData
 
 extension AppModel {
     func hasDevContainerConfiguration(for worktree: WorktreeRecord) -> Bool {
-        guard let worktreeURL = worktree.materializedURL else { return false }
-        return services.devContainerService.configuration(at: worktreeURL) != nil
+        ensureWorktreeDiscoverySnapshot(for: worktree).hasDevContainerConfiguration
     }
 
     func devContainerState(for worktree: WorktreeRecord) -> DevContainerWorkspaceState {
-        let configuration = worktree.materializedURL.flatMap { services.devContainerService.configuration(at: $0) }
+        let configuration = ensureWorktreeDiscoverySnapshot(for: worktree).configuration
         var state = devContainerStatesByWorktreeID[worktree.id] ?? DevContainerWorkspaceState(configuration: configuration)
         state.configuration = configuration
         return state
     }
 
-    func isDevContainerLogsVisible(for worktreeID: UUID) -> Bool {
-        visibleDevContainerLogWorktreeIDs.contains(worktreeID)
-    }
-
-    func setDevContainerLogsVisible(_ isVisible: Bool, for worktreeID: UUID) {
-        if isVisible {
-            visibleDevContainerLogWorktreeIDs.insert(worktreeID)
-        } else {
-            visibleDevContainerLogWorktreeIDs.remove(worktreeID)
-        }
-    }
-
     func refreshDevContainerState(for worktree: WorktreeRecord) async {
+        recordDevContainerRefreshStart(for: worktree.id)
         guard let worktreeURL = worktree.materializedURL else {
             devContainerStatesByWorktreeID[worktree.id] = DevContainerWorkspaceState(configuration: nil)
+            worktreeDiscoverySnapshotsByID[worktree.id] = WorktreeDiscoverySnapshot(
+                worktreeID: worktree.id,
+                workspacePath: nil,
+                configuration: nil,
+                availableDevTools: worktreeDiscoverySnapshotsByID[worktree.id]?.availableDevTools,
+                lastUpdatedAt: .now
+            )
+            if let repository = worktree.repository {
+                refreshRepositorySidebarSnapshot(for: repository)
+            }
             return
         }
+        refreshWorktreeConfigurationSnapshot(for: worktree)
         let snapshot = await services.devContainerService.status(for: worktreeURL)
         mergeDevContainerSnapshot(snapshot, into: worktree.id)
     }
@@ -39,8 +38,8 @@ extension AppModel {
         guard let modelContext = storedModelContext else { return }
         let worktrees = (try? modelContext.fetch(FetchDescriptor<WorktreeRecord>())) ?? []
         for worktree in worktrees {
-            guard let worktreeURL = worktree.materializedURL else { continue }
-            let hasConfiguration = services.devContainerService.configuration(at: worktreeURL) != nil
+            guard worktree.materializedURL != nil else { continue }
+            let hasConfiguration = ensureWorktreeDiscoverySnapshot(for: worktree).hasDevContainerConfiguration
             guard hasConfiguration || devContainerStatesByWorktreeID[worktree.id] != nil else { continue }
             await refreshDevContainerState(for: worktree)
         }
@@ -106,6 +105,11 @@ extension AppModel {
         }
     }
 
+    func openDevContainerLogs(for worktree: WorktreeRecord, in repository: ManagedRepository) {
+        selectedRepositoryID = repository.id
+        selectPrimaryPane(.devContainerLogs, for: worktree, in: repository)
+    }
+
     func activeDevContainerSummaries() -> [DevContainerGlobalSummary] {
         devContainerStatesByWorktreeID.compactMap { worktreeID, state in
             guard let worktree = worktreeRecord(with: worktreeID),
@@ -113,7 +117,7 @@ extension AppModel {
             else {
                 return nil
             }
-            guard state.isRunning || state.activeOperation != nil || (state.diagnosticIssue != nil && state.hasConfiguration) else {
+            guard state.isRunning || state.activeOperation != nil else {
                 return nil
             }
             return DevContainerGlobalSummary(
@@ -153,12 +157,103 @@ extension AppModel {
     }
 
     func activeDevContainerCount(in repository: ManagedRepository) -> Int {
-        repository.worktrees.reduce(into: 0) { partialResult, worktree in
-            let state = devContainerStatesByWorktreeID[worktree.id]
-            if state?.isRunning == true || state?.activeOperation != nil {
-                partialResult += 1
-            }
+        repositorySidebarSnapshotsByID[repository.id]?.activeDevContainerCount ?? 0
+    }
+
+    func sidebarSnapshot(for repository: ManagedRepository) -> RepositorySidebarSnapshot {
+        if let snapshot = repositorySidebarSnapshotsByID[repository.id] {
+            return snapshot
         }
+        return RepositorySidebarSnapshot(
+            repositoryID: repository.id,
+            isRefreshing: refreshingRepositoryIDs.contains(repository.id),
+            isAgentRunning: isAgentRunning(forRepository: repository),
+            activeDevContainerCount: repository.worktrees.reduce(into: 0) { result, worktree in
+                let state = devContainerStatesByWorktreeID[worktree.id]
+                if state?.isRunning == true || state?.activeOperation != nil {
+                    result += 1
+                }
+            }
+        )
+    }
+
+    func refreshRepositorySidebarSnapshot(for repository: ManagedRepository) {
+        let snapshot = RepositorySidebarSnapshot(
+            repositoryID: repository.id,
+            isRefreshing: refreshingRepositoryIDs.contains(repository.id),
+            isAgentRunning: isAgentRunning(forRepository: repository),
+            activeDevContainerCount: repository.worktrees.reduce(into: 0) { result, worktree in
+                let state = devContainerStatesByWorktreeID[worktree.id]
+                if state?.isRunning == true || state?.activeOperation != nil {
+                    result += 1
+                }
+            }
+        )
+        repositorySidebarSnapshotsByID[repository.id] = snapshot
+    }
+
+    func primeWorktreeConfigurationSnapshots(for repository: ManagedRepository) {
+        for worktree in repository.worktrees {
+            _ = ensureWorktreeDiscoverySnapshot(for: worktree)
+        }
+    }
+
+    func cachedWorktreeDiscoverySnapshot(for worktree: WorktreeRecord) -> WorktreeDiscoverySnapshot {
+        let workspacePath = worktree.materializedURL?.path
+        if let snapshot = worktreeDiscoverySnapshotsByID[worktree.id],
+           snapshot.workspacePath == workspacePath
+        {
+            return snapshot
+        }
+        return WorktreeDiscoverySnapshot(
+            worktreeID: worktree.id,
+            workspacePath: workspacePath,
+            configuration: nil,
+            availableDevTools: nil,
+            lastUpdatedAt: .distantPast
+        )
+    }
+
+    @discardableResult
+    func ensureWorktreeDiscoverySnapshot(for worktree: WorktreeRecord) -> WorktreeDiscoverySnapshot {
+        let workspacePath = worktree.materializedURL?.path
+        if let snapshot = worktreeDiscoverySnapshotsByID[worktree.id],
+           snapshot.workspacePath == workspacePath
+        {
+            return snapshot
+        }
+        return refreshWorktreeConfigurationSnapshot(for: worktree)
+    }
+
+    @discardableResult
+    func refreshWorktreeConfigurationSnapshot(for worktree: WorktreeRecord) -> WorktreeDiscoverySnapshot {
+        guard let worktreeURL = worktree.materializedURL else {
+            let snapshot = WorktreeDiscoverySnapshot(
+                worktreeID: worktree.id,
+                workspacePath: nil,
+                configuration: nil,
+                availableDevTools: nil,
+                lastUpdatedAt: .now
+            )
+            worktreeDiscoverySnapshotsByID[worktree.id] = snapshot
+            return snapshot
+        }
+
+        recordDevContainerConfigurationProbe(for: worktree.id)
+        let configuration = services.devContainerService.configuration(at: worktreeURL)
+        let snapshot = WorktreeDiscoverySnapshot(
+            worktreeID: worktree.id,
+            workspacePath: worktreeURL.path,
+            configuration: configuration,
+            availableDevTools: worktreeDiscoverySnapshotsByID[worktree.id]?.availableDevTools,
+            lastUpdatedAt: .now
+        )
+        worktreeDiscoverySnapshotsByID[worktree.id] = snapshot
+        return snapshot
+    }
+
+    func invalidateWorktreeDiscoverySnapshot(for worktreeID: UUID) {
+        worktreeDiscoverySnapshotsByID.removeValue(forKey: worktreeID)
     }
 
     func startDevContainerLogStreaming(for worktree: WorktreeRecord) async {
@@ -269,6 +364,19 @@ extension AppModel {
         state.isLogStreaming = isLogStreaming
         state.activeOperation = activeOperation
         devContainerStatesByWorktreeID[worktreeID] = state
+        if let worktree = worktreeRecord(with: worktreeID) {
+            let currentPath = worktree.materializedURL?.path
+            worktreeDiscoverySnapshotsByID[worktreeID] = WorktreeDiscoverySnapshot(
+                worktreeID: worktreeID,
+                workspacePath: currentPath,
+                configuration: snapshot.configuration,
+                availableDevTools: worktreeDiscoverySnapshotsByID[worktreeID]?.availableDevTools,
+                lastUpdatedAt: snapshot.lastUpdatedAt ?? .now
+            )
+            if let repository = worktree.repository {
+                refreshRepositorySidebarSnapshot(for: repository)
+            }
+        }
     }
 
     private func appendDevContainerLogChunk(_ chunk: String, for worktreeID: UUID) {

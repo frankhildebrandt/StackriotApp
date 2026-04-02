@@ -332,7 +332,7 @@ extension AppModel {
         switch terminalTabs.primaryPane(for: worktree.id) {
         case .implementationPlan:
             ("Implementation Plan", loadImplementationPlan(for: worktree.id))
-        case .intent, .browser:
+        case .intent, .browser, .devContainerLogs:
             ("Intent", loadIntent(for: worktree.id))
         }
     }

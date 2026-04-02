@@ -134,6 +134,85 @@ struct MCPServerTests {
         #expect(callResponse.body.contains("Demo"))
     }
 
+    @Test
+    func serverDeliversToolResponsesOverSSE() async throws {
+        let port = 38766
+        let token = "test-token"
+        let configuration = MCPServerConfiguration(
+            enabled: true,
+            listenAddress: "127.0.0.1",
+            port: port,
+            apiToken: token,
+            exposeReadOnlyToolsOnly: true
+        )
+        let manager = MCPServerManager(configurationProvider: { configuration })
+        let registry = makeRegistry()
+
+        await manager.configure(toolRegistry: registry, statusHandler: nil, logHandler: nil)
+        await manager.start()
+        defer {
+            Task {
+                await manager.stop()
+            }
+        }
+
+        try await waitUntilRunning(manager)
+
+        let endpoint = URL(string: configuration.endpointURLString)!
+        let initializeResponse = try await postJSON(
+            to: endpoint,
+            token: token,
+            sessionID: nil,
+            payload: """
+            {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"tests","version":"1.0"}}}
+            """
+        )
+
+        let sessionID = try #require(initializeResponse.headers["Mcp-Session-Id"])
+
+        let streamTask = Task { () throws -> (statusCode: Int, contentType: String?, payload: String) in
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "GET"
+            request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id")
+
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            let httpResponse = try #require(response as? HTTPURLResponse)
+            for try await line in bytes.lines {
+                if line.hasPrefix("data: ") {
+                    return (
+                        statusCode: httpResponse.statusCode,
+                        contentType: httpResponse.value(forHTTPHeaderField: "Content-Type"),
+                        payload: String(line.dropFirst(6))
+                    )
+                }
+            }
+
+            struct MissingSSEPayload: Error {}
+            throw MissingSSEPayload()
+        }
+
+        try await Task.sleep(for: .milliseconds(150))
+
+        let toolsResponse = try await postJSON(
+            to: endpoint,
+            token: token,
+            sessionID: sessionID,
+            payload: """
+            {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+            """
+        )
+
+        #expect(toolsResponse.statusCode == 202)
+        #expect(toolsResponse.body.isEmpty)
+
+        let streamResponse = try await streamTask.value
+        #expect(streamResponse.statusCode == 200)
+        #expect(streamResponse.contentType?.contains("text/event-stream") == true)
+        #expect(streamResponse.payload.contains("\"list_repositories\""))
+    }
+
     private func makeRegistry() -> MCPToolRegistry {
         MCPToolRegistry(
             listRepositoriesHandler: {
