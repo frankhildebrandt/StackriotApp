@@ -111,6 +111,12 @@ final class AppModel: @unchecked Sendable {
     @ObservationIgnored
     var lastWorktreeStatusPollAt: Date?
     @ObservationIgnored
+    var worktreeStatusRefreshTasksByRepositoryID: [UUID: Task<WorktreeStatusRefreshResult, Never>] = [:]
+    @ObservationIgnored
+    var pendingWorktreeStatusRefreshRepositoryIDs: Set<UUID> = []
+    @ObservationIgnored
+    var worktreeStatusRefreshGenerationByRepositoryID: [UUID: Int] = [:]
+    @ObservationIgnored
     var devContainerMonitoringTask: Task<Void, Never>?
 
     init(
