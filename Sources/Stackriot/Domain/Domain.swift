@@ -274,6 +274,12 @@ struct AgentPromptCommandComponents: Sendable, Equatable {
     let displayCommandLine: String
 }
 
+enum AgentPromptCommandMode: Sendable, Equatable {
+    case execute
+    case plan
+    case planResume(sessionID: String)
+}
+
 struct CopilotModelOption: Identifiable, Sendable, Equatable, Hashable {
     let id: String
     let displayName: String
@@ -570,6 +576,21 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    var promptOutputInterpreter: RunOutputInterpreterKind? {
+        switch self {
+        case .claudeCode:
+            .claudePrintStreamJSON
+        case .codex:
+            .codexExecJSONL
+        case .githubCopilot:
+            .copilotPromptJSONL
+        case .cursorCLI:
+            .cursorAgentPrintJSON
+        case .none:
+            nil
+        }
+    }
+
     var supportsPlanning: Bool {
         switch self {
         case .claudeCode, .codex, .githubCopilot, .cursorCLI:
@@ -645,11 +666,101 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
                 displayCommandLine: "copilot -p \(prompt.shellEscaped)\(modelDisplaySuffix) --allow-all-tools --output-format json"
             )
         case .cursorCLI:
-            return AgentPromptCommandComponents(
-                arguments: ["--print", "--output-format", "stream-json", "--stream-partial-output", "--trust", "--force", prompt],
-                displayCommandLine: "cursor-agent --print --output-format stream-json --stream-partial-output --trust --force \(prompt.shellEscaped)"
-            )
+            return cursorPromptCommandComponents(for: prompt, mode: .execute)
         }
+    }
+
+    func planDraftCommandComponents(
+        for prompt: String,
+        artifactURLs: (schema: URL, response: URL)? = nil,
+        options: AgentLaunchOptions = AgentLaunchOptions()
+    ) -> AgentPromptCommandComponents? {
+        switch self {
+        case .claudeCode, .githubCopilot:
+            return promptCommandComponents(for: prompt, options: options)
+        case .codex:
+            guard let artifactURLs else { return nil }
+            return AgentPromptCommandComponents(
+                arguments: [
+                    "exec",
+                    "--full-auto",
+                    "--json",
+                    "--color", "never",
+                    "--output-schema", artifactURLs.schema.path,
+                    "--output-last-message", artifactURLs.response.path,
+                    prompt,
+                ],
+                displayCommandLine: "codex exec --full-auto --json --color never --output-schema \(artifactURLs.schema.path.shellEscaped) --output-last-message \(artifactURLs.response.path.shellEscaped) <prompt>"
+            )
+        case .cursorCLI:
+            return cursorPromptCommandComponents(for: prompt, mode: .plan)
+        case .none:
+            return nil
+        }
+    }
+
+    func planReplyCommandComponents(
+        for prompt: String,
+        sessionID: String,
+        responseFilePath: String? = nil
+    ) -> AgentPromptCommandComponents? {
+        switch self {
+        case .codex:
+            guard let responseFilePath = responseFilePath?.nonEmpty else { return nil }
+            return AgentPromptCommandComponents(
+                arguments: [
+                    "exec",
+                    "resume",
+                    "--full-auto",
+                    "--json",
+                    "--output-last-message", responseFilePath,
+                    sessionID,
+                    prompt,
+                ],
+                displayCommandLine: "codex exec resume --full-auto --json --output-last-message \(responseFilePath.shellEscaped) \(sessionID.shellEscaped) <reply>"
+            )
+        case .cursorCLI:
+            return cursorPromptCommandComponents(for: prompt, mode: .planResume(sessionID: sessionID))
+        default:
+            return nil
+        }
+    }
+
+    private func cursorPromptCommandComponents(
+        for prompt: String,
+        mode: AgentPromptCommandMode
+    ) -> AgentPromptCommandComponents {
+        var arguments: [String] = []
+        var displayCommand = "cursor-agent"
+
+        let displayPrompt: String
+        switch mode {
+        case .execute:
+            displayPrompt = prompt.shellEscaped
+        case .plan:
+            displayPrompt = "<prompt>"
+        case .planResume(let sessionID):
+            arguments += ["--resume", sessionID]
+            displayCommand += " --resume \(sessionID.shellEscaped)"
+            displayPrompt = "<reply>"
+        }
+
+        arguments += ["--print", "--output-format", "stream-json", "--stream-partial-output", "--trust"]
+        displayCommand += " --print --output-format stream-json --stream-partial-output --trust"
+
+        if mode == .execute {
+            arguments.append("--force")
+            displayCommand += " --force"
+        }
+
+        if mode != .execute {
+            arguments.append("--plan")
+            displayCommand += " --plan"
+        }
+
+        arguments.append(prompt)
+        displayCommand += " \(displayPrompt)"
+        return AgentPromptCommandComponents(arguments: arguments, displayCommandLine: displayCommand)
     }
 }
 
