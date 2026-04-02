@@ -48,6 +48,7 @@ final class AppModel: @unchecked Sendable {
         runtimeRootPath: AppPaths.nodeRuntimeRoot.path,
         npmCachePath: AppPaths.npmCacheDirectory.path
     )
+    var localToolStatuses: [AppManagedToolStatus] = []
     var availableAgents: Set<AIAgentTool> = []
     var runningAgentWorktreeIDs: Set<UUID> = []
     var terminalTabs = TerminalTabBookkeeping()
@@ -166,6 +167,7 @@ final class AppModel: @unchecked Sendable {
                 nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
                 await services.nodeRuntimeManager.refreshDefaultRuntimeIfNeeded(force: false)
                 nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
+                localToolStatuses = await services.localToolManager.allStatuses()
                 await refreshAllRepositories(force: false)
                 await refreshAllDevContainerStates()
                 restoreAllPRMonitoring(in: modelContext)

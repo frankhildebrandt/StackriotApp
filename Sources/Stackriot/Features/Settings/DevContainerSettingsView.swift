@@ -54,7 +54,8 @@ struct DevContainerSettingsView: View {
             }
 
             Section("Tooling status") {
-                LabeledContent("Docker", value: toolingStatus.dockerInstalled ? "Installed" : "Missing")
+                LabeledContent("Container engine", value: toolingStatus.containerEngine?.displayName ?? "Missing")
+                LabeledContent("Engine executable", value: toolingStatus.containerEngineExecutable ?? "Unavailable")
                 LabeledContent("devcontainer", value: toolingStatus.devcontainerInstalled ? "Installed" : "Missing")
                 LabeledContent("npx", value: toolingStatus.npxInstalled ? "Installed" : "Missing")
                 LabeledContent("Effective CLI", value: toolingStatus.resolvedCLI?.displayName ?? "Unavailable")
@@ -69,7 +70,7 @@ struct DevContainerSettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Preferred path")
                         .font(.subheadline.weight(.medium))
-                    Text("Install Docker Desktop or another Docker engine, then install the Dev Containers CLI so the `devcontainer` command is available in your shell.")
+                    Text("Install Docker, Podman, or another Docker-compatible engine, then make the Dev Containers CLI available either in your shell or via Stackriot local CLI management.")
                         .foregroundStyle(.secondary)
 
                     Text("Fallback path")

@@ -11,35 +11,39 @@ enum ShellEnvironment {
         "/sbin",
     ]
 
-    private static var fallbackPath: String {
-        standardPATHEntries().joined(separator: ":")
+    private static func fallbackPath(includeAppManagedPaths: Bool) -> String {
+        standardPATHEntries(includeAppManagedPaths: includeAppManagedPaths).joined(separator: ":")
     }
 
-    static func loginShellPath() async -> String {
-        if let path = await readLoginShellPath() {
+    static func loginShellPath(includeAppManagedPaths: Bool = true) async -> String {
+        if let path = await readLoginShellPath(includeAppManagedPaths: includeAppManagedPaths) {
             return path
         }
 
         let inheritedPath = ProcessInfo.processInfo.environment["PATH"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if let inheritedPath, !inheritedPath.isEmpty {
-            return mergePATHEntries(primary: inheritedPath, fallback: fallbackPath)
+            return mergePATHEntries(
+                primary: inheritedPath,
+                fallback: fallbackPath(includeAppManagedPaths: includeAppManagedPaths)
+            )
         }
 
-        return fallbackPath
+        return fallbackPath(includeAppManagedPaths: includeAppManagedPaths)
     }
 
     static func resolvedEnvironment(
         additional: [String: String] = [:],
-        overrides: [String: String] = [:]
+        overrides: [String: String] = [:],
+        includeAppManagedPaths: Bool = true
     ) async -> [String: String] {
         ProcessInfo.processInfo.environment
-            .merging(["PATH": await loginShellPath()]) { _, new in new }
+            .merging(["PATH": await loginShellPath(includeAppManagedPaths: includeAppManagedPaths)]) { _, new in new }
             .merging(additional) { _, new in new }
             .merging(overrides) { _, new in new }
     }
 
-    private static func readLoginShellPath() async -> String? {
+    private static func readLoginShellPath(includeAppManagedPaths: Bool) async -> String? {
         let shell = ProcessInfo.processInfo.environment["SHELL"]?.nonEmpty ?? "/bin/zsh"
 
         do {
@@ -52,13 +56,19 @@ enum ShellEnvironment {
             }
 
             let path = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-            return path.isEmpty ? nil : mergePATHEntries(primary: path, fallback: fallbackPath)
+            return path.isEmpty
+                ? nil
+                : mergePATHEntries(
+                    primary: path,
+                    fallback: fallbackPath(includeAppManagedPaths: includeAppManagedPaths)
+                )
         } catch {
             return nil
         }
     }
 
     static func standardPATHEntries(
+        includeAppManagedPaths: Bool = true,
         homeDirectory: String? = ProcessInfo.processInfo.environment["HOME"]?.nonEmpty
             ?? FileManager.default.homeDirectoryForCurrentUser.path
     ) -> [String] {
@@ -68,10 +78,20 @@ enum ShellEnvironment {
             entries.append((homeDirectory as NSString).appendingPathComponent("bin"))
         }
 
+        if includeAppManagedPaths {
+            entries.insert(contentsOf: managedPATHEntries(), at: 0)
+        }
+
         return mergePATHEntries(
             primaryEntries: entries,
             fallbackEntries: []
         )
+    }
+
+    static func managedPATHEntries() -> [String] {
+        [
+            AppPaths.localToolsBinDirectory.path,
+        ]
     }
 
     private static func mergePATHEntries(primary: String, fallback: String) -> String {

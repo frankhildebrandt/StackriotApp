@@ -27,7 +27,7 @@ actor NodeRuntimeManager {
     func prepareExecution(for descriptor: CommandExecutionDescriptor) async throws -> PreparedCommandExecution {
         guard let requirement = descriptor.runtimeRequirement else {
             if let binPath = cachedStatus.resolvedDefaultBinPath {
-                let environment = runtimeEnvironment(binDirectory: binPath)
+                let environment = try await runtimeEnvironment(binDirectory: binPath)
                     .merging(descriptor.environment) { _, new in new }
                 return PreparedCommandExecution(
                     executable: descriptor.executable,
@@ -137,9 +137,9 @@ actor NodeRuntimeManager {
         }
 
         let resolvedVersion = versionResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        let nodeURL = URL(fileURLWithPath: nodePath)
+        let nodeURL = URL(fileURLWithPath: nodePath).resolvingSymlinksInPath()
         let binURL = nodeURL.deletingLastPathComponent()
-        let environment = runtimeEnvironment(binDirectory: binURL.path)
+        let environment = try await runtimeEnvironment(binDirectory: binURL.path)
         let runtime = ResolvedNodeRuntime(
             requestedVersionSpec: requirement.nodeVersionSpec,
             resolvedVersion: resolvedVersion,
@@ -189,7 +189,7 @@ actor NodeRuntimeManager {
 
         if !FileManager.default.fileExists(atPath: nvmScript.path) {
             if FileManager.default.fileExists(atPath: AppPaths.nvmDirectory.path) {
-                if try await waitForNVMInstallation(timeout: 10) {
+                if try await waitForNVMInstallation(timeout: 30) {
                     return
                 }
                 try? FileManager.default.removeItem(at: AppPaths.nvmDirectory)
@@ -207,12 +207,23 @@ actor NodeRuntimeManager {
                     Self.nvmRepositoryURL,
                     AppPaths.nvmDirectory.path,
                 ],
-                environment: baseEnvironment()
+                environment: try await baseEnvironment()
             )
-            if cloneResult.exitCode != 0,
-               cloneResult.stderr.contains("already exists"),
-               try await waitForNVMInstallation(timeout: 10) {
-                return
+            if cloneResult.exitCode != 0 {
+                let combinedOutput = [cloneResult.stderr, cloneResult.stdout]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: "\n")
+
+                if combinedOutput.contains("already exists")
+                    || combinedOutput.contains("is not an empty directory")
+                    || combinedOutput.contains("File exists") {
+                    if FileManager.default.fileExists(atPath: nvmScript.path) {
+                        return
+                    }
+                    if try await waitForNVMInstallation(timeout: 30) {
+                        return
+                    }
+                }
             }
             guard cloneResult.exitCode == 0 else {
                 throw StackriotError.commandFailed(cloneResult.stderr.isEmpty ? cloneResult.stdout : cloneResult.stderr)
@@ -229,7 +240,7 @@ actor NodeRuntimeManager {
                 "pull",
                 "--ff-only",
             ],
-            environment: baseEnvironment()
+            environment: try await baseEnvironment()
         )
         guard updateResult.exitCode == 0 else {
             throw StackriotError.commandFailed(updateResult.stderr.isEmpty ? updateResult.stdout : updateResult.stderr)
@@ -248,15 +259,15 @@ actor NodeRuntimeManager {
     }
 
     private func runNVMCommand(_ command: String) async throws -> CommandResult {
-        let nvmScript = AppPaths.nvmDirectory.appendingPathComponent("nvm.sh").path
+        let nvmScript = AppPaths.aliasedNVMDirectory.appendingPathComponent("nvm.sh").path
         let script = """
         set -euo pipefail
-        export NVM_DIR=\(shellQuote(AppPaths.nvmDirectory.path))
-        export NPM_CONFIG_CACHE=\(shellQuote(AppPaths.npmCacheDirectory.path))
-        export npm_config_cache=\(shellQuote(AppPaths.npmCacheDirectory.path))
-        export XDG_CACHE_HOME=\(shellQuote(AppPaths.runtimeCacheRoot.path))
-        export COREPACK_HOME=\(shellQuote(AppPaths.corepackCacheDirectory.path))
-        export TMPDIR=\(shellQuote(AppPaths.runtimeTemporaryDirectory.path))
+        export NVM_DIR=\(shellQuote(AppPaths.aliasedNVMDirectory.path))
+        export NPM_CONFIG_CACHE=\(shellQuote(AppPaths.aliasedNPMCacheDirectory.path))
+        export npm_config_cache=\(shellQuote(AppPaths.aliasedNPMCacheDirectory.path))
+        export XDG_CACHE_HOME=\(shellQuote(AppPaths.aliasedRuntimeCacheRoot.path))
+        export COREPACK_HOME=\(shellQuote(AppPaths.aliasedCorepackCacheDirectory.path))
+        export TMPDIR=\(shellQuote(AppPaths.aliasedRuntimeTemporaryDirectory.path))
         mkdir -p "$NVM_DIR" "$NVM_DIR/versions/node" "$NPM_CONFIG_CACHE" "$XDG_CACHE_HOME" "$COREPACK_HOME" "$TMPDIR"
         . \(shellQuote(nvmScript))
         \(command)
@@ -265,7 +276,7 @@ actor NodeRuntimeManager {
         return try await CommandRunner.runCollected(
             executable: "bash",
             arguments: ["-lc", script],
-            environment: baseEnvironment()
+            environment: try await baseEnvironment()
         )
     }
 
@@ -281,21 +292,23 @@ actor NodeRuntimeManager {
             .filter { $0.hasPrefix("v") }
     }
 
-    private func baseEnvironment() -> [String: String] {
-        [
-            "NVM_DIR": AppPaths.nvmDirectory.path,
-            "NPM_CONFIG_CACHE": AppPaths.npmCacheDirectory.path,
-            "npm_config_cache": AppPaths.npmCacheDirectory.path,
-            "XDG_CACHE_HOME": AppPaths.runtimeCacheRoot.path,
-            "COREPACK_HOME": AppPaths.corepackCacheDirectory.path,
-            "TMPDIR": AppPaths.runtimeTemporaryDirectory.path,
+    private func baseEnvironment() async throws -> [String: String] {
+        let loginShellPath = await ShellEnvironment.loginShellPath(includeAppManagedPaths: false)
+        return [
+            "PATH": loginShellPath,
+            "NVM_DIR": AppPaths.aliasedNVMDirectory.path,
+            "NPM_CONFIG_CACHE": AppPaths.aliasedNPMCacheDirectory.path,
+            "npm_config_cache": AppPaths.aliasedNPMCacheDirectory.path,
+            "XDG_CACHE_HOME": AppPaths.aliasedRuntimeCacheRoot.path,
+            "COREPACK_HOME": AppPaths.aliasedCorepackCacheDirectory.path,
+            "TMPDIR": AppPaths.aliasedRuntimeTemporaryDirectory.path,
         ]
     }
 
-    private func runtimeEnvironment(binDirectory: String) -> [String: String] {
-        var environment = baseEnvironment()
-        let currentPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        environment["PATH"] = "\(binDirectory):\(currentPath)"
+    private func runtimeEnvironment(binDirectory: String) async throws -> [String: String] {
+        var environment = try await baseEnvironment()
+        let loginShellPath = await ShellEnvironment.loginShellPath(includeAppManagedPaths: false)
+        environment["PATH"] = "\(binDirectory):\(loginShellPath)"
         environment["NVM_BIN"] = binDirectory
         return environment
     }

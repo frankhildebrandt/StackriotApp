@@ -176,7 +176,7 @@ struct StackriotTests {
         let prompt = "Fix failing tests"
 
         let claude = AIAgentTool.claudeCode.launchCommandWithPrompt(prompt, in: path)
-        #expect(claude.contains("claude -p --dangerously-skip-permissions --output-format stream-json"))
+        #expect(claude.contains("claude -p --dangerously-skip-permissions --verbose --output-format stream-json"))
         #expect(claude.contains(prompt.shellEscaped))
 
         let codex = AIAgentTool.codex.launchCommandWithPrompt(prompt, in: path)
@@ -210,7 +210,7 @@ struct StackriotTests {
         let responseURL = URL(fileURLWithPath: "/tmp/plan-response.json")
 
         let claudePlan = try #require(AIAgentTool.claudeCode.planDraftCommandComponents(for: prompt))
-        #expect(claudePlan.displayCommandLine.contains("claude -p --dangerously-skip-permissions --output-format stream-json"))
+        #expect(claudePlan.displayCommandLine.contains("claude -p --dangerously-skip-permissions --verbose --output-format stream-json"))
         #expect(claudePlan.arguments.last == prompt)
 
         let codexPlan = try #require(AIAgentTool.codex.planDraftCommandComponents(
@@ -302,7 +302,8 @@ struct StackriotTests {
         #expect(entries.contains("/usr/local/bin"))
         #expect(entries.contains("/opt/homebrew/bin"))
         #expect(entries.contains("/Users/tester/bin"))
-        #expect(entries.first == "/opt/homebrew/bin")
+        #expect(entries.contains(AppPaths.localToolsBinDirectory.path))
+        #expect(entries.first == AppPaths.localToolsBinDirectory.path)
         #expect(Set(entries).count == entries.count)
     }
 
@@ -392,9 +393,9 @@ struct StackriotTests {
         )
 
         let prepared = try await manager.prepareExecution(for: descriptor)
-        #expect(prepared.environment["NVM_DIR"] == AppPaths.nvmDirectory.path)
-        #expect(prepared.environment["NPM_CONFIG_CACHE"] == AppPaths.npmCacheDirectory.path)
-        #expect(prepared.environment["npm_config_cache"] == AppPaths.npmCacheDirectory.path)
+        #expect(prepared.environment["NVM_DIR"] == AppPaths.aliasedNVMDirectory.path)
+        #expect(prepared.environment["NPM_CONFIG_CACHE"] == AppPaths.aliasedNPMCacheDirectory.path)
+        #expect(prepared.environment["npm_config_cache"] == AppPaths.aliasedNPMCacheDirectory.path)
         #expect(prepared.executable.hasPrefix(AppPaths.applicationSupportDirectory.path))
 
         let nodePath = URL(fileURLWithPath: prepared.environment["NVM_BIN"] ?? "")
@@ -444,6 +445,38 @@ struct StackriotTests {
         #expect(results.count == 2)
         #expect(Set(results.map { $0.executable }).count == 1)
         #expect(Set(results.compactMap { $0.environment["NVM_BIN"] }).count == 1)
+    }
+
+    @Test
+    func managedNodeRuntimeAcceptsPreexistingNVMDirectoryWhenScriptExists() async throws {
+        try AppPaths.ensureBaseDirectories()
+        try FileManager.default.createDirectory(at: AppPaths.nvmDirectory, withIntermediateDirectories: true)
+
+        let scriptURL = AppPaths.nvmDirectory.appendingPathComponent("nvm.sh")
+        if !FileManager.default.fileExists(atPath: scriptURL.path) {
+            try "#!/bin/sh\n".write(to: scriptURL, atomically: true, encoding: .utf8)
+        }
+
+        let manager = NodeRuntimeManager()
+        let root = try temporaryDirectory(named: "existing-nvm")
+        let descriptor = CommandExecutionDescriptor(
+            title: "npm install",
+            actionKind: .installDependencies,
+            executable: "npm",
+            arguments: ["--version"],
+            currentDirectoryURL: root,
+            repositoryID: UUID(),
+            runtimeRequirement: NodeRuntimeRequirement(
+                packageManager: .npm,
+                nodeVersionSpec: AppPreferences.nodeDefaultVersionSpec,
+                versionSource: .defaultLTS
+            ),
+            usesTerminalSession: false
+        )
+
+        let prepared = try await manager.prepareExecution(for: descriptor)
+        #expect(prepared.environment["NVM_DIR"] == AppPaths.aliasedNVMDirectory.path)
+        #expect(FileManager.default.fileExists(atPath: scriptURL.path))
     }
 
     @Test

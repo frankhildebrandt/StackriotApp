@@ -33,6 +33,7 @@
 		E00000000000000000000014 /* RunConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000014 /* RunConsoleView.swift */; };
 		E00000000000000000000076 /* DevContainerConsolePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000076 /* DevContainerConsolePanel.swift */; };
 		E00000000000000000000078 /* CopilotModelDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000078 /* CopilotModelDiscoveryService.swift */; };
+		E0000000000000000000007C /* LocalToolManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000007C /* LocalToolManager.swift */; };
 		E00000000000000000000079 /* PendingCopilotExecutionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000079 /* PendingCopilotExecutionSheet.swift */; };
 		E00000000000000000000050 /* CodexRunFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000050 /* CodexRunFeedView.swift */; };
 		E00000000000000000000055 /* CodexPlanDraftSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000055 /* CodexPlanDraftSheet.swift */; };
@@ -153,6 +154,7 @@
 		D00000000000000000000014 /* RunConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunConsoleView.swift; sourceTree = "<group>"; };
 		D00000000000000000000076 /* DevContainerConsolePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevContainerConsolePanel.swift; sourceTree = "<group>"; };
 		D00000000000000000000078 /* CopilotModelDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotModelDiscoveryService.swift; sourceTree = "<group>"; };
+		D0000000000000000000007C /* LocalToolManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalToolManager.swift; sourceTree = "<group>"; };
 		D00000000000000000000079 /* PendingCopilotExecutionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingCopilotExecutionSheet.swift; sourceTree = "<group>"; };
 		D00000000000000000000050 /* CodexRunFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexRunFeedView.swift; sourceTree = "<group>"; };
 		D00000000000000000000055 /* CodexPlanDraftSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexPlanDraftSheet.swift; sourceTree = "<group>"; };
@@ -382,6 +384,7 @@
 				D00000000000000000000052 /* ClaudePrintStreamJSONParser.swift */,
 				D00000000000000000000049 /* CodexExecJSONLParser.swift */,
 				D00000000000000000000078 /* CopilotModelDiscoveryService.swift */,
+				D0000000000000000000007C /* LocalToolManager.swift */,
 				D00000000000000000000053 /* CopilotPromptJSONLParser.swift */,
 				D0000000000000000000005F /* CursorAgentPrintJSONParser.swift */,
 				D00000000000000000000077 /* DevContainerService.swift */,
@@ -689,6 +692,7 @@
 				E0000000000000000000006D /* MCPToolRegistry.swift in Sources */,
 				E00000000000000000000077 /* DevContainerService.swift in Sources */,
 				E00000000000000000000078 /* CopilotModelDiscoveryService.swift in Sources */,
+				E0000000000000000000007C /* LocalToolManager.swift in Sources */,
 				E00000000000000000000028 /* AppPaths.swift in Sources */,
 				E00000000000000000000029 /* CommandRunner.swift in Sources */,
 				E0000000000000000000002A /* StackriotError.swift in Sources */,

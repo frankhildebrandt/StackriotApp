@@ -111,7 +111,7 @@ enum AIProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .anthropic:
             "claude-sonnet-4-5"
         case .openRouter:
-            "openai/gpt-5.4-mini"
+            "openrouter/auto"
         case .ollama:
             "llama3.2"
         case .lmStudio:
@@ -576,6 +576,19 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    var managedTool: AppManagedTool? {
+        switch self {
+        case .claudeCode:
+            .claude
+        case .codex:
+            .codex
+        case .cursorCLI:
+            .cursorAgent
+        case .none, .githubCopilot:
+            nil
+        }
+    }
+
     var promptOutputInterpreter: RunOutputInterpreterKind? {
         switch self {
         case .claudeCode:
@@ -647,9 +660,10 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             return nil
         case .claudeCode:
             // Claude Code uses print mode for automation. Permissions must be non-interactive.
+            // Newer CLIs require `--verbose` when combining `-p` with `stream-json`.
             return AgentPromptCommandComponents(
-                arguments: ["-p", "--dangerously-skip-permissions", "--output-format", "stream-json", prompt],
-                displayCommandLine: "claude -p --dangerously-skip-permissions --output-format stream-json \(prompt.shellEscaped)"
+                arguments: ["-p", "--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json", prompt],
+                displayCommandLine: "claude -p --dangerously-skip-permissions --verbose --output-format stream-json \(prompt.shellEscaped)"
             )
         case .codex:
             // Codex CLI uses `exec` in automation contexts; `--full-auto` enables edits.
@@ -1397,6 +1411,76 @@ struct PreparedCommandExecution: Sendable {
     let executable: String
     let arguments: [String]
     let environment: [String: String]
+}
+
+enum AppManagedTool: String, Codable, CaseIterable, Identifiable, Sendable {
+    case devcontainer
+    case claude
+    case cursorAgent
+    case codex
+    case vscode
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .devcontainer:
+            "Devcontainer CLI"
+        case .claude:
+            "Claude CLI"
+        case .cursorAgent:
+            "Cursor Agent CLI"
+        case .codex:
+            "Codex CLI"
+        case .vscode:
+            "VS Code CLI"
+        }
+    }
+
+    var executableName: String {
+        switch self {
+        case .devcontainer:
+            "devcontainer"
+        case .claude:
+            "claude"
+        case .cursorAgent:
+            "cursor-agent"
+        case .codex:
+            "codex"
+        case .vscode:
+            "code"
+        }
+    }
+}
+
+enum AppManagedToolResolutionSource: String, Codable, Sendable {
+    case shell
+    case appManaged
+    case unavailable
+
+    var displayName: String {
+        switch self {
+        case .shell:
+            "Shell"
+        case .appManaged:
+            "App"
+        case .unavailable:
+            "Missing"
+        }
+    }
+}
+
+struct AppManagedToolStatus: Identifiable, Equatable, Sendable {
+    let tool: AppManagedTool
+    let resolutionSource: AppManagedToolResolutionSource
+    let resolvedPath: String?
+    let installHint: String?
+
+    var id: AppManagedTool { tool }
+
+    var isAvailable: Bool {
+        resolutionSource != .unavailable
+    }
 }
 
 struct NodeRuntimeStatusSnapshot: Codable, Sendable {

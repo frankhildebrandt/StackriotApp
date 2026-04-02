@@ -2,38 +2,39 @@ import Foundation
 
 @MainActor
 struct DevContainerService {
-    typealias CommandExecutor = @Sendable (_ executable: String, _ arguments: [String], _ currentDirectoryURL: URL?) async throws -> CommandResult
+    typealias CommandExecutor = @Sendable (_ executable: String, _ arguments: [String], _ currentDirectoryURL: URL?, _ environment: [String: String]) async throws -> CommandResult
     typealias CommandLocator = (_ command: String) async -> Bool
 
     private let fileManager: FileManager
     private let commandExecutor: CommandExecutor
     private let commandLocator: CommandLocator
+    private let localToolManager: LocalToolManager
 
     init(
         fileManager: FileManager = .default,
-        commandExecutor: @escaping CommandExecutor = { executable, arguments, currentDirectoryURL in
-            try await CommandRunner.runCollected(
+        commandExecutor: @escaping CommandExecutor = { executable, arguments, currentDirectoryURL, environment in
+            let resolvedEnvironment = await ShellEnvironment.resolvedEnvironment(overrides: environment)
+            return try await CommandRunner.runCollected(
                 executable: executable,
                 arguments: arguments,
-                currentDirectoryURL: currentDirectoryURL
+                currentDirectoryURL: currentDirectoryURL,
+                environment: resolvedEnvironment
             )
         },
-        commandLocator: CommandLocator? = nil
+        commandLocator: CommandLocator? = nil,
+        localToolManager: LocalToolManager = LocalToolManager()
     ) {
         self.fileManager = fileManager
         self.commandExecutor = commandExecutor
+        self.localToolManager = localToolManager
         self.commandLocator = commandLocator ?? { command in
-            guard let pathValue = ProcessInfo.processInfo.environment["PATH"] else {
-                return false
-            }
-
+            let pathValue = await ShellEnvironment.loginShellPath(includeAppManagedPaths: false)
             for entry in pathValue.split(separator: ":") {
                 let candidate = URL(fileURLWithPath: String(entry)).appendingPathComponent(command)
                 if fileManager.isExecutableFile(atPath: candidate.path) {
                     return true
                 }
             }
-
             return false
         }
     }
@@ -60,8 +61,9 @@ struct DevContainerService {
         strategy: DevContainerCLIStrategy = AppPreferences.devContainerCLIStrategy,
         isFeatureEnabled: Bool = AppPreferences.devContainerEnabled
     ) async -> DevContainerToolingStatus {
-        let dockerInstalled = await commandLocator("docker")
-        let devcontainerInstalled = await commandLocator("devcontainer")
+        let containerEngine = await resolveContainerEngine()
+        let devcontainerStatus = await localToolManager.status(for: .devcontainer)
+        let devcontainerInstalled = devcontainerStatus.isAvailable
         let npxInstalled = await commandLocator("npx")
 
         let resolvedCLI: DevContainerResolvedCLIKind?
@@ -83,7 +85,8 @@ struct DevContainerService {
         return DevContainerToolingStatus(
             isFeatureEnabled: isFeatureEnabled,
             cliStrategy: strategy,
-            dockerInstalled: dockerInstalled,
+            containerEngine: containerEngine?.kind,
+            containerEngineExecutable: containerEngine?.executable,
             devcontainerInstalled: devcontainerInstalled,
             npxInstalled: npxInstalled,
             resolvedCLI: resolvedCLI
@@ -112,13 +115,13 @@ struct DevContainerService {
             )
         }
 
-        guard tooling.dockerInstalled else {
+        guard tooling.containerEngineInstalled else {
             return DevContainerWorkspaceSnapshot(
                 configuration: configuration,
-                detailsErrorMessage: "Docker CLI is required to inspect and run devcontainers.",
+                detailsErrorMessage: "A Docker-compatible container engine is required to inspect and run devcontainers.",
                 lastUpdatedAt: .now,
                 toolingStatus: tooling,
-                diagnosticIssue: .dockerMissing
+                diagnosticIssue: .containerEngineMissing
             )
         }
 
@@ -199,10 +202,10 @@ struct DevContainerService {
 
     func stop(worktreeURL: URL) async throws -> DevContainerWorkspaceSnapshot {
         let configuration = try requireConfiguration(at: worktreeURL)
-        try await requireDockerInstalled()
+        let engine = try await requireContainerEngine()
         let runningContainerIDs = try await listContainerIDs(for: configuration, includeStopped: false)
         if !runningContainerIDs.isEmpty {
-            let result = try await commandExecutor("docker", ["stop"] + runningContainerIDs, nil)
+            let result = try await commandExecutor(engine.executable, ["stop"] + runningContainerIDs, nil, engine.environment)
             guard result.exitCode == 0 else {
                 throw StackriotError.commandFailed(commandFailureMessage(result, fallback: "The devcontainer could not be stopped."))
             }
@@ -217,10 +220,10 @@ struct DevContainerService {
 
     func delete(worktreeURL: URL) async throws -> DevContainerWorkspaceSnapshot {
         let configuration = try requireConfiguration(at: worktreeURL)
-        try await requireDockerInstalled()
+        let engine = try await requireContainerEngine()
         let containerIDs = try await listContainerIDs(for: configuration, includeStopped: true)
         if !containerIDs.isEmpty {
-            let result = try await commandExecutor("docker", ["rm", "-f"] + containerIDs, nil)
+            let result = try await commandExecutor(engine.executable, ["rm", "-f"] + containerIDs, nil, engine.environment)
             guard result.exitCode == 0 else {
                 throw StackriotError.commandFailed(commandFailureMessage(result, fallback: "The devcontainer could not be removed."))
             }
@@ -230,13 +233,13 @@ struct DevContainerService {
 
     func logStreamDescriptor(for worktreeURL: URL, tail: Int = 200) async throws -> (String, [String]) {
         let configuration = try requireConfiguration(at: worktreeURL)
-        try await requireDockerInstalled()
+        let engine = try await requireContainerEngine()
         let runningContainerIDs = try await listContainerIDs(for: configuration, includeStopped: false)
         guard let containerID = runningContainerIDs.first else {
             throw StackriotError.commandFailed("No running devcontainer was found for this workspace.")
         }
 
-        return ("docker", ["logs", "-f", "--tail", String(tail), containerID])
+        return (engine.executable, ["logs", "-f", "--tail", String(tail), containerID])
     }
 
     func terminalDescriptor(
@@ -245,7 +248,7 @@ struct DevContainerService {
         worktreeID: UUID
     ) async throws -> CommandExecutionDescriptor {
         let configuration = try requireConfiguration(at: worktreeURL)
-        try await requireDockerInstalled()
+        let engine = try await requireContainerEngine()
         let runningContainerIDs = try await listContainerIDs(for: configuration, includeStopped: false)
         guard !runningContainerIDs.isEmpty else {
             throw StackriotError.commandFailed("No running devcontainer was found for this workspace.")
@@ -256,16 +259,17 @@ struct DevContainerService {
         return CommandExecutionDescriptor(
             title: "Devcontainer Terminal",
             actionKind: .devContainer,
-            executable: "docker",
+            executable: engine.executable,
             arguments: [
                 "exec", "-it", primaryContainerID,
                 "sh", "-lc",
                 "if command -v bash >/dev/null 2>&1; then exec bash -il; elif command -v sh >/dev/null 2>&1; then exec sh; else exec /bin/sh; fi",
             ],
-            displayCommandLine: "docker exec -it \(inspect.displayName.nonEmpty ?? primaryContainerID) <shell>",
+            displayCommandLine: "\(engine.kind.displayName.lowercased()) exec -it \(inspect.displayName.nonEmpty ?? primaryContainerID) <shell>",
             currentDirectoryURL: worktreeURL,
             repositoryID: repositoryID,
             worktreeID: worktreeID,
+            environment: engine.environment,
             usesTerminalSession: true
         )
     }
@@ -282,8 +286,8 @@ struct DevContainerService {
         guard tooling.isFeatureEnabled else {
             throw StackriotError.commandFailed("Devcontainer support is disabled in Settings.")
         }
-        guard tooling.dockerInstalled else {
-            throw StackriotError.executableNotFound("docker")
+        guard tooling.containerEngineInstalled else {
+            throw StackriotError.executableNotFound("docker/podman")
         }
         guard tooling.isCLIAvailable else {
             throw StackriotError.executableNotFound("devcontainer")
@@ -291,10 +295,11 @@ struct DevContainerService {
         return tooling
     }
 
-    private func requireDockerInstalled() async throws {
-        guard await commandLocator("docker") else {
-            throw StackriotError.executableNotFound("docker")
+    private func requireContainerEngine() async throws -> ResolvedContainerEngine {
+        guard let engine = await resolveContainerEngine() else {
+            throw StackriotError.executableNotFound("docker/podman")
         }
+        return engine
     }
 
     private func runCLI(
@@ -305,12 +310,14 @@ struct DevContainerService {
         extraArguments: [String] = []
     ) async throws -> CommandResult {
         let resolvedCLI = try resolveCLI(tooling: tooling)
+        let engine = try await requireContainerEngine()
         let arguments = resolvedCLI.argumentsPrefix + [
             command,
             "--workspace-folder", workspaceURL.path,
             "--config", configuration.configFileURL.path,
         ] + extraArguments
-        let result = try await commandExecutor(resolvedCLI.executable, arguments, workspaceURL)
+        let environment = engine.environment
+        let result = try await commandExecutor(resolvedCLI.executable, arguments, workspaceURL, environment)
         guard result.exitCode == 0 else {
             throw StackriotError.commandFailed(commandFailureMessage(result, fallback: "The devcontainer command failed."))
         }
@@ -320,7 +327,8 @@ struct DevContainerService {
     private func resolveCLI(tooling: DevContainerToolingStatus) throws -> ResolvedCLI {
         switch tooling.resolvedCLI {
         case .devcontainerCLI:
-            return ResolvedCLI(executable: "devcontainer", argumentsPrefix: [])
+            let status = localToolManager.appManagedExecutablePath(for: .devcontainer) ?? "devcontainer"
+            return ResolvedCLI(executable: status, argumentsPrefix: [])
         case .npx:
             return ResolvedCLI(executable: "npx", argumentsPrefix: ["-y", "@devcontainers/cli"])
         case nil:
@@ -363,9 +371,10 @@ struct DevContainerService {
         }
         arguments += ["--format", "{{.ID}}"]
 
-        let result = try await commandExecutor("docker", arguments, nil)
+        let engine = try await requireContainerEngine()
+        let result = try await commandExecutor(engine.executable, arguments, nil, engine.environment)
         guard result.exitCode == 0 else {
-            throw StackriotError.commandFailed(commandFailureMessage(result, fallback: "Docker could not list devcontainer containers."))
+            throw StackriotError.commandFailed(commandFailureMessage(result, fallback: "The container engine could not list devcontainer containers."))
         }
 
         return result.stdout
@@ -375,9 +384,10 @@ struct DevContainerService {
     }
 
     private func inspectContainer(id: String) async throws -> DockerInspectContainer {
-        let result = try await commandExecutor("docker", ["inspect", id], nil)
+        let engine = try await requireContainerEngine()
+        let result = try await commandExecutor(engine.executable, ["inspect", id], nil, engine.environment)
         guard result.exitCode == 0 else {
-            throw StackriotError.commandFailed(commandFailureMessage(result, fallback: "Docker could not inspect the devcontainer."))
+            throw StackriotError.commandFailed(commandFailureMessage(result, fallback: "The container engine could not inspect the devcontainer."))
         }
 
         let data = Data(result.stdout.utf8)
@@ -389,13 +399,15 @@ struct DevContainerService {
     }
 
     private func fetchStats(for containerID: String) async throws -> DevContainerResourceUsage? {
+        let engine = try await requireContainerEngine()
         let result = try await commandExecutor(
-            "docker",
+            engine.executable,
             ["stats", "--no-stream", "--format", "{{json .}}", containerID],
-            nil
+            nil,
+            engine.environment
         )
         guard result.exitCode == 0 else {
-            throw StackriotError.commandFailed(commandFailureMessage(result, fallback: "Docker could not read devcontainer stats."))
+            throw StackriotError.commandFailed(commandFailureMessage(result, fallback: "The container engine could not read devcontainer stats."))
         }
 
         let line = result.stdout
@@ -418,8 +430,11 @@ struct DevContainerService {
 
     private func diagnosticIssue(for error: Error) -> DevContainerDiagnosticIssue? {
         let rendered = error.localizedDescription
-        if rendered.contains("Cannot connect to the Docker daemon") || rendered.contains("Docker is not reachable") {
-            return .dockerUnreachable
+        if rendered.contains("Cannot connect to the Docker daemon")
+            || rendered.contains("Docker is not reachable")
+            || rendered.contains("Podman is not reachable")
+            || rendered.contains("container engine is not reachable") {
+            return .containerEngineUnreachable
         }
         if rendered.localizedCaseInsensitiveContains("inspect the devcontainer") {
             return .containerUnreachable
@@ -434,7 +449,7 @@ struct DevContainerService {
 
         let rendered = error.localizedDescription
         if rendered.contains("Cannot connect to the Docker daemon") {
-            return "Docker is not reachable. Start Docker Desktop or another Docker engine and try again."
+            return "The container engine is not reachable. Start Docker Desktop, Podman, or another compatible engine and try again."
         }
         return rendered
     }
@@ -443,15 +458,55 @@ struct DevContainerService {
         let output = result.stderr.nonEmpty ?? result.stdout.nonEmpty
         let message = output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? fallback
         if message.contains("Cannot connect to the Docker daemon") {
-            return "Docker is not reachable. Start Docker Desktop or another Docker engine and try again."
+            return "The container engine is not reachable. Start Docker Desktop, Podman, or another compatible engine and try again."
         }
         return message
+    }
+
+    private func resolveContainerEngine() async -> ResolvedContainerEngine? {
+        if await commandLocator("docker") {
+            return ResolvedContainerEngine(kind: .docker, executable: "docker")
+        }
+
+        guard await commandLocator("podman") else {
+            return nil
+        }
+
+        try? ensurePodmanDockerShim()
+        return ResolvedContainerEngine(
+            kind: .podman,
+            executable: "podman",
+            environment: [
+                "PATH": "\(AppPaths.localToolsShimsDirectory.path):\(await ShellEnvironment.loginShellPath())",
+            ]
+        )
+    }
+
+    private func ensurePodmanDockerShim() throws {
+        try AppPaths.ensureBaseDirectories()
+        let shimURL = AppPaths.localToolsShimsDirectory.appendingPathComponent("docker")
+        let script = """
+        #!/bin/sh
+        exec podman "$@"
+        """
+        let existing = try? String(contentsOf: shimURL, encoding: .utf8)
+        if existing == script {
+            return
+        }
+        try script.write(to: shimURL, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shimURL.path)
     }
 }
 
 private struct ResolvedCLI: Sendable {
     let executable: String
     let argumentsPrefix: [String]
+}
+
+private struct ResolvedContainerEngine: Sendable {
+    let kind: DevContainerContainerEngineKind
+    let executable: String
+    var environment: [String: String] = [:]
 }
 
 private struct DockerInspectContainer: Decodable, Sendable {

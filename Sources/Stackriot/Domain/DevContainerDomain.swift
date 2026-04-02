@@ -86,10 +86,24 @@ enum DevContainerResolvedCLIKind: String, Codable, Sendable {
     }
 }
 
+enum DevContainerContainerEngineKind: String, Codable, Sendable {
+    case docker
+    case podman
+
+    var displayName: String {
+        switch self {
+        case .docker:
+            "Docker"
+        case .podman:
+            "Podman"
+        }
+    }
+}
+
 enum DevContainerDiagnosticIssue: String, Codable, Sendable {
     case featureDisabled
-    case dockerMissing
-    case dockerUnreachable
+    case containerEngineMissing
+    case containerEngineUnreachable
     case cliUnavailable
     case noConfiguration
     case containerUnreachable
@@ -98,10 +112,10 @@ enum DevContainerDiagnosticIssue: String, Codable, Sendable {
         switch self {
         case .featureDisabled:
             "Disabled in Settings"
-        case .dockerMissing:
-            "Docker CLI Missing"
-        case .dockerUnreachable:
-            "Docker Not Reachable"
+        case .containerEngineMissing:
+            "Container Engine CLI Missing"
+        case .containerEngineUnreachable:
+            "Container Engine Not Reachable"
         case .cliUnavailable:
             "Devcontainer CLI Missing"
         case .noConfiguration:
@@ -115,7 +129,8 @@ enum DevContainerDiagnosticIssue: String, Codable, Sendable {
 struct DevContainerToolingStatus: Equatable, Sendable {
     var isFeatureEnabled: Bool
     var cliStrategy: DevContainerCLIStrategy
-    var dockerInstalled: Bool
+    var containerEngine: DevContainerContainerEngineKind?
+    var containerEngineExecutable: String?
     var devcontainerInstalled: Bool
     var npxInstalled: Bool
     var resolvedCLI: DevContainerResolvedCLIKind?
@@ -123,17 +138,23 @@ struct DevContainerToolingStatus: Equatable, Sendable {
     init(
         isFeatureEnabled: Bool = AppPreferences.devContainerEnabled,
         cliStrategy: DevContainerCLIStrategy = AppPreferences.devContainerCLIStrategy,
-        dockerInstalled: Bool = false,
+        containerEngine: DevContainerContainerEngineKind? = nil,
+        containerEngineExecutable: String? = nil,
         devcontainerInstalled: Bool = false,
         npxInstalled: Bool = false,
         resolvedCLI: DevContainerResolvedCLIKind? = nil
     ) {
         self.isFeatureEnabled = isFeatureEnabled
         self.cliStrategy = cliStrategy
-        self.dockerInstalled = dockerInstalled
+        self.containerEngine = containerEngine
+        self.containerEngineExecutable = containerEngineExecutable
         self.devcontainerInstalled = devcontainerInstalled
         self.npxInstalled = npxInstalled
         self.resolvedCLI = resolvedCLI
+    }
+
+    var containerEngineInstalled: Bool {
+        containerEngine != nil
     }
 
     var isCLIAvailable: Bool {
@@ -142,8 +163,8 @@ struct DevContainerToolingStatus: Equatable, Sendable {
 
     var missingRequiredTools: [String] {
         var tools: [String] = []
-        if !dockerInstalled {
-            tools.append("docker")
+        if !containerEngineInstalled {
+            tools.append("docker/podman")
         }
         if !isCLIAvailable {
             tools.append("devcontainer")
@@ -152,9 +173,9 @@ struct DevContainerToolingStatus: Equatable, Sendable {
     }
 
     var summaryLine: String {
-        let docker = dockerInstalled ? "docker" : "docker missing"
+        let engine = containerEngine?.displayName ?? "container engine missing"
         let cli = resolvedCLI?.displayName ?? "no devcontainer CLI"
-        return "\(docker) · \(cli)"
+        return "\(engine) · \(cli)"
     }
 }
 

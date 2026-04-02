@@ -49,6 +49,9 @@ struct NodeSettingsView: View {
                 LabeledContent("NPM cache") {
                     MonospacedSettingsValue(appModel.nodeRuntimeStatus.npmCachePath)
                 }
+                LabeledContent("Local CLI bin") {
+                    MonospacedSettingsValue(AppPaths.localToolsBinDirectory.path)
+                }
             }
 
             Section {
@@ -68,7 +71,50 @@ struct NodeSettingsView: View {
                         .textSelection(.enabled)
                 }
             }
+
+            Section("Local CLI tools") {
+                ForEach(Array(localCLIStatuses.enumerated()), id: \.element.tool) { _, status in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(status.tool.displayName)
+                            Spacer()
+                            Text(status.resolutionSource.displayName)
+                                .foregroundStyle(status.isAvailable ? Color.secondary : Color.red)
+                        }
+
+                        if let resolvedPath = status.resolvedPath?.nonEmpty {
+                            MonospacedSettingsValue(resolvedPath)
+                        }
+
+                        HStack {
+                            Button("Install locally") {
+                                appModel.installLocalTool(status.tool)
+                            }
+
+                            if let installHint = status.installHint?.nonEmpty {
+                                Text(installHint)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Button("Refresh local CLI status") {
+                    appModel.refreshLocalToolStatuses()
+                }
+            }
         }
+        .task {
+            if appModel.localToolStatuses.isEmpty {
+                appModel.refreshLocalToolStatuses()
+            }
+        }
+    }
+
+    private var localCLIStatuses: [AppManagedToolStatus] {
+        appModel.localToolStatuses
     }
 }
 

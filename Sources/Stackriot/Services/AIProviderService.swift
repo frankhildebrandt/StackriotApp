@@ -59,6 +59,20 @@ struct AIProviderService {
         return try await Self.liveCommitMessageSummary(diff: diff, configuration: configuration)
     }
 
+    /// Performs a minimal chat completion to verify credentials, base URL, and model.
+    func verifyConfiguration(_ configuration: AIProviderConfiguration) async throws {
+        guard configuration.isConfigured else {
+            throw StackriotError.commandFailed(
+                "KI-Provider ist nicht vollstaendig konfiguriert (z. B. API-Schluessel fehlt)."
+            )
+        }
+        _ = try await Self.generateText(
+            configuration: configuration,
+            systemPrompt: "Du fuehrst nur einen Verbindungstest aus. Antworte sehr kurz.",
+            userPrompt: "Antworte mit genau einem Wort: OK"
+        )
+    }
+
     func fallbackWorktreeNameSuggestion(for ticket: TicketDetails) -> AIWorktreeNameSuggestion {
         Self.fallbackWorktreeNameSuggestion(for: ticket)
     }
@@ -326,6 +340,9 @@ struct AIProviderService {
         if let apiKey = configuration.apiKey?.nonEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
+        if configuration.provider == .openRouter {
+            applyOpenRouterAttributionHeaders(to: &request)
+        }
 
         let payload = OpenAICompatibleRequest(
             model: configuration.model,
@@ -339,11 +356,32 @@ struct AIProviderService {
         let (data, response) = try await URLSession.shared.data(for: request)
         try ensureHTTPStatus(response, data: data)
         let decoded = try JSONDecoder().decode(OpenAICompatibleResponse.self, from: data)
-        guard let content = decoded.choices.first?.message.resolvedContent?.nonEmpty else {
+        if let apiError = decoded.error {
+            throw StackriotError.commandFailed(apiError.message)
+        }
+        guard let choice = decoded.choices.first else {
+            throw StackriotError.commandFailed("No completion choices received from \(configuration.provider.displayName).")
+        }
+        if let choiceError = choice.error {
+            throw StackriotError.commandFailed(choiceError.message)
+        }
+        guard let message = choice.message else {
+            throw StackriotError.commandFailed("No assistant message received from \(configuration.provider.displayName).")
+        }
+        guard let content = message.resolvedContent?.nonEmpty else {
             throw StackriotError.commandFailed("No completion content received from \(configuration.provider.displayName).")
         }
         return content
     }
+
+    /// OpenRouter recommends `HTTP-Referer` and `X-OpenRouter-Title` for app attribution (see openrouter.ai/docs/requests).
+    private static func applyOpenRouterAttributionHeaders(to request: inout URLRequest) {
+        request.setValue(openRouterHTTPReferer, forHTTPHeaderField: "HTTP-Referer")
+        request.setValue(openRouterAppTitle, forHTTPHeaderField: "X-OpenRouter-Title")
+    }
+
+    private static let openRouterHTTPReferer = "https://stackriot.app"
+    private static let openRouterAppTitle = "Stackriot"
 
     private static func generateAnthropicText(
         configuration: AIProviderConfiguration,
@@ -565,7 +603,16 @@ private struct OpenAICompatibleRequest: Encodable {
 }
 
 private struct OpenAICompatibleResponse: Decodable {
+    struct APIErrorPayload: Decodable {
+        let message: String
+    }
+
     struct Choice: Decodable {
+        struct ChoiceError: Decodable {
+            let code: Int?
+            let message: String
+        }
+
         struct Message: Decodable {
             let content: String?
             let parts: [Part]
@@ -597,10 +644,23 @@ private struct OpenAICompatibleResponse: Decodable {
             }
         }
 
-        let message: Message
+        let message: Message?
+        let error: ChoiceError?
     }
 
     let choices: [Choice]
+    let error: APIErrorPayload?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        error = try container.decodeIfPresent(APIErrorPayload.self, forKey: .error)
+        choices = try container.decodeIfPresent([Choice].self, forKey: .choices) ?? []
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case choices
+        case error
+    }
 }
 
 private struct AnthropicRequest: Encodable {

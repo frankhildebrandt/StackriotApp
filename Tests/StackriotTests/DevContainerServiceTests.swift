@@ -48,9 +48,10 @@ struct DevContainerServiceTests {
         let workspace = try makeTemporaryWorkspace()
         let config = workspace.appendingPathComponent(".devcontainer.json")
         try "{}".write(to: config, atomically: true, encoding: .utf8)
+        let localToolManager = try makeLocalToolManager(withExecutables: ["devcontainer"])
 
         let service = DevContainerService(
-            commandExecutor: { executable, arguments, _ in
+            commandExecutor: { executable, arguments, _, _ in
             if executable == "docker",
                arguments.count == 8,
                arguments[0] == "ps",
@@ -95,7 +96,8 @@ struct DevContainerServiceTests {
         },
             commandLocator: { command in
                 ["docker", "devcontainer"].contains(command)
-            }
+            },
+            localToolManager: localToolManager
         )
 
         let snapshot = await service.status(for: workspace)
@@ -106,7 +108,7 @@ struct DevContainerServiceTests {
         #expect(snapshot.resourceUsage?.cpuPercent == "1.23%")
         #expect(snapshot.resourceUsage?.memoryUsage == "512MiB / 8GiB")
         #expect(snapshot.resourceUsage?.memoryPercent == "6.25%")
-        #expect(snapshot.toolingStatus.dockerInstalled)
+        #expect(snapshot.toolingStatus.containerEngine == .docker)
         #expect(snapshot.toolingStatus.resolvedCLI == .devcontainerCLI)
     }
 
@@ -115,32 +117,35 @@ struct DevContainerServiceTests {
         let workspace = try makeTemporaryWorkspace()
         let config = workspace.appendingPathComponent(".devcontainer.json")
         try "{}".write(to: config, atomically: true, encoding: .utf8)
+        let localToolManager = try makeLocalToolManager(withExecutables: ["devcontainer"])
 
         let service = DevContainerService(
-            commandExecutor: { _, _, _ in
+            commandExecutor: { _, _, _, _ in
                 CommandResult(stdout: "", stderr: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?", exitCode: 1)
             },
             commandLocator: { command in
                 ["docker", "devcontainer"].contains(command)
-            }
+            },
+            localToolManager: localToolManager
         )
 
         let snapshot = await service.status(for: workspace)
 
         #expect(snapshot.runtimeStatus == DevContainerRuntimeStatus.unknown)
-        #expect(snapshot.detailsErrorMessage == "Docker is not reachable. Start Docker Desktop or another Docker engine and try again.")
-        #expect(snapshot.diagnosticIssue == .dockerUnreachable)
+        #expect(snapshot.detailsErrorMessage == "The container engine is not reachable. Start Docker Desktop, Podman, or another compatible engine and try again.")
+        #expect(snapshot.diagnosticIssue == .containerEngineUnreachable)
     }
 
     @Test
     func toolingStatusPrefersDevcontainerCLIInAutoMode() async {
+        let localToolManager = try? makeLocalToolManager(withExecutables: ["devcontainer"])
         let service = DevContainerService(commandLocator: { command in
             ["docker", "devcontainer", "npx"].contains(command)
-        })
+        }, localToolManager: localToolManager ?? LocalToolManager(shellPathProvider: { "" }))
 
         let tooling = await service.toolingStatus(strategy: .auto)
 
-        #expect(tooling.dockerInstalled)
+        #expect(tooling.containerEngine == .docker)
         #expect(tooling.resolvedCLI == .devcontainerCLI)
     }
 
@@ -148,11 +153,11 @@ struct DevContainerServiceTests {
     func toolingStatusFallsBackToNpxInAutoMode() async {
         let service = DevContainerService(commandLocator: { command in
             ["docker", "npx"].contains(command)
-        })
+        }, localToolManager: LocalToolManager(shellPathProvider: { "" }))
 
         let tooling = await service.toolingStatus(strategy: .auto)
 
-        #expect(tooling.dockerInstalled)
+        #expect(tooling.containerEngine == .docker)
         #expect(!tooling.devcontainerInstalled)
         #expect(tooling.resolvedCLI == .npx)
     }
@@ -161,12 +166,25 @@ struct DevContainerServiceTests {
     func toolingStatusRespectsExplicitStrategy() async {
         let service = DevContainerService(commandLocator: { command in
             ["docker", "npx"].contains(command)
-        })
+        }, localToolManager: LocalToolManager(shellPathProvider: { "" }))
 
         let tooling = await service.toolingStatus(strategy: .devcontainerCLI)
 
-        #expect(tooling.dockerInstalled)
+        #expect(tooling.containerEngine == .docker)
         #expect(tooling.resolvedCLI == nil)
+    }
+
+    @Test
+    func toolingStatusUsesPodmanWhenDockerIsMissing() async throws {
+        let localToolManager = try makeLocalToolManager(withExecutables: ["devcontainer"])
+        let service = DevContainerService(commandLocator: { command in
+            ["podman", "npx"].contains(command)
+        }, localToolManager: localToolManager)
+
+        let tooling = await service.toolingStatus(strategy: .auto)
+
+        #expect(tooling.containerEngine == .podman)
+        #expect(tooling.resolvedCLI == .devcontainerCLI)
     }
 
     @Test
@@ -174,9 +192,10 @@ struct DevContainerServiceTests {
         let workspace = try makeTemporaryWorkspace()
         let config = workspace.appendingPathComponent(".devcontainer.json")
         try "{}".write(to: config, atomically: true, encoding: .utf8)
+        let localToolManager = LocalToolManager(shellPathProvider: { "" })
 
         let service = DevContainerService(
-            commandExecutor: { executable, arguments, _ in
+            commandExecutor: { executable, arguments, _, _ in
                 if executable == "docker",
                    arguments.count == 7,
                    arguments[0] == "ps",
@@ -199,7 +218,8 @@ struct DevContainerServiceTests {
             },
             commandLocator: { command in
                 command == "docker"
-            }
+            },
+            localToolManager: localToolManager
         )
 
         let descriptor = try await service.terminalDescriptor(
@@ -217,5 +237,15 @@ struct DevContainerServiceTests {
         let workspace = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         return workspace
+    }
+
+    private func makeLocalToolManager(withExecutables executables: [String]) throws -> LocalToolManager {
+        let directory = try makeTemporaryWorkspace()
+        for executable in executables {
+            let path = directory.appendingPathComponent(executable)
+            try "#!/bin/sh\nexit 0\n".write(to: path, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
+        }
+        return LocalToolManager(shellPathProvider: { directory.path })
     }
 }

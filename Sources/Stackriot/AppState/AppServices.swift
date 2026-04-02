@@ -412,6 +412,7 @@ struct AppServices {
     let agentManager: AIAgentManager
     let nodeTooling: NodeToolingService
     let nodeRuntimeManager: NodeRuntimeManager
+    let localToolManager: LocalToolManager
     let makeTooling: MakeToolingService
     let worktreeStatusService: WorktreeStatusService
     let devToolDiscovery: DevToolDiscoveryService
@@ -432,21 +433,25 @@ struct AppServices {
         aiProviderService: AIProviderService = AIProviderService(),
         ideManager: IDEManager = IDEManager(),
         sshKeyManager: SSHKeyManager = SSHKeyManager(),
-        agentManager: AIAgentManager = AIAgentManager(),
+        agentManager: AIAgentManager? = nil,
         nodeTooling: NodeToolingService = NodeToolingService(),
         nodeRuntimeManager: NodeRuntimeManager = NodeRuntimeManager(),
+        localToolManager: LocalToolManager? = nil,
         makeTooling: MakeToolingService = MakeToolingService(),
         worktreeStatusService: WorktreeStatusService = WorktreeStatusService(),
         devToolDiscovery: DevToolDiscoveryService = DevToolDiscoveryService(),
         runConfigurationDiscovery: RunConfigurationDiscoveryService = RunConfigurationDiscoveryService(),
         copilotModelDiscovery: CopilotModelDiscoveryService = CopilotModelDiscoveryService(),
-        devContainerService: DevContainerService = DevContainerService(),
+        devContainerService: DevContainerService? = nil,
         mcpServerManager: MCPServerManager = MCPServerManager(),
         rawLogArchive: AgentRawLogArchiveService = AgentRawLogArchiveService(),
         notificationService: any AppNotificationServing = AppNotificationService(),
         quickIntentContextService: any QuickIntentContextServing = QuickIntentContextService(),
         globalHotKeyManager: any GlobalHotKeyRegistering = CarbonGlobalHotKeyManager()
     ) {
+        let localToolManager = localToolManager ?? LocalToolManager(nodeRuntimeManager: nodeRuntimeManager)
+        let agentManager = agentManager ?? AIAgentManager(localToolManager: localToolManager)
+
         self.repositoryManager = repositoryManager
         self.worktreeManager = worktreeManager
         self.gitHubCLIService = gitHubCLIService
@@ -457,12 +462,13 @@ struct AppServices {
         self.agentManager = agentManager
         self.nodeTooling = nodeTooling
         self.nodeRuntimeManager = nodeRuntimeManager
+        self.localToolManager = localToolManager
         self.makeTooling = makeTooling
         self.worktreeStatusService = worktreeStatusService
         self.devToolDiscovery = devToolDiscovery
         self.runConfigurationDiscovery = runConfigurationDiscovery
         self.copilotModelDiscovery = copilotModelDiscovery
-        self.devContainerService = devContainerService
+        self.devContainerService = devContainerService ?? DevContainerService(localToolManager: localToolManager)
         self.mcpServerManager = mcpServerManager
         self.rawLogArchive = rawLogArchive
         self.notificationService = notificationService
@@ -478,15 +484,16 @@ struct AppServices {
         aiProviderService: AIProviderService(),
         ideManager: IDEManager(),
         sshKeyManager: SSHKeyManager(),
-        agentManager: AIAgentManager(),
+        agentManager: nil,
         nodeTooling: NodeToolingService(),
         nodeRuntimeManager: NodeRuntimeManager(),
+        localToolManager: nil,
         makeTooling: MakeToolingService(),
         worktreeStatusService: WorktreeStatusService(),
         devToolDiscovery: DevToolDiscoveryService(),
         runConfigurationDiscovery: RunConfigurationDiscoveryService(),
         copilotModelDiscovery: CopilotModelDiscoveryService(),
-        devContainerService: DevContainerService(),
+        devContainerService: nil,
         mcpServerManager: MCPServerManager(),
         rawLogArchive: AgentRawLogArchiveService(),
         notificationService: AppNotificationService(),
