@@ -11,6 +11,7 @@ struct RunConsoleColumn: View {
 
     var body: some View {
         let worktree = appModel.selectedWorktree(for: repository)
+        let worktreeDiscovery = worktree.map { appModel.cachedWorktreeDiscoverySnapshot(for: $0) }
 
         VStack(alignment: .leading, spacing: 0) {
             if let worktree {
@@ -36,7 +37,7 @@ struct RunConsoleColumn: View {
                 // Action Toolbar
                 WorktreeActionBar(worktree: worktree, repository: repository)
 
-                if appModel.hasDevContainerConfiguration(for: worktree) {
+                if worktreeDiscovery?.hasDevContainerConfiguration == true {
                     DevContainerConsolePanel(worktree: worktree)
                 }
 
@@ -74,6 +75,11 @@ struct RunConsoleColumn: View {
             }
         }
         .id(worktree?.id ?? repository.id)
+        .task(id: worktree?.id) {
+            guard let worktree else { return }
+            await Task.yield()
+            appModel.markRunConsoleVisible(for: repository.id, worktreeID: worktree.id)
+        }
         .navigationTitle("Run Console")
         .background(
             LinearGradient(
@@ -89,7 +95,7 @@ struct RunConsoleColumn: View {
             }
         }
         .task(id: worktree?.id) {
-            guard let worktree, appModel.hasDevContainerConfiguration(for: worktree) else { return }
+            guard let worktree, worktreeDiscovery?.hasDevContainerConfiguration == true else { return }
             await appModel.refreshDevContainerState(for: worktree)
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(4))

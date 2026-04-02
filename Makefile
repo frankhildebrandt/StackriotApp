@@ -2,7 +2,9 @@ PROJECT := Stackriot.xcodeproj
 SCHEME := Stackriot
 CONFIGURATION ?= Release
 APP_NAME := Stackriot
+PRODUCTION_DESTINATION := generic/platform=macOS
 BUILD_DIR := $(CURDIR)/build
+PRODUCTION_DIR := $(BUILD_DIR)/production
 LOCAL_CACHE_DIR := $(BUILD_DIR)/Cache
 LOCAL_HOME_DIR := $(BUILD_DIR)/home
 LOCAL_TMP_DIR := $(BUILD_DIR)/tmp
@@ -12,15 +14,18 @@ PRODUCTS_DIR := $(DERIVED_DATA_DIR)/Build/Products/$(CONFIGURATION)
 DEBUG_PRODUCTS_DIR := $(DERIVED_DATA_DIR)/Build/Products/Debug
 DEBUG_APP_BUNDLE := $(DEBUG_PRODUCTS_DIR)/$(APP_NAME).app
 APP_BUNDLE := $(PRODUCTS_DIR)/$(APP_NAME).app
+PRODUCTION_APP_BUNDLE := $(PRODUCTION_DIR)/$(APP_NAME).app
+PRODUCTION_ZIP_PATH := $(PRODUCTION_DIR)/$(APP_NAME).zip
 DMG_DIR := $(BUILD_DIR)/dmg
 DMG_BACKGROUND := $(BUILD_DIR)/$(APP_NAME)-dmg-background.png
 DMG_PATH := $(DMG_DIR)/$(APP_NAME).dmg
 
-.PHONY: help production-build debug-run test dmg dmg-background clean clean-build clean-spm
+.PHONY: help production production-build debug-run test dmg dmg-background clean clean-build clean-spm
 
 help:
 	@printf "%s\n" \
 		"Available targets:" \
+		"  make production        Export a portable production app bundle and ZIP to $(PRODUCTION_DIR)" \
 		"  make production-build  Build $(APP_NAME).app in $(PRODUCTS_DIR) (CONFIGURATION=$(CONFIGURATION))" \
 		"  make debug-run         Build Debug $(APP_NAME).app and open it (for manual debugging)" \
 		"  make test              Run swift test with TMPDIR/HOME under $(BUILD_DIR) (isolated temp)" \
@@ -41,11 +46,23 @@ production-build:
 		-project "$(PROJECT)" \
 		-scheme "$(SCHEME)" \
 		-configuration "$(CONFIGURATION)" \
+		-destination "$(PRODUCTION_DESTINATION)" \
 		-derivedDataPath "$(DERIVED_DATA_DIR)" \
 		-clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIR)" \
 		-skipPackagePluginValidation \
+		ONLY_ACTIVE_ARCH=NO \
+		ARCHS="arm64 x86_64" \
 		build
 	@printf "Built app bundle: %s\n" "$(APP_BUNDLE)"
+
+production: production-build
+	@mkdir -p "$(PRODUCTION_DIR)"
+	rm -rf "$(PRODUCTION_APP_BUNDLE)" "$(PRODUCTION_ZIP_PATH)"
+	ditto "$(APP_BUNDLE)" "$(PRODUCTION_APP_BUNDLE)"
+	xattr -cr "$(PRODUCTION_APP_BUNDLE)" || true
+	ditto -c -k --keepParent "$(PRODUCTION_APP_BUNDLE)" "$(PRODUCTION_ZIP_PATH)"
+	@printf "Exported production app: %s\n" "$(PRODUCTION_APP_BUNDLE)"
+	@printf "Created portable ZIP: %s\n" "$(PRODUCTION_ZIP_PATH)"
 
 # Build Debug and launch the app (Xcode scheme). All caches live under $(BUILD_DIR).
 debug-run:

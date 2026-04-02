@@ -53,16 +53,13 @@ private struct SidebarRepositoryLayout {
 }
 
 struct SidebarView: View {
-    @Environment(AppModel.self) private var appModel
-
     let namespaces: [RepositoryNamespace]
     let projects: [RepositoryProject]
     let currentNamespace: RepositoryNamespace?
     let repositories: [ManagedRepository]
+    let sidebarSnapshotsByRepositoryID: [UUID: RepositorySidebarSnapshot]
     @Binding var selectedNamespaceID: UUID?
     @Binding var selectedRepositoryID: UUID?
-    let refreshingRepositoryIDs: Set<UUID>
-    let isAgentRunningForRepository: (ManagedRepository) -> Bool
     let onSelectNamespace: (RepositoryNamespace) -> Void
     let onCreateNamespace: () -> Void
     let onEditNamespace: (RepositoryNamespace) -> Void
@@ -117,9 +114,11 @@ struct SidebarView: View {
                                 ForEach(layout.repositoriesByProjectID[project.id, default: []]) { repository in
                                     RepositoryRow(
                                         repository: repository,
-                                        isRefreshing: refreshingRepositoryIDs.contains(repository.id),
-                                        isAgentRunning: isAgentRunningForRepository(repository),
-                                        activeDevContainerCount: AppPreferences.devContainerGlobalVisibilityEnabled ? appModel.activeDevContainerCount(in: repository) : 0
+                                        isRefreshing: sidebarSnapshotsByRepositoryID[repository.id]?.isRefreshing == true,
+                                        isAgentRunning: sidebarSnapshotsByRepositoryID[repository.id]?.isAgentRunning == true,
+                                        activeDevContainerCount: AppPreferences.devContainerGlobalVisibilityEnabled
+                                            ? (sidebarSnapshotsByRepositoryID[repository.id]?.activeDevContainerCount ?? 0)
+                                            : 0
                                     )
                                     .padding(.leading, 18)
                                     .tag(repository.id)
@@ -142,9 +141,11 @@ struct SidebarView: View {
                     ForEach(rootRepositories) { repository in
                         RepositoryRow(
                             repository: repository,
-                            isRefreshing: refreshingRepositoryIDs.contains(repository.id),
-                            isAgentRunning: isAgentRunningForRepository(repository),
-                            activeDevContainerCount: AppPreferences.devContainerGlobalVisibilityEnabled ? appModel.activeDevContainerCount(in: repository) : 0
+                            isRefreshing: sidebarSnapshotsByRepositoryID[repository.id]?.isRefreshing == true,
+                            isAgentRunning: sidebarSnapshotsByRepositoryID[repository.id]?.isAgentRunning == true,
+                            activeDevContainerCount: AppPreferences.devContainerGlobalVisibilityEnabled
+                                ? (sidebarSnapshotsByRepositoryID[repository.id]?.activeDevContainerCount ?? 0)
+                                : 0
                         )
                         .tag(repository.id)
                         .draggable(SidebarDragItem(kind: .repository, id: repository.id))

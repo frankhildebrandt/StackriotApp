@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import OSLog
 import SwiftData
 import SwiftUI
 
@@ -16,7 +17,13 @@ final class AppModel: @unchecked Sendable {
             persistSelectedNamespaceID()
         }
     }
-    var selectedRepositoryID: UUID?
+    var selectedRepositoryID: UUID? {
+        didSet {
+            guard selectedRepositoryID != oldValue else { return }
+            beginRepositorySelectionTrace()
+            primeSelectedRepositoryCachesIfNeeded()
+        }
+    }
     var selectedWorktreeIDsByRepository: [UUID: UUID] = [:]
     var cloneDraft = CloneRepositoryDraft()
     var worktreeDraft = WorktreeDraft()
@@ -59,8 +66,9 @@ final class AppModel: @unchecked Sendable {
     var pendingQuickIntentActivationID: UUID?
     var intentContentVersionsByWorktreeID: [UUID: Int] = [:]
     var implementationPlanContentVersionsByWorktreeID: [UUID: Int] = [:]
+    var worktreeDiscoverySnapshotsByID: [UUID: WorktreeDiscoverySnapshot] = [:]
     var devContainerStatesByWorktreeID: [UUID: DevContainerWorkspaceState] = [:]
-    var visibleDevContainerLogWorktreeIDs: Set<UUID> = []
+    var repositorySidebarSnapshotsByID: [UUID: RepositorySidebarSnapshot] = [:]
     var mcpServerStatus = MCPServerStatus.idle()
     var mcpLogEntries: [MCPLogEntry] = []
     /// When set, `RootView` opens `WindowGroup(id: "cursor-agent-markdown")` with this payload.
@@ -118,6 +126,8 @@ final class AppModel: @unchecked Sendable {
     var worktreeStatusRefreshGenerationByRepositoryID: [UUID: Int] = [:]
     @ObservationIgnored
     var devContainerMonitoringTask: Task<Void, Never>?
+    @ObservationIgnored
+    let selectionPerformanceMonitor = SelectionPerformanceMonitor()
 
     init(
         services: AppServices = .production,
@@ -249,12 +259,16 @@ final class AppModel: @unchecked Sendable {
         if selectedWorktreeIDsByRepository[repository.id] != selectedID {
             selectedWorktreeIDsByRepository[repository.id] = selectedID
             terminalTabs.selectPlanTab(for: selectedID)
+            beginWorktreeSelectionTrace(repositoryID: repository.id, worktreeID: selectedID)
         }
     }
 
     func selectWorktree(_ worktree: WorktreeRecord, in repository: ManagedRepository) {
         selectedWorktreeIDsByRepository[repository.id] = worktree.id
         terminalTabs.selectPlanTab(for: worktree.id)
+        beginWorktreeSelectionTrace(repositoryID: repository.id, worktreeID: worktree.id)
+        _ = ensureWorktreeDiscoverySnapshot(for: worktree)
+        _ = refreshAvailableDevToolsCache(for: worktree)
     }
 
     func visibleTabs(for worktree: WorktreeRecord, in repository: ManagedRepository) -> [RunRecord] {
@@ -319,6 +333,55 @@ final class AppModel: @unchecked Sendable {
         terminalTabs.tabState(for: run.id)
     }
 
+    func beginRepositorySelectionTrace() {
+        guard let repositoryID = selectedRepositoryID else { return }
+        selectionPerformanceMonitor.beginRepositorySelection(repositoryID: repositoryID)
+    }
+
+    func beginWorktreeSelectionTrace(repositoryID: UUID, worktreeID: UUID) {
+        selectionPerformanceMonitor.beginWorktreeSelection(
+            repositoryID: repositoryID,
+            worktreeID: worktreeID
+        )
+    }
+
+    func markWorktreeListVisible(for repositoryID: UUID) {
+        selectionPerformanceMonitor.markWorktreeListVisible(repositoryID: repositoryID)
+    }
+
+    func markRepositoryDetailVisible(for repositoryID: UUID) {
+        selectionPerformanceMonitor.markRepositoryDetailVisible(repositoryID: repositoryID)
+    }
+
+    func markRunConsoleVisible(for repositoryID: UUID, worktreeID: UUID) {
+        selectionPerformanceMonitor.markRunConsoleVisible(
+            repositoryID: repositoryID,
+            worktreeID: worktreeID
+        )
+    }
+
+    func recordWorktreeStatusRefreshStart(for repositoryID: UUID) {
+        selectionPerformanceMonitor.recordWorktreeStatusRefreshStart(repositoryID: repositoryID)
+    }
+
+    func recordDevContainerRefreshStart(for worktreeID: UUID) {
+        selectionPerformanceMonitor.recordDevContainerRefreshStart(worktreeID: worktreeID)
+    }
+
+    func recordDevContainerConfigurationProbe(for worktreeID: UUID) {
+        selectionPerformanceMonitor.recordDevContainerConfigurationProbe(for: worktreeID)
+    }
+
+    func recordDevToolDiscovery(for worktreeID: UUID) {
+        selectionPerformanceMonitor.recordDevToolDiscovery(for: worktreeID)
+    }
+
+    func primeSelectedRepositoryCachesIfNeeded() {
+        guard let repository = selectedRepository() else { return }
+        primeWorktreeConfigurationSnapshots(for: repository)
+        refreshRepositorySidebarSnapshot(for: repository)
+    }
+
     func presentCloneSheet() {
         cloneDraft = CloneRepositoryDraft()
         isCloneSheetPresented = true
@@ -377,6 +440,123 @@ final class AppModel: @unchecked Sendable {
 
     func defaultBranchWorkspace(for repository: ManagedRepository) -> WorktreeRecord? {
         worktrees(for: repository).first(where: \.isDefaultBranchWorkspace)
+    }
+}
+
+@MainActor
+final class SelectionPerformanceMonitor {
+    private struct ActiveTrace {
+        let repositoryID: UUID
+        var worktreeID: UUID?
+        let startedAt: ContinuousClock.Instant
+        var worktreeListVisibleAt: ContinuousClock.Instant?
+        var repositoryDetailVisibleAt: ContinuousClock.Instant?
+        var runConsoleVisibleAt: ContinuousClock.Instant?
+        var devToolDiscoveryCount = 0
+        var devContainerConfigurationProbeCount = 0
+        var worktreeStatusRefreshCount = 0
+        var devContainerRefreshCount = 0
+    }
+
+    private let logger = Logger(subsystem: "Stackriot", category: "selection-performance")
+    private let clock = ContinuousClock()
+    private var activeTrace: ActiveTrace?
+
+    func beginRepositorySelection(repositoryID: UUID) {
+        activeTrace = ActiveTrace(
+            repositoryID: repositoryID,
+            worktreeID: nil,
+            startedAt: clock.now
+        )
+        logger.debug("selection-begin repository=\(repositoryID.uuidString, privacy: .public)")
+    }
+
+    func beginWorktreeSelection(repositoryID: UUID, worktreeID: UUID) {
+        activeTrace = ActiveTrace(
+            repositoryID: repositoryID,
+            worktreeID: worktreeID,
+            startedAt: clock.now
+        )
+        logger.debug(
+            "selection-begin repository=\(repositoryID.uuidString, privacy: .public) worktree=\(worktreeID.uuidString, privacy: .public)"
+        )
+    }
+
+    func markWorktreeListVisible(repositoryID: UUID) {
+        guard var trace = activeTrace, trace.repositoryID == repositoryID else { return }
+        trace.worktreeListVisibleAt = trace.worktreeListVisibleAt ?? clock.now
+        activeTrace = trace
+        maybeLogCompletion()
+    }
+
+    func markRepositoryDetailVisible(repositoryID: UUID) {
+        guard var trace = activeTrace, trace.repositoryID == repositoryID else { return }
+        trace.repositoryDetailVisibleAt = trace.repositoryDetailVisibleAt ?? clock.now
+        activeTrace = trace
+        maybeLogCompletion()
+    }
+
+    func markRunConsoleVisible(repositoryID: UUID, worktreeID: UUID) {
+        guard var trace = activeTrace, trace.repositoryID == repositoryID else { return }
+        trace.worktreeID = trace.worktreeID ?? worktreeID
+        trace.runConsoleVisibleAt = trace.runConsoleVisibleAt ?? clock.now
+        activeTrace = trace
+        maybeLogCompletion()
+    }
+
+    func recordWorktreeStatusRefreshStart(repositoryID: UUID) {
+        guard activeTrace?.repositoryID == repositoryID else { return }
+        activeTrace?.worktreeStatusRefreshCount += 1
+    }
+
+    func recordDevContainerRefreshStart(worktreeID: UUID) {
+        guard activeTrace?.worktreeID == worktreeID else { return }
+        activeTrace?.devContainerRefreshCount += 1
+    }
+
+    func recordDevContainerConfigurationProbe(for worktreeID: UUID) {
+        guard activeTrace?.worktreeID == worktreeID else { return }
+        activeTrace?.devContainerConfigurationProbeCount += 1
+    }
+
+    func recordDevToolDiscovery(for worktreeID: UUID) {
+        guard activeTrace?.worktreeID == worktreeID else { return }
+        activeTrace?.devToolDiscoveryCount += 1
+    }
+
+    private func maybeLogCompletion() {
+        guard
+            let trace = activeTrace,
+            let worktreeListVisibleAt = trace.worktreeListVisibleAt,
+            let repositoryDetailVisibleAt = trace.repositoryDetailVisibleAt,
+            let runConsoleVisibleAt = trace.runConsoleVisibleAt
+        else {
+            return
+        }
+
+        let worktreeListMS = milliseconds(from: trace.startedAt, to: worktreeListVisibleAt)
+        let repositoryDetailMS = milliseconds(from: trace.startedAt, to: repositoryDetailVisibleAt)
+        let runConsoleMS = milliseconds(from: trace.startedAt, to: runConsoleVisibleAt)
+
+        logger.debug(
+            """
+            selection-complete repository=\(trace.repositoryID.uuidString, privacy: .public) \
+            worktree=\(trace.worktreeID?.uuidString ?? "-", privacy: .public) \
+            worktreeListMS=\(worktreeListMS) detailMS=\(repositoryDetailMS) runConsoleMS=\(runConsoleMS) \
+            devToolDiscoveryCount=\(trace.devToolDiscoveryCount) \
+            devContainerConfigProbeCount=\(trace.devContainerConfigurationProbeCount) \
+            worktreeStatusRefreshCount=\(trace.worktreeStatusRefreshCount) \
+            devContainerRefreshCount=\(trace.devContainerRefreshCount)
+            """
+        )
+        activeTrace = nil
+    }
+
+    private func milliseconds(from start: ContinuousClock.Instant, to end: ContinuousClock.Instant) -> Int {
+        let duration = start.duration(to: end)
+        let secondsMS = Double(duration.components.seconds) * 1_000
+        let attosecondsMS = Double(duration.components.attoseconds) / 1_000_000_000_000_000
+        return Int(secondsMS + attosecondsMS)
     }
 }
 

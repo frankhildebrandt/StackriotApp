@@ -10,10 +10,6 @@ struct DevContainerConsolePanel: View {
         appModel.devContainerState(for: worktree)
     }
 
-    private var showLogs: Bool {
-        appModel.isDevContainerLogsVisible(for: worktree.id)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
@@ -39,39 +35,10 @@ struct DevContainerConsolePanel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            if showLogs {
-                DevContainerLogView(
-                    text: state.logs,
-                    isStreaming: state.isLogStreaming,
-                    emptyMessage: logPlaceholder
-                )
-                .frame(maxWidth: .infinity)
-                .frame(height: 220)
-            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color.primary.opacity(0.03))
-        .onChange(of: showLogs) { _, newValue in
-            Task {
-                if newValue {
-                    await appModel.startDevContainerLogStreaming(for: worktree)
-                } else {
-                    appModel.stopDevContainerLogStreaming(for: worktree.id)
-                }
-            }
-        }
-        .onChange(of: state.containerID) { _, _ in
-            guard showLogs else { return }
-            Task {
-                appModel.stopDevContainerLogStreaming(for: worktree.id)
-                await appModel.startDevContainerLogStreaming(for: worktree)
-            }
-        }
-        .onDisappear {
-            appModel.stopDevContainerLogStreaming(for: worktree.id)
-        }
     }
 
     private var header: some View {
@@ -125,11 +92,13 @@ struct DevContainerConsolePanel: View {
             .buttonStyle(.bordered)
             .disabled(!state.canOpenTerminal)
 
-            Button(showLogs ? "Hide Logs" : "Show Logs") {
-                appModel.setDevContainerLogsVisible(!showLogs, for: worktree.id)
+            Button {
+                guard let repository = worktree.repository else { return }
+                appModel.openDevContainerLogs(for: worktree, in: repository)
+            } label: {
+                Label("Logs", systemImage: "doc.text")
             }
             .buttonStyle(.bordered)
-            .disabled(!state.hasContainer && !showLogs)
         }
     }
 
@@ -210,16 +179,6 @@ struct DevContainerConsolePanel: View {
         state.toolingStatus.resolvedCLI?.displayName ?? "Unavailable"
     }
 
-    private var logPlaceholder: String {
-        if state.isRunning {
-            return "No logs have been received from the container yet."
-        }
-        if state.hasContainer {
-            return "Start the container to stream logs here."
-        }
-        return "No devcontainer container exists for this workspace yet."
-    }
-
     private var shouldShowDiagnostics: Bool {
         state.diagnosticIssue != nil
     }
@@ -281,7 +240,48 @@ struct DevContainerConsolePanel: View {
     }
 }
 
-private struct DevContainerLogView: View {
+struct DevContainerLogsTabView: View {
+    @Environment(AppModel.self) private var appModel
+
+    let worktree: WorktreeRecord
+
+    private var state: DevContainerWorkspaceState {
+        appModel.devContainerState(for: worktree)
+    }
+
+    var body: some View {
+        DevContainerLogView(
+            text: state.logs,
+            isStreaming: state.isLogStreaming,
+            emptyMessage: logPlaceholder
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: worktree.id) {
+            await appModel.startDevContainerLogStreaming(for: worktree)
+        }
+        .onChange(of: state.containerID) { _, _ in
+            Task {
+                appModel.stopDevContainerLogStreaming(for: worktree.id)
+                await appModel.startDevContainerLogStreaming(for: worktree)
+            }
+        }
+        .onDisappear {
+            appModel.stopDevContainerLogStreaming(for: worktree.id)
+        }
+    }
+
+    private var logPlaceholder: String {
+        if state.isRunning {
+            return "No logs have been received from the container yet."
+        }
+        if state.hasContainer {
+            return "Start the container to stream logs here."
+        }
+        return "No devcontainer container exists for this workspace yet."
+    }
+}
+
+struct DevContainerLogView: View {
     let text: String
     let isStreaming: Bool
     let emptyMessage: String

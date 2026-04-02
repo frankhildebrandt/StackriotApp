@@ -128,7 +128,11 @@ extension AppModel {
     func refresh(_ repository: ManagedRepository, in modelContext: ModelContext) async {
         guard !refreshingRepositoryIDs.contains(repository.id) else { return }
         refreshingRepositoryIDs.insert(repository.id)
-        defer { refreshingRepositoryIDs.remove(repository.id) }
+        refreshRepositorySidebarSnapshot(for: repository)
+        defer {
+            refreshingRepositoryIDs.remove(repository.id)
+            refreshRepositorySidebarSnapshot(for: repository)
+        }
 
         let status = services.repositoryManager.refreshStatus(for: URL(fileURLWithPath: repository.bareRepositoryPath))
         guard status == .ready else {
@@ -136,6 +140,7 @@ extension AppModel {
             repository.updatedAt = .now
             repository.lastErrorMessage = "Repository missing or invalid."
             save(modelContext)
+            refreshRepositorySidebarSnapshot(for: repository)
             return
         }
 
@@ -172,6 +177,8 @@ extension AppModel {
         }
 
         _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
+        primeWorktreeConfigurationSnapshots(for: repository)
+        refreshRepositorySidebarSnapshot(for: repository)
         await refreshWorktreeStatuses(for: repository)
     }
 
@@ -247,6 +254,9 @@ extension AppModel {
             for run in repository.runs {
                 cancelAutoHide(for: run.id)
             }
+            for worktreeURL in repository.worktrees.compactMap(\.materializedURL) {
+                services.devToolDiscovery.invalidateCache(for: worktreeURL)
+            }
             try await services.repositoryManager.deleteRepository(
                 bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
                 worktreePaths: repository.worktrees.compactMap(\.materializedURL)
@@ -258,6 +268,11 @@ extension AppModel {
                 selectedRepositoryID = nil
             }
             selectedWorktreeIDsByRepository.removeValue(forKey: repository.id)
+            repositorySidebarSnapshotsByID.removeValue(forKey: repository.id)
+            for worktree in repository.worktrees {
+                invalidateWorktreeDiscoverySnapshot(for: worktree.id)
+                devContainerStatesByWorktreeID.removeValue(forKey: worktree.id)
+            }
             clearRepositoryDeletionRequest()
             notifyOperationSuccess(
                 title: "Repository deleted",

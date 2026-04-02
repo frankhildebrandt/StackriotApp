@@ -206,6 +206,18 @@ struct StackriotTests {
     }
 
     @Test
+    func shellEnvironmentStandardPathsIncludeHomebrewAndUserBin() {
+        let entries = ShellEnvironment.standardPATHEntries(homeDirectory: "/Users/tester")
+
+        #expect(entries.contains("/bin"))
+        #expect(entries.contains("/usr/local/bin"))
+        #expect(entries.contains("/opt/homebrew/bin"))
+        #expect(entries.contains("/Users/tester/bin"))
+        #expect(entries.first == "/opt/homebrew/bin")
+        #expect(Set(entries).count == entries.count)
+    }
+
+    @Test
     func generatedCommitMessageUsesFeatureSubjectAndBulletBody() {
         let message = GeneratedCommitMessage(
             summaryTitle: "Add commit action to AI agent summary",

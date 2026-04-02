@@ -34,6 +34,7 @@ enum WorktreePrimaryPaneKind: String, Codable, Sendable, Hashable {
     case intent
     case implementationPlan
     case browser
+    case devContainerLogs
 }
 
 struct WorktreePrimaryContext: Sendable, Equatable {
@@ -91,4 +92,23 @@ struct PullRequestUpstreamStatus: Sendable, Equatable {
         guard let localHeadSHA else { return true }
         return localHeadSHA != remoteHeadSHA
     }
+}
+
+struct WorktreeDiscoverySnapshot: Sendable, Equatable {
+    let worktreeID: UUID
+    let workspacePath: String?
+    var configuration: DevContainerConfiguration?
+    var availableDevTools: [SupportedDevTool]?
+    var lastUpdatedAt: Date
+
+    var hasDevContainerConfiguration: Bool {
+        configuration != nil
+    }
+}
+
+struct RepositorySidebarSnapshot: Sendable, Equatable {
+    let repositoryID: UUID
+    let isRefreshing: Bool
+    let isAgentRunning: Bool
+    let activeDevContainerCount: Int
 }

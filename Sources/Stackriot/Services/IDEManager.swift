@@ -203,16 +203,20 @@ final class DevToolDiscoveryService {
     private let ideManager = IDEManager()
 
     func availableTools(in worktreeURL: URL) -> [SupportedDevTool] {
-        let indicators = ProjectIndicators(rootURL: worktreeURL)
         let cacheKey = worktreeURL.path
-        if let cached = cache[cacheKey], cached.indicators == indicators {
+        if let cached = cache[cacheKey] {
             return cached.tools
         }
 
+        let indicators = ProjectIndicators(rootURL: worktreeURL)
         let installedTools = Set(SupportedDevTool.allCases.filter(isInstalled(_:)))
         let tools = relevantTools(from: installedTools, for: worktreeURL, indicators: indicators)
         cache[cacheKey] = CachedToolSet(indicators: indicators, tools: tools)
         return tools
+    }
+
+    func invalidateCache(for worktreeURL: URL) {
+        cache.removeValue(forKey: worktreeURL.path)
     }
 
     func relevantTools(from installedTools: Set<SupportedDevTool>, for worktreeURL: URL) -> [SupportedDevTool] {

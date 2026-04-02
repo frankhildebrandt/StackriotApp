@@ -83,10 +83,12 @@ Oder das Xcode-Projekt `Stackriot.xcodeproj` öffnen und dort bauen.
 ### Packaging
 
 ```bash
+make production
 make production-build
 make dmg
 ```
 
+- `make production` exportiert einen portablen Production-Build nach `build/production/Stackriot.app` und erstellt zusätzlich `build/production/Stackriot.zip` für die Weitergabe an andere Macs
 - `make production-build` baut ein Release-App-Bundle nach `build/DerivedData/Build/Products/Release/Stackriot.app`
 - `make dmg` erzeugt ein klassisches macOS-DMG mit Drag-&-Drop-Installationshilfe, Hintergrundbild und `README.md` unter `build/dmg/Stackriot.dmg`
 

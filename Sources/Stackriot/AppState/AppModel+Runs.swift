@@ -540,6 +540,11 @@ extension AppModel {
                 return run.worktree?.id
             }
         )
+        guard let modelContext = storedModelContext else { return }
+        let repositories = (try? modelContext.fetch(FetchDescriptor<ManagedRepository>())) ?? []
+        for repository in repositories {
+            refreshRepositorySidebarSnapshot(for: repository)
+        }
     }
 
     func dismissAISummary(for run: RunRecord) {
