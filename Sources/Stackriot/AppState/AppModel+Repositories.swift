@@ -141,6 +141,7 @@ extension AppModel {
             repository.lastErrorMessage = "Repository missing or invalid."
             save(modelContext)
             refreshRepositorySidebarSnapshot(for: repository)
+            refreshRepositoryDetailSnapshot(for: repository)
             return
         }
 
@@ -179,6 +180,7 @@ extension AppModel {
         _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
         primeWorktreeConfigurationSnapshots(for: repository)
         refreshRepositorySidebarSnapshot(for: repository)
+        refreshRepositoryDetailSnapshot(for: repository)
         await refreshWorktreeStatuses(for: repository)
     }
 
@@ -269,6 +271,7 @@ extension AppModel {
             }
             selectedWorktreeIDsByRepository.removeValue(forKey: repository.id)
             repositorySidebarSnapshotsByID.removeValue(forKey: repository.id)
+            repositoryDetailSnapshotsByID.removeValue(forKey: repository.id)
             for worktree in repository.worktrees {
                 invalidateWorktreeDiscoverySnapshot(for: worktree.id)
                 devContainerStatesByWorktreeID.removeValue(forKey: worktree.id)

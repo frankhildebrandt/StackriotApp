@@ -1,12 +1,15 @@
 import SwiftUI
 
 struct RepositoriesSettingsView: View {
+    @Environment(AppModel.self) private var appModel
     @AppStorage(AppPreferences.autoRefreshEnabledKey) private var autoRefreshEnabled = AppPreferences.defaultAutoRefreshEnabled
     @AppStorage(AppPreferences.autoRefreshIntervalKey) private var autoRefreshInterval = AppPreferences.defaultAutoRefreshInterval
     @AppStorage(AppPreferences.worktreeStatusPollingEnabledKey) private var worktreeStatusPollingEnabled =
         AppPreferences.defaultWorktreeStatusPollingEnabled
     @AppStorage(AppPreferences.worktreeStatusPollingIntervalKey) private var worktreeStatusPollingInterval =
         AppPreferences.defaultWorktreeStatusPollingInterval
+    @AppStorage(AppPreferences.performanceDebugModeEnabledKey) private var performanceDebugModeEnabled =
+        AppPreferences.defaultPerformanceDebugModeEnabled
 
     var body: some View {
         SettingsFormPage(category: .repositories) {
@@ -45,6 +48,35 @@ struct RepositoriesSettingsView: View {
                 Text("Repository workflow")
             } footer: {
                 Text("Stackriot stores shared Git data in a bare repository and creates worktrees for active tasks.")
+            }
+
+            Section {
+                Toggle("Enable performance debug artifact", isOn: $performanceDebugModeEnabled)
+                LabeledContent("Artifact file") {
+                    Text(appModel.performanceDebugArtifactURL().path)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+
+                HStack {
+                    Button("Show in Finder") {
+                        Task {
+                            await appModel.revealPerformanceDebugArtifact()
+                        }
+                    }
+
+                    Button("Copy artifact") {
+                        appModel.copyPerformanceDebugArtifactToPasteboard()
+                    }
+
+                    Button("Clear artifact") {
+                        appModel.clearPerformanceDebugArtifact()
+                    }
+                }
+            } header: {
+                Text("Performance debug")
+            } footer: {
+                Text("Enable this, reproduce the slow repository or worktree switch, then send the JSONL artifact file for analysis.")
             }
         }
     }

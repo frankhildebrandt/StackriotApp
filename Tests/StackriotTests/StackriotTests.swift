@@ -65,6 +65,31 @@ struct StackriotTests {
     }
 
     @Test
+    func terminalLaunchCommandWrapsPathResolvedExecutablesWithEnv() {
+        let command = TerminalLaunchCommand.resolve(executable: "make", arguments: ["test"])
+
+        #expect(command.executable == "/usr/bin/env")
+        #expect(command.arguments == ["make", "test"])
+    }
+
+    @Test
+    func terminalLaunchCommandPreservesExplicitExecutablePaths() {
+        let absolute = TerminalLaunchCommand.resolve(
+            executable: "/bin/zsh",
+            arguments: ["-il"]
+        )
+        #expect(absolute.executable == "/bin/zsh")
+        #expect(absolute.arguments == ["-il"])
+
+        let relativePath = TerminalLaunchCommand.resolve(
+            executable: "./scripts/run.sh",
+            arguments: ["--flag"]
+        )
+        #expect(relativePath.executable == "./scripts/run.sh")
+        #expect(relativePath.arguments == ["--flag"])
+    }
+
+    @Test
     func nodeScriptsAreDiscoveredFromPackageManifest() throws {
         let root = try temporaryDirectory(named: "node-scripts")
         let package = root.appendingPathComponent("package.json")

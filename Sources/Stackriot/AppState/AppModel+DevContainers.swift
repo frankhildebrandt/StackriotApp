@@ -190,6 +190,20 @@ extension AppModel {
             }
         )
         repositorySidebarSnapshotsByID[repository.id] = snapshot
+        refreshRepositoryDetailSnapshot(for: repository)
+    }
+
+    func repositoryDetailSnapshot(for repository: ManagedRepository) -> RepositoryDetailSnapshot {
+        if let snapshot = repositoryDetailSnapshotsByID[repository.id] {
+            return snapshot
+        }
+        let snapshot = makeRepositoryDetailSnapshot(for: repository)
+        repositoryDetailSnapshotsByID[repository.id] = snapshot
+        return snapshot
+    }
+
+    func refreshRepositoryDetailSnapshot(for repository: ManagedRepository) {
+        repositoryDetailSnapshotsByID[repository.id] = makeRepositoryDetailSnapshot(for: repository)
     }
 
     func primeWorktreeConfigurationSnapshots(for repository: ManagedRepository) {
@@ -254,6 +268,46 @@ extension AppModel {
 
     func invalidateWorktreeDiscoverySnapshot(for worktreeID: UUID) {
         worktreeDiscoverySnapshotsByID.removeValue(forKey: worktreeID)
+    }
+
+    private func makeRepositoryDetailSnapshot(for repository: ManagedRepository) -> RepositoryDetailSnapshot {
+        let selectedWorktreeID = selectedWorktreeIDsByRepository[repository.id] ?? worktrees(for: repository).first?.id
+        let defaultRemoteName = resolvedDefaultRemote(for: repository)?.name
+        let activeRunCount = activeRunIDs.count
+        let activeDevContainerCount = repository.worktrees.reduce(into: 0) { result, worktree in
+            let state = devContainerStatesByWorktreeID[worktree.id]
+            if state?.isRunning == true || state?.activeOperation != nil {
+                result += 1
+            }
+        }
+        let installedAgents = AIAgentTool.allCases.filter { tool in
+            tool != .none && self.availableAgents.contains(tool)
+        }
+
+        let worktreeSnapshots = Dictionary(uniqueKeysWithValues: repository.worktrees.map { worktree in
+            (
+                worktree.id,
+                WorktreePresentationSnapshot(
+                    worktreeID: worktree.id,
+                    isSelected: selectedWorktreeID == worktree.id,
+                    status: worktreeStatuses[worktree.id] ?? WorktreeStatus(),
+                    pullRequestStatus: pullRequestUpstreamStatuses[worktree.id],
+                    isAgentRunning: runningAgentWorktreeIDs.contains(worktree.id),
+                    devContainerState: devContainerState(for: worktree)
+                )
+            )
+        })
+
+        return RepositoryDetailSnapshot(
+            repositoryID: repository.id,
+            selectedWorktreeID: selectedWorktreeID,
+            defaultRemoteName: defaultRemoteName,
+            activeRunCount: activeRunCount,
+            activeDevContainerCount: activeDevContainerCount,
+            syncLog: syncLogs[repository.id],
+            availableAgents: installedAgents,
+            worktreeSnapshotsByID: worktreeSnapshots
+        )
     }
 
     func startDevContainerLogStreaming(for worktree: WorktreeRecord) async {

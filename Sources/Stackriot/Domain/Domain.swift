@@ -1315,6 +1315,7 @@ enum AppPreferences {
     static let defaultWorktreeStatusPollingInterval: Double = 120
     static let defaultQuickIntentHotkey = QuickIntentHotkeyConfiguration.default
     static let terminalTabRetentionModeKey = "terminal.tabs.retentionMode"
+    static let performanceDebugModeEnabledKey = "debug.performance.enabled"
     static let nodeAutoUpdateEnabledKey = "node.autoUpdateEnabled"
     static let nodeAutoUpdateIntervalKey = "node.autoUpdateIntervalSeconds"
     static let nodeDefaultVersionSpecKey = "node.defaultVersionSpec"
@@ -1337,6 +1338,7 @@ enum AppPreferences {
     static let defaultNodeAutoUpdateInterval: Double = 21_600
     static let defaultNodeVersionSpec = "lts/*"
     static let defaultTerminalTabRetentionMode = TerminalTabRetentionMode.shortRetain
+    static let defaultPerformanceDebugModeEnabled = false
     static let defaultAIProvider = AIProviderKind.openAI
     static let defaultMCPEnabled = false
     static let defaultMCPListenAddress = "127.0.0.1"
@@ -1407,6 +1409,14 @@ enum AppPreferences {
             return defaultTerminalTabRetentionMode
         }
         return mode
+    }
+
+    static var performanceDebugModeEnabled: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: performanceDebugModeEnabledKey) == nil {
+            return defaultPerformanceDebugModeEnabled
+        }
+        return defaults.bool(forKey: performanceDebugModeEnabledKey)
     }
 
     static var nodeAutoUpdateEnabled: Bool {

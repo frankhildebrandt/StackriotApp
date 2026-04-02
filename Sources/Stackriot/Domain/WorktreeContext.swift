@@ -112,3 +112,35 @@ struct RepositorySidebarSnapshot: Sendable, Equatable {
     let isAgentRunning: Bool
     let activeDevContainerCount: Int
 }
+
+struct WorktreePresentationSnapshot: Sendable {
+    let worktreeID: UUID
+    let isSelected: Bool
+    let status: WorktreeStatus
+    let pullRequestStatus: PullRequestUpstreamStatus?
+    let isAgentRunning: Bool
+    let devContainerState: DevContainerWorkspaceState
+}
+
+struct RepositoryDetailSnapshot: Sendable {
+    let repositoryID: UUID
+    let selectedWorktreeID: UUID?
+    let defaultRemoteName: String?
+    let activeRunCount: Int
+    let activeDevContainerCount: Int
+    let syncLog: String?
+    let availableAgents: [AIAgentTool]
+    let worktreeSnapshotsByID: [UUID: WorktreePresentationSnapshot]
+
+    func snapshot(for worktreeID: UUID) -> WorktreePresentationSnapshot {
+        worktreeSnapshotsByID[worktreeID]
+            ?? WorktreePresentationSnapshot(
+                worktreeID: worktreeID,
+                isSelected: false,
+                status: WorktreeStatus(),
+                pullRequestStatus: nil,
+                isAgentRunning: false,
+                devContainerState: DevContainerWorkspaceState()
+            )
+    }
+}

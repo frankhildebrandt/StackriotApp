@@ -351,6 +351,7 @@ extension AppModel {
             invalidateWorktreeDiscoverySnapshot(for: worktree.id)
             _ = refreshWorktreeConfigurationSnapshot(for: worktree)
             refreshRepositorySidebarSnapshot(for: repository)
+            refreshRepositoryDetailSnapshot(for: repository)
             await refreshWorktreeStatuses(for: repository)
             notifyOperationSuccess(
                 title: "IdeaTree materialized",
@@ -620,6 +621,7 @@ extension AppModel {
             invalidateWorktreeDiscoverySnapshot(for: worktree.id)
         }
         refreshRepositorySidebarSnapshot(for: repository)
+        refreshRepositoryDetailSnapshot(for: repository)
 
         return worktree
     }
@@ -631,6 +633,7 @@ extension AppModel {
         _ = ensureWorktreeDiscoverySnapshot(for: worktree)
         _ = refreshAvailableDevToolsCache(for: worktree)
         refreshRepositorySidebarSnapshot(for: repository)
+        refreshRepositoryDetailSnapshot(for: repository)
         isWorktreeSheetPresented = false
     }
 
@@ -679,6 +682,7 @@ extension AppModel {
             invalidateWorktreeDiscoverySnapshot(for: worktree.id)
             _ = refreshWorktreeConfigurationSnapshot(for: worktree)
             refreshRepositorySidebarSnapshot(for: repository)
+            refreshRepositoryDetailSnapshot(for: repository)
             await refreshWorktreeStatuses(for: repository)
             notifyOperationSuccess(
                 title: "Worktree moved",
@@ -794,6 +798,7 @@ extension AppModel {
                 selectedWorktreeIDsByRepository[repositoryID] = remainingWorktreeID
             }
             refreshRepositorySidebarSnapshot(for: repository)
+            refreshRepositoryDetailSnapshot(for: repository)
             await refreshWorktreeStatuses(for: repository)
             notifyOperationSuccess(
                 title: "Worktree removed",
@@ -849,6 +854,7 @@ extension AppModel {
 
             if worktreeStatusRefreshGenerationByRepositoryID[repositoryID] == result.generation {
                 applyWorktreeStatusRefreshResult(result, to: repository)
+                refreshRepositoryDetailSnapshot(for: repository)
             }
 
             guard pendingWorktreeStatusRefreshRepositoryIDs.contains(repositoryID) else {

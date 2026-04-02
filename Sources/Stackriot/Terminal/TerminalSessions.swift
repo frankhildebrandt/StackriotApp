@@ -2,6 +2,22 @@ import AppKit
 import SwiftTerm
 import SwiftUI
 
+struct TerminalLaunchCommand: Equatable {
+    let executable: String
+    let arguments: [String]
+
+    static func resolve(executable: String, arguments: [String]) -> Self {
+        guard !executable.contains("/") else {
+            return Self(executable: executable, arguments: arguments)
+        }
+
+        return Self(
+            executable: "/usr/bin/env",
+            arguments: [executable] + arguments
+        )
+    }
+}
+
 @MainActor
 final class AgentTerminalSession: ObservableObject {
     let runID: UUID
@@ -36,9 +52,10 @@ final class AgentTerminalSession: ObservableObject {
         let env = environment
             .sorted(by: { $0.key < $1.key })
             .map { "\($0.key)=\($0.value)" }
+        let command = TerminalLaunchCommand.resolve(executable: executable, arguments: arguments)
         view.startProcess(
-            executable: executable,
-            args: arguments,
+            executable: command.executable,
+            args: command.arguments,
             environment: env,
             currentDirectory: currentDirectory
         )

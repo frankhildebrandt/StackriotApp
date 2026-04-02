@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import Observation
 import OSLog
 import SwiftData
@@ -63,6 +64,7 @@ final class AppModel: @unchecked Sendable {
     var worktreeDiscoverySnapshotsByID: [UUID: WorktreeDiscoverySnapshot] = [:]
     var devContainerStatesByWorktreeID: [UUID: DevContainerWorkspaceState] = [:]
     var repositorySidebarSnapshotsByID: [UUID: RepositorySidebarSnapshot] = [:]
+    var repositoryDetailSnapshotsByID: [UUID: RepositoryDetailSnapshot] = [:]
     var mcpServerStatus = MCPServerStatus.idle()
     var mcpLogEntries: [MCPLogEntry] = []
     /// When set, `RootView` opens `WindowGroup(id: "cursor-agent-markdown")` with this payload.
@@ -255,6 +257,7 @@ final class AppModel: @unchecked Sendable {
             terminalTabs.selectPlanTab(for: selectedID)
             beginWorktreeSelectionTrace(repositoryID: repository.id, worktreeID: selectedID)
         }
+        refreshRepositoryDetailSnapshot(for: repository)
     }
 
     func selectWorktree(_ worktree: WorktreeRecord, in repository: ManagedRepository) {
@@ -263,6 +266,7 @@ final class AppModel: @unchecked Sendable {
         beginWorktreeSelectionTrace(repositoryID: repository.id, worktreeID: worktree.id)
         _ = ensureWorktreeDiscoverySnapshot(for: worktree)
         _ = refreshAvailableDevToolsCache(for: worktree)
+        refreshRepositoryDetailSnapshot(for: repository)
     }
 
     func visibleTabs(for worktree: WorktreeRecord, in repository: ManagedRepository) -> [RunRecord] {
@@ -377,6 +381,51 @@ final class AppModel: @unchecked Sendable {
         isCloneSheetPresented = true
     }
 
+    func performanceDebugArtifactURL() -> URL {
+        AppPaths.performanceDebugArtifactFile
+    }
+
+    func revealPerformanceDebugArtifact() async {
+        do {
+            let url = performanceDebugArtifactURL()
+            try FileManager.default.createDirectory(at: AppPaths.diagnosticsDirectory, withIntermediateDirectories: true)
+            if !FileManager.default.fileExists(atPath: url.path) {
+                try Data().write(to: url)
+            }
+            try await services.ideManager.revealInFinder(path: url)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func clearPerformanceDebugArtifact() {
+        do {
+            let url = performanceDebugArtifactURL()
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            selectionPerformanceMonitor.resetArtifactSession()
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func copyPerformanceDebugArtifactToPasteboard() {
+        do {
+            let url = performanceDebugArtifactURL()
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                pendingErrorMessage = "No performance debug artifact exists yet."
+                return
+            }
+
+            let contents = try String(contentsOf: url, encoding: .utf8)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(contents, forType: .string)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
     func presentWorktreeSheet(for repository: ManagedRepository) {
         worktreeDraft = WorktreeDraft(
             sourceBranch: repository.defaultBranch,
@@ -442,6 +491,7 @@ final class SelectionPerformanceMonitor {
 
     private let logger = Logger(subsystem: "Stackriot", category: "selection-performance")
     private let clock = ContinuousClock()
+    private let artifactRecorder = PerformanceDebugArtifactRecorder()
     private var activeTrace: ActiveTrace?
 
     func beginRepositorySelection(repositoryID: UUID) {
@@ -451,6 +501,13 @@ final class SelectionPerformanceMonitor {
             startedAt: clock.now
         )
         logger.debug("selection-begin repository=\(repositoryID.uuidString, privacy: .public)")
+        artifactRecorder.record(
+            kind: "selection-begin",
+            payload: [
+                "selectionKind": "repository",
+                "repositoryID": repositoryID.uuidString
+            ]
+        )
     }
 
     func beginWorktreeSelection(repositoryID: UUID, worktreeID: UUID) {
@@ -462,12 +519,27 @@ final class SelectionPerformanceMonitor {
         logger.debug(
             "selection-begin repository=\(repositoryID.uuidString, privacy: .public) worktree=\(worktreeID.uuidString, privacy: .public)"
         )
+        artifactRecorder.record(
+            kind: "selection-begin",
+            payload: [
+                "selectionKind": "worktree",
+                "repositoryID": repositoryID.uuidString,
+                "worktreeID": worktreeID.uuidString
+            ]
+        )
     }
 
     func markWorktreeListVisible(repositoryID: UUID) {
         guard var trace = activeTrace, trace.repositoryID == repositoryID else { return }
         trace.worktreeListVisibleAt = trace.worktreeListVisibleAt ?? clock.now
         activeTrace = trace
+        artifactRecorder.record(
+            kind: "selection-step",
+            payload: tracePayload(for: trace, extra: [
+                "step": "worktree-list-visible",
+                "elapsedMS": milliseconds(from: trace.startedAt, to: trace.worktreeListVisibleAt ?? clock.now)
+            ])
+        )
         maybeLogCompletion()
     }
 
@@ -475,6 +547,13 @@ final class SelectionPerformanceMonitor {
         guard var trace = activeTrace, trace.repositoryID == repositoryID else { return }
         trace.repositoryDetailVisibleAt = trace.repositoryDetailVisibleAt ?? clock.now
         activeTrace = trace
+        artifactRecorder.record(
+            kind: "selection-step",
+            payload: tracePayload(for: trace, extra: [
+                "step": "repository-detail-visible",
+                "elapsedMS": milliseconds(from: trace.startedAt, to: trace.repositoryDetailVisibleAt ?? clock.now)
+            ])
+        )
         maybeLogCompletion()
     }
 
@@ -483,27 +562,74 @@ final class SelectionPerformanceMonitor {
         trace.worktreeID = trace.worktreeID ?? worktreeID
         trace.runConsoleVisibleAt = trace.runConsoleVisibleAt ?? clock.now
         activeTrace = trace
+        artifactRecorder.record(
+            kind: "selection-step",
+            payload: tracePayload(for: trace, extra: [
+                "step": "run-console-visible",
+                "elapsedMS": milliseconds(from: trace.startedAt, to: trace.runConsoleVisibleAt ?? clock.now)
+            ])
+        )
         maybeLogCompletion()
     }
 
     func recordWorktreeStatusRefreshStart(repositoryID: UUID) {
         guard activeTrace?.repositoryID == repositoryID else { return }
         activeTrace?.worktreeStatusRefreshCount += 1
+        if let trace = activeTrace {
+            artifactRecorder.record(
+                kind: "refresh-start",
+                payload: tracePayload(for: trace, extra: [
+                    "refreshKind": "worktree-status",
+                    "count": trace.worktreeStatusRefreshCount
+                ])
+            )
+        }
     }
 
     func recordDevContainerRefreshStart(worktreeID: UUID) {
         guard activeTrace?.worktreeID == worktreeID else { return }
         activeTrace?.devContainerRefreshCount += 1
+        if let trace = activeTrace {
+            artifactRecorder.record(
+                kind: "refresh-start",
+                payload: tracePayload(for: trace, extra: [
+                    "refreshKind": "devcontainer-state",
+                    "count": trace.devContainerRefreshCount
+                ])
+            )
+        }
     }
 
     func recordDevContainerConfigurationProbe(for worktreeID: UUID) {
         guard activeTrace?.worktreeID == worktreeID else { return }
         activeTrace?.devContainerConfigurationProbeCount += 1
+        if let trace = activeTrace {
+            artifactRecorder.record(
+                kind: "discovery",
+                payload: tracePayload(for: trace, extra: [
+                    "discoveryKind": "devcontainer-config",
+                    "count": trace.devContainerConfigurationProbeCount
+                ])
+            )
+        }
     }
 
     func recordDevToolDiscovery(for worktreeID: UUID) {
         guard activeTrace?.worktreeID == worktreeID else { return }
         activeTrace?.devToolDiscoveryCount += 1
+        if let trace = activeTrace {
+            artifactRecorder.record(
+                kind: "discovery",
+                payload: tracePayload(for: trace, extra: [
+                    "discoveryKind": "devtool",
+                    "count": trace.devToolDiscoveryCount
+                ])
+            )
+        }
+    }
+
+    func resetArtifactSession() {
+        artifactRecorder.resetSession()
     }
 
     private func maybeLogCompletion() {
@@ -531,6 +657,18 @@ final class SelectionPerformanceMonitor {
             devContainerRefreshCount=\(trace.devContainerRefreshCount)
             """
         )
+        artifactRecorder.record(
+            kind: "selection-complete",
+            payload: tracePayload(for: trace, extra: [
+                "worktreeListMS": worktreeListMS,
+                "detailMS": repositoryDetailMS,
+                "runConsoleMS": runConsoleMS,
+                "devToolDiscoveryCount": trace.devToolDiscoveryCount,
+                "devContainerConfigProbeCount": trace.devContainerConfigurationProbeCount,
+                "worktreeStatusRefreshCount": trace.worktreeStatusRefreshCount,
+                "devContainerRefreshCount": trace.devContainerRefreshCount
+            ])
+        )
         activeTrace = nil
     }
 
@@ -539,6 +677,93 @@ final class SelectionPerformanceMonitor {
         let secondsMS = Double(duration.components.seconds) * 1_000
         let attosecondsMS = Double(duration.components.attoseconds) / 1_000_000_000_000_000
         return Int(secondsMS + attosecondsMS)
+    }
+
+    private func tracePayload(for trace: ActiveTrace, extra: [String: Any] = [:]) -> [String: Any] {
+        var payload: [String: Any] = [
+            "repositoryID": trace.repositoryID.uuidString
+        ]
+        if let worktreeID = trace.worktreeID {
+            payload["worktreeID"] = worktreeID.uuidString
+        }
+        for (key, value) in extra {
+            payload[key] = value
+        }
+        return payload
+    }
+}
+
+private final class PerformanceDebugArtifactRecorder {
+    private var sessionID: UUID?
+    private let dateFormatter = ISO8601DateFormatter()
+
+    func resetSession() {
+        sessionID = nil
+    }
+
+    func record(kind: String, payload: [String: Any]) {
+        guard AppPreferences.performanceDebugModeEnabled else { return }
+        do {
+            try FileManager.default.createDirectory(at: AppPaths.diagnosticsDirectory, withIntermediateDirectories: true)
+            let fileURL = AppPaths.performanceDebugArtifactFile
+            if !FileManager.default.fileExists(atPath: fileURL.path) {
+                _ = FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+            }
+
+            let sessionID = try ensureSession()
+            var record = payload
+            record["kind"] = kind
+            record["recordedAt"] = dateFormatter.string(from: .now)
+            record["sessionID"] = sessionID.uuidString
+
+            let data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
+            guard var line = String(data: data, encoding: .utf8) else { return }
+            line.append("\n")
+
+            let handle = try FileHandle(forWritingTo: fileURL)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            if let encoded = line.data(using: .utf8) {
+                try handle.write(contentsOf: encoded)
+            }
+        } catch {
+            Logger(subsystem: "Stackriot", category: "selection-performance").error(
+                "performance-artifact-write-failed error=\(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private func ensureSession() throws -> UUID {
+        if let sessionID {
+            return sessionID
+        }
+        let newSessionID = UUID()
+        sessionID = newSessionID
+        try writeSessionHeader(sessionID: newSessionID)
+        return newSessionID
+    }
+
+    private func writeSessionHeader(sessionID: UUID) throws {
+        let bundleInfo = Bundle.main.infoDictionary ?? [:]
+        let payload: [String: Any] = [
+            "kind": "session-header",
+            "recordedAt": dateFormatter.string(from: .now),
+            "sessionID": sessionID.uuidString,
+            "appVersion": bundleInfo["CFBundleShortVersionString"] as? String ?? "unknown",
+            "buildNumber": bundleInfo["CFBundleVersion"] as? String ?? "unknown",
+            "performanceDebugModeEnabled": AppPreferences.performanceDebugModeEnabled,
+            "artifactPath": AppPaths.performanceDebugArtifactFile.path
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        guard var line = String(data: data, encoding: .utf8) else { return }
+        line.append("\n")
+        let fileURL = AppPaths.performanceDebugArtifactFile
+        let handle = try FileHandle(forWritingTo: fileURL)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        if let encoded = line.data(using: .utf8) {
+            try handle.write(contentsOf: encoded)
+        }
     }
 }
 
