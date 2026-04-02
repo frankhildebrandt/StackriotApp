@@ -53,9 +53,14 @@ extension AppModel {
 
     /// Legacy `Plans/{uuid}.md` is migrated once into `intentFile` when the intent file is missing (see `ensureLegacyPlanMigrationIfNeeded`).
     func loadIntent(for worktreeID: UUID) -> String {
+        if let cached = intentContentsByWorktreeID[worktreeID] {
+            return cached
+        }
         ensureLegacyPlanMigrationIfNeeded(for: worktreeID)
         let url = AppPaths.intentFile(for: worktreeID)
-        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        intentContentsByWorktreeID[worktreeID] = text
+        return text
     }
 
     func writeIntent(_ text: String, for worktreeID: UUID) throws {
@@ -68,15 +73,23 @@ extension AppModel {
     func saveIntent(_ text: String, for worktreeID: UUID) {
         do {
             try writeIntent(text, for: worktreeID)
+            intentContentsByWorktreeID[worktreeID] = text
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
     }
 
     func loadImplementationPlan(for worktreeID: UUID) -> String {
+        if let cached = implementationPlanContentsByWorktreeID[worktreeID] {
+            return cached
+        }
         ensureLegacyPlanMigrationIfNeeded(for: worktreeID)
         let url = AppPaths.implementationPlanFile(for: worktreeID)
-        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        implementationPlanContentsByWorktreeID[worktreeID] = text
+        implementationPlanPresenceByWorktreeID[worktreeID] =
+            text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        return text
     }
 
     func writeImplementationPlan(_ text: String, for worktreeID: UUID) throws {
@@ -89,13 +102,55 @@ extension AppModel {
     func saveImplementationPlan(_ text: String, for worktreeID: UUID) {
         do {
             try writeImplementationPlan(text, for: worktreeID)
+            implementationPlanContentsByWorktreeID[worktreeID] = text
+            implementationPlanPresenceByWorktreeID[worktreeID] =
+                text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         } catch {
             pendingErrorMessage = error.localizedDescription
         }
     }
 
     func hasImplementationPlanContent(for worktreeID: UUID) -> Bool {
-        loadImplementationPlan(for: worktreeID).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        if let cached = implementationPlanPresenceByWorktreeID[worktreeID] {
+            return cached
+        }
+        return loadImplementationPlan(for: worktreeID).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    func cachedIntent(for worktreeID: UUID) -> String? {
+        intentContentsByWorktreeID[worktreeID]
+    }
+
+    func cachedImplementationPlan(for worktreeID: UUID) -> String? {
+        implementationPlanContentsByWorktreeID[worktreeID]
+    }
+
+    func preloadIntent(for worktreeID: UUID) async -> String {
+        if let cached = intentContentsByWorktreeID[worktreeID] {
+            return cached
+        }
+        ensureLegacyPlanMigrationIfNeeded(for: worktreeID)
+        let url = AppPaths.intentFile(for: worktreeID)
+        let text = await Task.detached(priority: .utility) {
+            (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        }.value
+        intentContentsByWorktreeID[worktreeID] = text
+        return text
+    }
+
+    func preloadImplementationPlan(for worktreeID: UUID) async -> String {
+        if let cached = implementationPlanContentsByWorktreeID[worktreeID] {
+            return cached
+        }
+        ensureLegacyPlanMigrationIfNeeded(for: worktreeID)
+        let url = AppPaths.implementationPlanFile(for: worktreeID)
+        let text = await Task.detached(priority: .utility) {
+            (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        }.value
+        implementationPlanContentsByWorktreeID[worktreeID] = text
+        implementationPlanPresenceByWorktreeID[worktreeID] =
+            text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        return text
     }
 
     func intentContentVersion(for worktreeID: UUID) -> Int {

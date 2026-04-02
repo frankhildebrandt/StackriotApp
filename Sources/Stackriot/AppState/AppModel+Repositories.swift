@@ -274,6 +274,7 @@ extension AppModel {
             repositoryDetailSnapshotsByID.removeValue(forKey: repository.id)
             for worktree in repository.worktrees {
                 invalidateWorktreeDiscoverySnapshot(for: worktree.id)
+                invalidateRunConfigurationCache(for: worktree.id)
                 devContainerStatesByWorktreeID.removeValue(forKey: worktree.id)
             }
             notifyOperationSuccess(

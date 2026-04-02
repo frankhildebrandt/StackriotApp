@@ -17,7 +17,7 @@ struct PlanEditorView: View {
 
     @State private var bodyText: String = ""
     @State private var saveTask: Task<Void, Never>?
-    @State private var hasLoaded = false
+    @State private var isLoading = false
 
     var body: some View {
         let contentVersion = role == .intent
@@ -26,23 +26,20 @@ struct PlanEditorView: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
-            TextEditor(text: $bodyText)
-                .font(.system(.body, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(Color(nsColor: .textBackgroundColor))
-        .onAppear {
-            if !hasLoaded {
-                bodyText = loadFromDisk()
-                hasLoaded = true
+            Group {
+                if isLoading && bodyText.isEmpty {
+                    ProgressView("Loading…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    TextEditor(text: $bodyText)
+                        .font(.system(.body, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                        .padding(16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
-        .onChange(of: worktree.id) { _, _ in
-            saveTask?.cancel()
-            bodyText = loadFromDisk()
-        }
+        .background(Color(nsColor: .textBackgroundColor))
         .onChange(of: bodyText) { _, newValue in
             saveTask?.cancel()
             let id = worktree.id
@@ -59,19 +56,35 @@ struct PlanEditorView: View {
                 }
             }
         }
-        .onChange(of: contentVersion) { _, _ in
+        .task(id: "\(worktree.id.uuidString)-\(roleKey)-\(contentVersion)") {
             saveTask?.cancel()
-            bodyText = loadFromDisk()
+            await loadContent()
         }
     }
 
-    private func loadFromDisk() -> String {
+    private var roleKey: String {
         switch role {
         case .intent:
-            appModel.loadIntent(for: worktree.id)
+            "intent"
         case .implementationPlan:
-            appModel.loadImplementationPlan(for: worktree.id)
+            "implementation-plan"
         }
+    }
+
+    private func loadContent() async {
+        isLoading = true
+        let loadedText: String
+        switch role {
+        case .intent:
+            bodyText = appModel.cachedIntent(for: worktree.id) ?? bodyText
+            loadedText = await appModel.preloadIntent(for: worktree.id)
+        case .implementationPlan:
+            bodyText = appModel.cachedImplementationPlan(for: worktree.id) ?? bodyText
+            loadedText = await appModel.preloadImplementationPlan(for: worktree.id)
+        }
+        guard !Task.isCancelled else { return }
+        bodyText = loadedText
+        isLoading = false
     }
 
     private var toolbar: some View {

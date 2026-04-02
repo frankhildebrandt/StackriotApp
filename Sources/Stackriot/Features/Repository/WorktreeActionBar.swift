@@ -82,6 +82,9 @@ struct WorktreeActionBar: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(.thinMaterial)
+        .task(id: worktree.id) {
+            await appModel.refreshAvailableRunConfigurationsCache(for: worktree)
+        }
         .sheet(isPresented: $pendingGitCommit) {
             GitCommitSheet(worktree: worktree, repository: repository)
         }
@@ -331,12 +334,11 @@ struct WorktreeActionBar: View {
     }
 
     private var runConfigurations: [RunConfiguration] {
-        appModel.availableRunConfigurations(for: worktree)
+        appModel.cachedAvailableRunConfigurations(for: worktree)
     }
 
     private var hasDependencyActions: Bool {
-        guard let worktreeURL = worktree.materializedURL else { return false }
-        return FileManager.default.fileExists(atPath: worktreeURL.appendingPathComponent("package.json").path)
+        appModel.hasCachedDependencyActions(for: worktree)
     }
 
     private var runConfigurationSections: [RunConfigurationMenuSection] {

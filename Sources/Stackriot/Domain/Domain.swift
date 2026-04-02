@@ -451,7 +451,7 @@ enum SupportedDevTool: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct RunConfiguration: Identifiable, Sendable {
+struct RunConfiguration: Identifiable, Sendable, Equatable {
     let id: String
     let name: String
     let source: RunConfigurationSource
@@ -1265,7 +1265,7 @@ enum NodeVersionSource: String, Codable, Sendable {
     case defaultLTS
 }
 
-struct NodeRuntimeRequirement: Sendable {
+struct NodeRuntimeRequirement: Sendable, Equatable {
     let packageManager: PackageManagerKind
     let nodeVersionSpec: String
     let versionSource: NodeVersionSource

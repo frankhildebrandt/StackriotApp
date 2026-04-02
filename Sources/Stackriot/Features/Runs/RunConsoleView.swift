@@ -74,6 +74,28 @@ struct RunConsoleView: View {
         .padding(.horizontal, 12)
         .padding(.top, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task(id: run?.id) {
+            guard let run,
+                  let repositoryID = run.repository?.id,
+                  let worktreeID = run.worktree?.id
+            else {
+                return
+            }
+            await Task.yield()
+            appModel.recordSelectionPhase(
+                repositoryID: repositoryID,
+                worktreeID: worktreeID,
+                phase: "run-console-view-visible",
+                metadata: [
+                    "runID": run.id.uuidString,
+                    "isActive": activeRunIDs.contains(run.id),
+                    "hasTerminalSession": appModel.terminalSession(for: run) != nil,
+                    "showsAISummary": appModel.shouldShowAISummary(for: run),
+                    "hasStructuredFeed": appModel.hasStructuredFeed(for: run),
+                    "outputLength": run.outputText.count
+                ]
+            )
+        }
     }
 
     private func fixWithAIMenu(for run: RunRecord) -> some View {

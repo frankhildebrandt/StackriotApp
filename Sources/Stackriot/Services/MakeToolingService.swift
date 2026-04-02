@@ -33,7 +33,6 @@ struct MakeToolingService {
     }
 }
 
-@MainActor
 final class RunConfigurationDiscoveryService {
     private struct CachedDiscovery {
         let fingerprint: ProjectFingerprint

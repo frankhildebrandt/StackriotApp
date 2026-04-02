@@ -12,6 +12,17 @@ struct RunConsoleColumn: View {
     var body: some View {
         let worktree = appModel.selectedWorktree(for: repository)
         let worktreeDiscovery = worktree.map { appModel.cachedWorktreeDiscoverySnapshot(for: $0) }
+        let _ = {
+            guard let worktree else { return }
+            appModel.recordSelectionPhase(
+                repositoryID: repository.id,
+                worktreeID: worktree.id,
+                phase: "run-console-column-body",
+                metadata: [
+                    "hasDevContainerConfiguration": worktreeDiscovery?.hasDevContainerConfiguration == true
+                ]
+            )
+        }()
 
         VStack(alignment: .leading, spacing: 0) {
             if let worktree {
@@ -47,6 +58,7 @@ struct RunConsoleColumn: View {
                 let tabs = appModel.visibleTabs(for: worktree, in: repository)
                 let isPlanSelected = appModel.isPrimaryContextTabSelected(for: worktree)
                     || (worktree.isDefaultBranchWorkspace && tabs.isEmpty)
+                let selectedTab = isPlanSelected ? nil : appModel.selectedTab(for: worktree, in: repository)
 
                 TerminalTabStrip(repository: repository, worktree: worktree, tabs: tabs)
 
@@ -61,7 +73,7 @@ struct RunConsoleColumn: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     RunConsoleView(
-                        run: appModel.selectedTab(for: worktree, in: repository),
+                        run: selectedTab,
                         activeRunIDs: appModel.activeRunIDs
                     )
                 }
@@ -78,6 +90,21 @@ struct RunConsoleColumn: View {
         .task(id: worktree?.id) {
             guard let worktree else { return }
             await Task.yield()
+            let tabs = appModel.visibleTabs(for: worktree, in: repository)
+            let isPlanSelected = appModel.isPrimaryContextTabSelected(for: worktree)
+                || (worktree.isDefaultBranchWorkspace && tabs.isEmpty)
+            let selectedTab = isPlanSelected ? nil : appModel.selectedTab(for: worktree, in: repository)
+            appModel.recordSelectionPhase(
+                repositoryID: repository.id,
+                worktreeID: worktree.id,
+                phase: "run-console-column-visible",
+                metadata: [
+                    "tabCount": tabs.count,
+                    "isPlanSelected": isPlanSelected,
+                    "selectedTabID": selectedTab?.id.uuidString ?? "",
+                    "selectedTabOutputLength": selectedTab?.outputText.count ?? 0
+                ]
+            )
             appModel.markRunConsoleVisible(for: repository.id, worktreeID: worktree.id)
         }
         .navigationTitle("Run Console")
@@ -96,11 +123,14 @@ struct RunConsoleColumn: View {
         }
         .task(id: worktree?.id) {
             guard let worktree, worktreeDiscovery?.hasDevContainerConfiguration == true else { return }
-            await appModel.refreshDevContainerState(for: worktree)
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(4))
+                if appModel.shouldRefreshDevContainerImmediately(for: worktree) {
+                    await appModel.refreshDevContainerState(for: worktree)
+                }
+                let interval = appModel.consoleDevContainerPollInterval(for: worktree)
+                try? await Task.sleep(for: .seconds(interval))
                 guard !Task.isCancelled else { return }
-                await appModel.refreshDevContainerState(for: worktree)
+                guard appModel.shouldActivelyPollDevContainer(for: worktree) else { continue }
             }
         }
         .onDisappear {

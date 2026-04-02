@@ -28,6 +28,21 @@ struct WorktreePrimaryContextView: View {
         .sheet(item: $authProvider) { provider in
             EmbeddedBrowserAuthenticationSheet(provider: provider)
         }
+        .task(id: "\(worktree.id.uuidString)-\(appModel.primaryPane(for: worktree).rawValue)") {
+            await Task.yield()
+            let pane = appModel.primaryPane(for: worktree)
+            appModel.recordSelectionPhase(
+                repositoryID: repository.id,
+                worktreeID: worktree.id,
+                phase: "primary-context-visible",
+                metadata: [
+                    "primaryContextTabKind": worktree.primaryContextTabKind.rawValue,
+                    "selectedPane": pane.rawValue,
+                    "hasBrowserContext": worktree.resolvedPrimaryContext != nil,
+                    "isMaterialized": worktree.materializedPath != nil
+                ]
+            )
+        }
     }
 
     @ViewBuilder
