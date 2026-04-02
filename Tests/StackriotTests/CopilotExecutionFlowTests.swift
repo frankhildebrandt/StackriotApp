@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import Testing
 @testable import Stackriot
 
@@ -151,12 +152,77 @@ struct CopilotExecutionFlowTests {
         #expect(draft.promptText == "Keep editing while Copilot runs")
     }
 
+    @MainActor
+    @Test
+    func prepareCopilotPlanningWithIntentBuildsDraftAndDefaultsToAuto() async throws {
+        let discovery = CopilotModelDiscoveryService(
+            runCommand: { _, _, _, _ in
+                CommandResult(
+                    stdout: "",
+                    stderr: #"Error: Invalid value for option "--model" (choices: "gpt-5.4-mini", "claude-sonnet-4.5")"#,
+                    exitCode: 1
+                )
+            },
+            environmentProvider: { [:] }
+        )
+        let appModel = AppModel(services: AppServices(
+            copilotModelDiscovery: discovery,
+            notificationService: NoopNotificationService()
+        ))
+        appModel.availableAgents = [.githubCopilot]
+
+        let repository = makeRepository(name: "CopilotPlanning")
+        let worktree = WorktreeRecord(branchName: "feature/copilot-planning", path: "/tmp/copilot-planning", repository: repository)
+        repository.worktrees = [worktree]
+
+        let modelContext = try makeInMemoryModelContext()
+        appModel.storedModelContext = modelContext
+
+        await appModel.prepareCopilotPlanningWithIntent(
+            for: worktree,
+            in: repository,
+            currentIntentText: "Plan the feature rollout",
+            modelContext: modelContext
+        )
+
+        let draft = try #require(appModel.pendingCopilotExecutionDraft)
+        #expect(draft.purpose == .planning)
+        #expect(draft.tool == .githubCopilot)
+        #expect(draft.promptSourceTitle == "Intent")
+        #expect(draft.promptText == "Plan the feature rollout")
+        #expect(draft.selectedCopilotModelID == CopilotModelOption.auto.id)
+        #expect(draft.availableCopilotModels == [
+            .auto,
+            CopilotModelOption(id: "gpt-5.4-mini", displayName: "gpt-5.4-mini", isAuto: false),
+            CopilotModelOption(id: "claude-sonnet-4.5", displayName: "claude-sonnet-4.5", isAuto: false),
+        ])
+        #expect(draft.modelDiscoveryErrorMessage == nil)
+        #expect(!draft.isLoadingCopilotModels)
+    }
+
     private func makeRepository(name: String) -> ManagedRepository {
         ManagedRepository(
             displayName: name,
             bareRepositoryPath: "/tmp/\(name)",
             defaultBranch: "main"
         )
+    }
+
+    private func makeInMemoryModelContext() throws -> ModelContext {
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: RepositoryNamespace.self,
+            RepositoryProject.self,
+            ManagedRepository.self,
+            RepositoryRemote.self,
+            StoredSSHKey.self,
+            WorktreeRecord.self,
+            ActionTemplateRecord.self,
+            RunRecord.self,
+            AgentRawLogRecord.self,
+            configurations: configuration
+        )
+        return ModelContext(container)
     }
 }
 

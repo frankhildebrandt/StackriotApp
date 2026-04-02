@@ -207,12 +207,44 @@ extension AppModel {
         }
 
         pendingCopilotExecutionDraft = PendingAgentExecutionDraft(
+            purpose: .execution,
             tool: .githubCopilot,
             worktreeID: worktree.id,
             repositoryID: repository.id,
             promptSourceTitle: prompt.sourceTitle,
             promptText: prompt.text,
             activatesTerminalTab: options.activatesTerminalTab,
+            availableCopilotModels: [.auto],
+            selectedCopilotModelID: CopilotModelOption.auto.id,
+            isLoadingCopilotModels: true,
+            modelDiscoveryErrorMessage: nil
+        )
+
+        await reloadPendingCopilotExecutionModels()
+    }
+
+    func prepareCopilotPlanningWithIntent(
+        for worktree: WorktreeRecord,
+        in repository: ManagedRepository,
+        currentIntentText: String,
+        modelContext: ModelContext
+    ) async {
+        guard availableAgents.contains(.githubCopilot) else {
+            pendingErrorMessage = "GitHub Copilot is not available on this machine."
+            return
+        }
+        guard !worktree.isDefaultBranchWorkspace else { return }
+        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil else { return }
+
+        let trimmedIntent = currentIntentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        pendingCopilotExecutionDraft = PendingAgentExecutionDraft(
+            purpose: .planning,
+            tool: .githubCopilot,
+            worktreeID: worktree.id,
+            repositoryID: repository.id,
+            promptSourceTitle: "Intent",
+            promptText: trimmedIntent,
+            activatesTerminalTab: true,
             availableCopilotModels: [.auto],
             selectedCopilotModelID: CopilotModelOption.auto.id,
             isLoadingCopilotModels: true,
@@ -264,13 +296,29 @@ extension AppModel {
 
         pendingCopilotExecutionDraft = nil
         Task {
-            await launchAgentWithPlan(
-                .githubCopilot,
-                for: worktree,
-                in: modelContext,
-                options: options,
-                promptOverride: draft.promptText
-            )
+            switch draft.purpose {
+            case .execution:
+                await launchAgentWithPlan(
+                    .githubCopilot,
+                    for: worktree,
+                    in: modelContext,
+                    options: options,
+                    promptOverride: draft.promptText
+                )
+            case .planning:
+                guard let repository = repositoryRecord(with: draft.repositoryID) else {
+                    pendingErrorMessage = StackriotError.worktreeUnavailable.localizedDescription
+                    return
+                }
+                await startAgentPlanDraft(
+                    using: .githubCopilot,
+                    for: worktree,
+                    in: repository,
+                    currentIntentText: draft.promptText,
+                    modelContext: modelContext,
+                    options: options
+                )
+            }
         }
     }
 
@@ -293,13 +341,30 @@ extension AppModel {
         agentPlanDraftsByWorktreeID[worktreeID]
     }
 
+    func presentAgentPlanDraft(for worktreeID: UUID) {
+        guard agentPlanDraftsByWorktreeID[worktreeID] != nil else { return }
+        if let activeWorktreeID = activeAgentPlanDraftWorktreeID, activeWorktreeID != worktreeID {
+            agentPlanDraftsByWorktreeID[activeWorktreeID]?.presentation = .background
+        }
+        agentPlanDraftsByWorktreeID[worktreeID]?.presentation = .foreground
+        activeAgentPlanDraftWorktreeID = worktreeID
+    }
+
+    func sendAgentPlanDraftToBackground(for worktreeID: UUID) {
+        guard agentPlanDraftsByWorktreeID[worktreeID] != nil else { return }
+        agentPlanDraftsByWorktreeID[worktreeID]?.presentation = .background
+        if activeAgentPlanDraftWorktreeID == worktreeID {
+            activeAgentPlanDraftWorktreeID = nil
+        }
+    }
+
     func dismissPresentedAgentPlanDraft() {
         guard let worktreeID = activeAgentPlanDraftWorktreeID else { return }
         if let draft = agentPlanDraftsByWorktreeID[worktreeID], draft.didImportPlan {
-            activeAgentPlanDraftWorktreeID = nil
+            cleanupAgentPlanDraft(for: worktreeID)
             return
         }
-        cancelAgentPlanDraft(for: worktreeID)
+        sendAgentPlanDraftToBackground(for: worktreeID)
     }
 
     func startAgentPlanDraft(
@@ -307,7 +372,9 @@ extension AppModel {
         for worktree: WorktreeRecord,
         in repository: ManagedRepository,
         currentIntentText: String,
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        presentation: AgentPlanDraft.Presentation = .foreground,
+        options: AgentLaunchOptions = AgentLaunchOptions()
     ) async {
         guard !worktree.isDefaultBranchWorkspace else { return }
         guard tool.supportsPlanning else {
@@ -322,7 +389,9 @@ extension AppModel {
 
         if let existingDraft = agentPlanDraftsByWorktreeID[worktree.id] {
             if activeRunIDs.contains(existingDraft.runID) {
-                activeAgentPlanDraftWorktreeID = worktree.id
+                if presentation == .foreground {
+                    presentAgentPlanDraft(for: worktree.id)
+                }
                 return
             }
             cleanupAgentPlanDraft(for: worktree.id)
@@ -345,7 +414,8 @@ extension AppModel {
             repositoryID: repository.id,
             currentIntentText: currentIntentText,
             existingImplementationPlan: existingImplementation,
-            artifactURLs: artifactURLs
+            artifactURLs: artifactURLs,
+            options: options
         ) else {
             pendingErrorMessage = "\(tool.displayName) planning is not configured."
             return
@@ -367,9 +437,12 @@ extension AppModel {
             issueContext: worktree.issueContext?.nonEmpty ?? worktree.branchName,
             run: run,
             responseFilePath: artifactURLs.response.path,
-            schemaFilePath: artifactURLs.schema.path
+            schemaFilePath: artifactURLs.schema.path,
+            presentation: presentation
         )
-        activeAgentPlanDraftWorktreeID = worktree.id
+        if presentation == .foreground {
+            presentAgentPlanDraft(for: worktree.id)
+        }
     }
 
     func sendAgentPlanReply(_ reply: String, for worktreeID: UUID) {
@@ -457,7 +530,13 @@ extension AppModel {
                 agentPlanDraftsByWorktreeID[worktreeID]?.latestQuestions = response.questions?
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .compactMap(\.nonEmpty) ?? []
-                agentPlanDraftsByWorktreeID[worktreeID]?.importErrorMessage = nil
+                let needsInputMessage = draft.tool.supportsPlanResume
+                    ? nil
+                    : "\(draft.tool.displayName) requested follow-up input, but Stackriot cannot resume this planning session yet."
+                agentPlanDraftsByWorktreeID[worktreeID]?.importErrorMessage = needsInputMessage
+                if draft.presentation == .background {
+                    notifyBackgroundPlanNeedsInput(response, for: draft)
+                }
             case .ready:
                 guard let proposedPlan = response.planMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty else {
                     agentPlanDraftsByWorktreeID[worktreeID]?.importErrorMessage = "\(draft.tool.displayName) reported a completed plan turn but did not return `plan_markdown`."
@@ -481,6 +560,10 @@ extension AppModel {
         switch draft.tool {
         case .codex:
             sessionID = (parser as? CodexExecJSONLParser)?.currentThreadID?.nonEmpty
+        case .claudeCode:
+            sessionID = (parser as? ClaudePrintStreamJSONParser)?.currentSessionID?.nonEmpty
+        case .githubCopilot:
+            sessionID = (parser as? CopilotPromptJSONLParser)?.currentSessionID?.nonEmpty
         case .cursorCLI:
             sessionID = (parser as? CursorAgentPrintJSONParser)?.currentSessionID?.nonEmpty
         default:
@@ -491,12 +574,23 @@ extension AppModel {
             agentPlanDraftsByWorktreeID[worktreeID]?.sessionID = sessionID
         }
 
-        guard draft.tool == .cursorCLI,
-              let responseText = (parser as? CursorAgentPrintJSONParser)?.latestResultText?.nonEmpty,
-              let responseFilePath = draft.responseFilePath?.nonEmpty
-        else {
+        guard let responseFilePath = draft.responseFilePath?.nonEmpty else {
             return
         }
+
+        let responseText: String?
+        switch draft.tool {
+        case .cursorCLI:
+            responseText = (parser as? CursorAgentPrintJSONParser)?.latestResultText?.nonEmpty
+        case .claudeCode:
+            responseText = (parser as? ClaudePrintStreamJSONParser)?.latestAssistantMessageText?.nonEmpty
+        case .githubCopilot:
+            responseText = (parser as? CopilotPromptJSONLParser)?.latestAssistantMessageText?.nonEmpty
+        default:
+            responseText = nil
+        }
+
+        guard let responseText else { return }
 
         do {
             try responseText.write(toFile: responseFilePath, atomically: true, encoding: .utf8)
@@ -537,6 +631,10 @@ extension AppModel {
     private func structuredAgentPlanResponse(forRunID runID: UUID, tool: AIAgentTool) -> AgentPlanResponse? {
         guard let parser = structuredOutputParsersByRunID[runID] else { return nil }
         switch tool {
+        case .claudeCode:
+            return (parser as? ClaudePrintStreamJSONParser)?.latestAssistantMessageText.flatMap(Self.parseAgentPlanResponse(from:))
+        case .githubCopilot:
+            return (parser as? CopilotPromptJSONLParser)?.latestAssistantMessageText.flatMap(Self.parseAgentPlanResponse(from:))
         case .cursorCLI:
             return (parser as? CursorAgentPrintJSONParser)?.latestResultText.flatMap(Self.parseAgentPlanResponse(from:))
         default:
@@ -556,6 +654,9 @@ extension AppModel {
             if activeAgentPlanDraftWorktreeID == worktreeID {
                 activeAgentPlanDraftWorktreeID = nil
             }
+            if let draft = agentPlanDraftsByWorktreeID[worktreeID], draft.presentation == .background {
+                notifyBackgroundPlanImport(for: draft)
+            }
 
             if let session = terminalSessions[runID] {
                 session.terminate()
@@ -566,6 +667,40 @@ extension AppModel {
             agentPlanDraftsByWorktreeID[worktreeID]?.importErrorMessage = error.localizedDescription
             pendingErrorMessage = "Failed to import \(tool.displayName) plan: \(error.localizedDescription)"
         }
+    }
+
+    private func notifyBackgroundPlanImport(for draft: AgentPlanDraft) {
+        notifyOperationSuccess(
+            title: "\(draft.tool.displayName) plan imported",
+            subtitle: draft.branchName,
+            body: "The latest planning run finished in the background and updated the Implementation Plan.",
+            userInfo: [
+                "worktreeID": draft.worktreeID.uuidString,
+                "repositoryID": draft.repositoryID.uuidString,
+                "agentTool": draft.tool.rawValue,
+            ]
+        )
+    }
+
+    private func notifyBackgroundPlanNeedsInput(_ response: AgentPlanResponse, for draft: AgentPlanDraft) {
+        let summary = response.summary?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+            ?? "The planning run stopped for additional input."
+        let body: String
+        if draft.tool.supportsPlanResume {
+            body = "\(summary) Reopen the planning run from the worktree context to answer the follow-up questions."
+        } else {
+            body = "\(summary) Reopen the planning run to review the requested input, then start a fresh planning run after updating the intent."
+        }
+        notifyOperationFailure(
+            title: "\(draft.tool.displayName) planning needs input",
+            subtitle: draft.branchName,
+            body: body,
+            userInfo: [
+                "worktreeID": draft.worktreeID.uuidString,
+                "repositoryID": draft.repositoryID.uuidString,
+                "agentTool": draft.tool.rawValue,
+            ]
+        )
     }
 
     private static let planTimestampFormatter: ISO8601DateFormatter = {
@@ -601,7 +736,8 @@ extension AppModel {
         repositoryID: UUID,
         currentIntentText: String,
         existingImplementationPlan: String?,
-        artifactURLs: (schema: URL, response: URL)
+        artifactURLs: (schema: URL, response: URL),
+        options: AgentLaunchOptions
     ) -> CommandExecutionDescriptor? {
         let prompt = agentPlanPrompt(
             for: tool,
@@ -610,6 +746,26 @@ extension AppModel {
             existingImplementationPlan: existingImplementationPlan
         )
         switch tool {
+        case .claudeCode:
+            guard let components = tool.promptCommandComponents(for: prompt) else { return nil }
+            return CommandExecutionDescriptor(
+                title: "\(tool.displayName) Plan",
+                actionKind: .aiAgent,
+                showsAgentIndicator: false,
+                executable: "claude",
+                arguments: components.arguments,
+                displayCommandLine: components.displayCommandLine,
+                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                repositoryID: repositoryID,
+                worktreeID: worktree.id,
+                runtimeRequirement: nil,
+                stdinText: nil,
+                environment: [:],
+                usesTerminalSession: false,
+                outputInterpreter: .claudePrintStreamJSON,
+                agentTool: tool,
+                initialPrompt: prompt
+            )
         case .codex:
             return CommandExecutionDescriptor(
                 title: "\(tool.displayName) Plan",
@@ -634,6 +790,26 @@ extension AppModel {
                 environment: [:],
                 usesTerminalSession: false,
                 outputInterpreter: .codexExecJSONL,
+                agentTool: tool,
+                initialPrompt: prompt
+            )
+        case .githubCopilot:
+            guard let components = tool.promptCommandComponents(for: prompt, options: options) else { return nil }
+            return CommandExecutionDescriptor(
+                title: "\(tool.displayName) Plan",
+                actionKind: .aiAgent,
+                showsAgentIndicator: false,
+                executable: "copilot",
+                arguments: components.arguments,
+                displayCommandLine: components.displayCommandLine,
+                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+                repositoryID: repositoryID,
+                worktreeID: worktree.id,
+                runtimeRequirement: nil,
+                stdinText: nil,
+                environment: [:],
+                usesTerminalSession: false,
+                outputInterpreter: .copilotPromptJSONL,
                 agentTool: tool,
                 initialPrompt: prompt
             )

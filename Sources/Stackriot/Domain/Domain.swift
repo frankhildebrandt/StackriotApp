@@ -552,7 +552,7 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
 
     var supportsPlanning: Bool {
         switch self {
-        case .codex, .cursorCLI:
+        case .claudeCode, .codex, .githubCopilot, .cursorCLI:
             true
         default:
             false
@@ -560,7 +560,12 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
     }
 
     var supportsPlanResume: Bool {
-        supportsPlanning
+        switch self {
+        case .codex, .cursorCLI:
+            true
+        default:
+            false
+        }
     }
 
     func launchCommand(in path: String) -> String {

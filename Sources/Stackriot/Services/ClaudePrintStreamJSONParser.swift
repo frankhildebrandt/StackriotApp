@@ -1,6 +1,9 @@
 import Foundation
 
 final class ClaudePrintStreamJSONParser: StructuredAgentOutputParsing {
+    var currentSessionID: String?
+    var latestAssistantMessageText: String?
+
     private var bufferedLine = ""
     private var nextTransientSegmentIndex = 0
     private var segmentRevisions: [String: Int] = [:]
@@ -37,6 +40,9 @@ final class ClaudePrintStreamJSONParser: StructuredAgentOutputParsing {
         guard let object = StructuredAgentOutputParserSupport.jsonObject(from: line) else {
             return fallbackChunk(line: line)
         }
+
+        currentSessionID = StructuredAgentOutputParserSupport.firstString(in: object, keys: ["session_id", "sessionId"])
+            ?? currentSessionID
 
         let type = StructuredAgentOutputParserSupport.firstString(in: object, keys: ["type", "event", "kind"]) ?? "event"
 
@@ -77,6 +83,7 @@ final class ClaudePrintStreamJSONParser: StructuredAgentOutputParsing {
         guard let text = extractText(from: object) else { return nil }
         let segmentID = stableSegmentID(for: object, fallbackPrefix: "claude-message")
         let bodyText = mergedText(text, for: segmentID, store: &bodyTextByID)
+        latestAssistantMessageText = bodyText.nonEmpty ?? latestAssistantMessageText
         let segment = makeSegment(
             id: segmentID,
             kind: .agentMessage,

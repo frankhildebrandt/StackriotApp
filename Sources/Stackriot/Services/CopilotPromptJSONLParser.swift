@@ -1,6 +1,9 @@
 import Foundation
 
 final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
+    var currentSessionID: String?
+    var latestAssistantMessageText: String?
+
     private static let ignoredEventTypes: Set<String> = [
         "session.background_tasks_changed",
         "session.mcp_servers_loaded",
@@ -49,6 +52,11 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
             return fallbackChunk(line: line)
         }
 
+        let payload = eventPayload(from: object)
+        currentSessionID = StructuredAgentOutputParserSupport.firstString(in: payload, keys: ["session_id", "sessionId", "conversation_id", "conversationId"])
+            ?? StructuredAgentOutputParserSupport.firstString(in: object, keys: ["session_id", "sessionId", "conversation_id", "conversationId", "chat_id", "chatId", "id"])
+            ?? currentSessionID
+
         let type = StructuredAgentOutputParserSupport.firstString(in: object, keys: ["type", "event", "kind"]) ?? "event"
         let normalizedType = type.lowercased()
 
@@ -89,6 +97,21 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
     private func renderAssistantMessageIfNeeded(type: String, object: [String: Any]) -> StructuredAgentOutputChunk? {
         let normalizedType = type.lowercased()
         let payload = eventPayload(from: object)
+        if normalizedType == "result",
+           let text = StructuredAgentOutputParserSupport.firstString(in: object, keys: ["result"])
+        {
+            let segmentID = stableSegmentID(for: object, fallbackPrefix: "copilot-result")
+            let bodyText = mergedText(text, for: segmentID, store: &bodyTextByID)
+            latestAssistantMessageText = bodyText.nonEmpty ?? latestAssistantMessageText
+            let segment = makeSegment(
+                id: segmentID,
+                kind: .agentMessage,
+                title: "Final answer",
+                bodyText: bodyText,
+                groupID: currentSessionID
+            )
+            return StructuredAgentOutputChunk(renderedText: "[copilot] \(text)\n", segments: [segment])
+        }
         let legacyRole = StructuredAgentOutputParserSupport.firstString(in: object, keys: ["role", "speaker"])
         let isLegacyAssistantMessage = (legacyRole?.lowercased() == "assistant")
             || normalizedType == "assistant_message"
@@ -138,6 +161,7 @@ final class CopilotPromptJSONLParser: StructuredAgentOutputParsing {
             store: &bodyTextByID,
             isDelta: normalizedType.contains("delta")
         )
+        latestAssistantMessageText = bodyText.nonEmpty ?? latestAssistantMessageText
         chunk.segments.append(
             makeSegment(
                 id: segmentID,

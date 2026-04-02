@@ -9,7 +9,7 @@ struct PendingCopilotExecutionSheet: View {
 
         VStack(alignment: .leading, spacing: 16) {
             if let draft = appModel.pendingCopilotExecutionDraft {
-                Text(draft.activatesTerminalTab ? "Execute with GitHub Copilot" : "Send to Background with GitHub Copilot")
+                Text(draft.activatesTerminalTab ? draft.purpose.title : draft.purpose.backgroundTitle)
                     .font(.title3.weight(.semibold))
 
                 Text(executionDescription(for: draft))
@@ -62,7 +62,7 @@ struct PendingCopilotExecutionSheet: View {
                         }
                     }
 
-                    Button(draft.activatesTerminalTab ? "Execute" : "Send to Background") {
+                    Button(primaryActionTitle(for: draft)) {
                         appModel.executePendingCopilotExecution(in: modelContext)
                     }
                     .keyboardShortcut(.defaultAction)
@@ -78,9 +78,23 @@ struct PendingCopilotExecutionSheet: View {
 
     private func executionDescription(for draft: PendingAgentExecutionDraft) -> String {
         let sourceTitle = draft.promptSourceTitle.lowercased()
-        if draft.activatesTerminalTab {
-            return "Run the current \(sourceTitle) with GitHub Copilot."
+        switch draft.purpose {
+        case .execution:
+            if draft.activatesTerminalTab {
+                return "Run the current \(sourceTitle) with GitHub Copilot."
+            }
+            return "Run the current \(sourceTitle) with GitHub Copilot in the background while keeping the plan open."
+        case .planning:
+            return "Create an implementation plan from the current \(sourceTitle) with GitHub Copilot."
         }
-        return "Run the current \(sourceTitle) with GitHub Copilot in the background while keeping the plan open."
+    }
+
+    private func primaryActionTitle(for draft: PendingAgentExecutionDraft) -> String {
+        switch draft.purpose {
+        case .execution:
+            draft.activatesTerminalTab ? "Execute" : "Send to Background"
+        case .planning:
+            "Create Plan"
+        }
     }
 }
