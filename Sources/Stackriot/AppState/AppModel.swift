@@ -33,8 +33,6 @@ final class AppModel: @unchecked Sendable {
     var pendingErrorMessage: String?
     var worktreeStatuses: [UUID: WorktreeStatus] = [:]
     var pullRequestUpstreamStatuses: [UUID: PullRequestUpstreamStatus] = [:]
-    var worktreePendingMergeOfferID: UUID?
-    var pendingIntegrationConflict: IntegrationConflictDraft?
     var syncLogs: [UUID: String] = [:]
     var activeRunIDs: Set<UUID> = []
     var refreshingRepositoryIDs: Set<UUID> = []
@@ -43,10 +41,6 @@ final class AppModel: @unchecked Sendable {
     var isPullRequestCheckoutSheetPresented = false
     var isDiffInspectorPresented = false
     var remoteManagementRepositoryID: UUID?
-    var pendingRepositoryDeletionID: UUID?
-    var pendingNamespaceDeletionID: UUID?
-    var pendingProjectDeletionID: UUID?
-    var pendingTerminalCloseConfirmation: TerminalCloseConfirmationDraft?
     var publishDraft = PublishBranchDraft()
     var integrationDraft = IntegrationDraft()
     var nodeRuntimeStatus = NodeRuntimeStatusSnapshot(
@@ -314,10 +308,6 @@ final class AppModel: @unchecked Sendable {
         terminalSessions[run.id] = nil
     }
 
-    func clearPendingTerminalCloseConfirmation() {
-        pendingTerminalCloseConfirmation = nil
-    }
-
     func reopenTab(_ run: RunRecord) {
         guard let worktreeID = run.worktree?.id else { return }
         if let repositoryID = run.repository?.id {
@@ -410,14 +400,6 @@ final class AppModel: @unchecked Sendable {
 
     func dismissRemoteManagement() {
         remoteManagementRepositoryID = nil
-    }
-
-    func requestRepositoryDeletion(_ repository: ManagedRepository) {
-        pendingRepositoryDeletionID = repository.id
-    }
-
-    func clearRepositoryDeletionRequest() {
-        pendingRepositoryDeletionID = nil
     }
 
     func presentPublishSheet(for repository: ManagedRepository, worktree: WorktreeRecord) {

@@ -84,8 +84,6 @@ struct RepositoryDetailView: View {
     @Environment(\.modelContext) private var modelContext
 
     let repository: ManagedRepository
-    @State private var worktreePendingRemoval: WorktreeRemovalDraft?
-    @State private var worktreePendingMove: WorktreeMoveDraft?
     @State private var removingWorktreeIDs: Set<UUID> = []
     @State private var movingWorktreeIDs: Set<UUID> = []
     @State private var isRefreshingStatuses = false
@@ -141,85 +139,6 @@ struct RepositoryDetailView: View {
                     initialBranchName: integrationTargetBranchName
                 )
             }
-        }
-        .confirmationDialog("Remove worktree?", item: $worktreePendingRemoval) { worktree in
-            Button("Remove", role: .destructive) {
-                worktreePendingRemoval = nil
-                if let record = appModel.worktreeRecord(with: worktree.id) {
-                    removeWorktree(record)
-                }
-            }
-        } message: { worktree in
-            Text("""
-            This removes the local worktree at \(worktree.path).
-            Open tabs and local run history for this worktree will be cleaned up, while the bare repository and remote branch stay untouched.
-            """)
-        }
-        .confirmationDialog("Worktree verschieben?", item: $worktreePendingMove) { draft in
-            Button("Verschieben") {
-                worktreePendingMove = nil
-                if let record = appModel.worktreeRecord(with: draft.id) {
-                    moveWorktree(record, to: draft.destinationRoot)
-                }
-            }
-            Button("Abbrechen", role: .cancel) {
-                worktreePendingMove = nil
-            }
-        } message: { draft in
-            Text(worktreeMoveConfirmationMessage(for: draft))
-        }
-        .alert("Rebase fehlgeschlagen", isPresented: Binding(
-            get: { appModel.worktreePendingMergeOfferID != nil },
-            set: { newValue in
-                if !newValue {
-                    appModel.worktreePendingMergeOfferID = nil
-                }
-            }
-        )) {
-            Button("Merge versuchen") {
-                if
-                    let worktreeID = appModel.worktreePendingMergeOfferID,
-                    let worktree = appModel.worktreeRecord(with: worktreeID)
-                {
-                    Task {
-                        await appModel.syncWorktreeFromMain(
-                            worktree,
-                            repository: repository,
-                            strategy: .merge,
-                            modelContext: modelContext
-                        )
-                    }
-                }
-            }
-            Button("Abbrechen", role: .cancel) {
-                appModel.worktreePendingMergeOfferID = nil
-            }
-        } message: {
-            Text("Der Rebase von \(repository.defaultBranch) konnte nicht abgeschlossen werden. Möchtest du stattdessen einen Merge versuchen?")
-        }
-        .confirmationDialog("Merge-Konflikte auflösen", isPresented: Binding(
-            get: { appModel.pendingIntegrationConflict != nil },
-            set: { newValue in
-                if !newValue {
-                    appModel.pendingIntegrationConflict = nil
-                }
-            }
-        ), presenting: appModel.pendingIntegrationConflict) { draft in
-            ForEach(availableAgents) { tool in
-                Button("Mit \(tool.displayName)") {
-                    Task {
-                        await appModel.launchConflictResolutionAgent(tool, for: draft, in: modelContext)
-                    }
-                }
-            }
-            Button("Abbrechen", role: .cancel) {
-                appModel.pendingIntegrationConflict = nil
-            }
-        } message: { draft in
-            Text("""
-            Beim Integrieren von \(draft.sourceBranch) in \(draft.defaultBranch) sind Konflikte entstanden.
-            Wähle einen Agenten, der die Konflikte löst und den Commit `\(draft.commitMessage)` erstellt.
-            """)
         }
     }
 
@@ -332,19 +251,8 @@ struct RepositoryDetailView: View {
         return (appModel.activeRunIDs.isEmpty && !hasActiveDevContainers) ? "list.bullet.circle" : "list.bullet.circle.fill"
     }
 
-    private func worktreeMoveConfirmationMessage(for draft: WorktreeMoveDraft) -> String {
-        "\(draft.branchName) wird nach \(draft.destinationPath) verschoben.\n" +
-            "Branch, Run-Historie und Zuordnung bleiben erhalten, nur der lokale Pfad wird aktualisiert."
-    }
-
     private var selectedWorktree: WorktreeRecord? {
         appModel.selectedWorktree(for: repository)
-    }
-
-    private var availableAgents: [AIAgentTool] {
-        AIAgentTool.allCases.filter { tool in
-            tool != .none && appModel.availableAgents.contains(tool)
-        }
     }
 
     private func autoSyncAvailable(for worktree: WorktreeRecord) -> Bool {
@@ -678,7 +586,7 @@ struct RepositoryDetailView: View {
                 }
                 Divider()
                 Button("Remove Worktree", role: .destructive) {
-                    worktreePendingRemoval = WorktreeRemovalDraft(id: worktree.id, path: worktree.displayPath ?? worktree.branchName)
+                    removeWorktree(worktree)
                 }
                 .disabled(isRemovingWorktree(worktree))
             }
@@ -718,13 +626,7 @@ struct RepositoryDetailView: View {
             return
         }
 
-        let destinationPath = destinationRoot.appendingPathComponent(worktree.branchName, isDirectory: true).path
-        worktreePendingMove = WorktreeMoveDraft(
-            id: worktree.id,
-            branchName: worktree.branchName,
-            destinationRoot: destinationRoot,
-            destinationPath: destinationPath
-        )
+        moveWorktree(worktree, to: destinationRoot)
     }
 
     private func showsIntegrationButton(for worktree: WorktreeRecord) -> Bool {
@@ -1319,11 +1221,4 @@ private struct ActiveDevContainerRow: View {
             }
         }
     }
-}
-
-private struct WorktreeMoveDraft: Identifiable {
-    let id: UUID
-    let branchName: String
-    let destinationRoot: URL
-    let destinationPath: String
 }

@@ -33,11 +33,17 @@ extension AppModel {
     func deleteRawLog(_ record: AgentRawLogRecord, in modelContext: ModelContext) async {
         guard record.status != .running else {
             pendingErrorMessage = "Active RAW logs can only be deleted after the run has finished."
+            notifyOperationFailure(
+                title: "RAW log deletion failed",
+                subtitle: record.title,
+                body: "Active RAW logs can only be deleted after the run has finished."
+            )
             return
         }
 
         let logURL = record.logFileURL
         let runID = record.runID
+        let title = record.title
 
         do {
             try await Task.detached(priority: .utility) {
@@ -62,8 +68,18 @@ extension AppModel {
             }
             modelContext.delete(record)
             try modelContext.save()
+            notifyOperationSuccess(
+                title: "RAW log deleted",
+                subtitle: title,
+                body: "The archived log file and its metadata were removed."
+            )
         } catch {
             pendingErrorMessage = "RAW log could not be deleted: \(error.localizedDescription)"
+            notifyOperationFailure(
+                title: "RAW log deletion failed",
+                subtitle: title,
+                body: error.localizedDescription
+            )
         }
     }
 }

@@ -16,7 +16,6 @@ struct RawLogBrowserWindow: View {
     @State private var selectedLogID: UUID?
     @State private var logText = ""
     @State private var logLoadError: String?
-    @State private var pendingDeletion: AgentRawLogRecord?
 
     private let allProjectsLabel = "Alle Projekte"
     private let allRepositoriesLabel = "Alle Repositories"
@@ -99,21 +98,6 @@ struct RawLogBrowserWindow: View {
         .onChange(of: rawLogs.count) { _, _ in ensureSelection() }
         .task(id: selectedRecord?.id) {
             await reloadSelectedLog()
-        }
-        .confirmationDialog("RAW-Log loeschen?", item: $pendingDeletion) { record in
-            Button("Loeschen", role: .destructive) {
-                let deletedID = record.id
-                Task {
-                    await appModel.deleteRawLog(record, in: modelContext)
-                    if selectedLogID == deletedID {
-                        selectedLogID = filteredLogs.first(where: { $0.id != deletedID })?.id
-                    }
-                    await reloadRawLogsFromStore()
-                }
-            }
-            Button("Abbrechen", role: .cancel) {}
-        } message: { record in
-            Text("Die archivierte Datei und ihre Metadaten fuer \(record.title) werden entfernt. Der urspruengliche RunRecord bleibt erhalten.")
         }
         .alert("Stackriot", isPresented: Binding(
             get: { appModel.pendingErrorMessage != nil },
@@ -261,7 +245,14 @@ struct RawLogBrowserWindow: View {
                     }
 
                     Button(role: .destructive) {
-                        pendingDeletion = record
+                        let deletedID = record.id
+                        Task {
+                            await appModel.deleteRawLog(record, in: modelContext)
+                            if selectedLogID == deletedID {
+                                selectedLogID = filteredLogs.first(where: { $0.id != deletedID })?.id
+                            }
+                            await reloadRawLogsFromStore()
+                        }
                     } label: {
                         Label("Loeschen", systemImage: "trash")
                     }

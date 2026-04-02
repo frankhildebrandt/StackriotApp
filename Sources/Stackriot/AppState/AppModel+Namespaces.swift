@@ -92,22 +92,6 @@ extension AppModel {
         projectEditorDraft = nil
     }
 
-    func requestNamespaceDeletion(_ namespace: RepositoryNamespace) {
-        pendingNamespaceDeletionID = namespace.id
-    }
-
-    func clearNamespaceDeletionRequest() {
-        pendingNamespaceDeletionID = nil
-    }
-
-    func requestProjectDeletion(_ project: RepositoryProject) {
-        pendingProjectDeletionID = project.id
-    }
-
-    func clearProjectDeletionRequest() {
-        pendingProjectDeletionID = nil
-    }
-
     func saveNamespace(name: String, editing namespace: RepositoryNamespace?, in modelContext: ModelContext) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
@@ -166,6 +150,11 @@ extension AppModel {
     func deleteNamespace(_ namespace: RepositoryNamespace, in modelContext: ModelContext) {
         guard !namespace.isDefault else {
             pendingErrorMessage = "The default namespace cannot be deleted."
+            notifyOperationFailure(
+                title: "Namespace deletion failed",
+                subtitle: namespace.name,
+                body: "The default namespace cannot be deleted."
+            )
             return
         }
 
@@ -194,9 +183,14 @@ extension AppModel {
             selectedNamespaceID = fallbackNamespace.id
         }
 
+        let namespaceName = namespace.name
         modelContext.delete(namespace)
         save(modelContext)
-        clearNamespaceDeletionRequest()
+        notifyOperationSuccess(
+            title: "Namespace deleted",
+            subtitle: namespaceName,
+            body: "Projects were removed and repositories moved to \(Self.defaultNamespaceName)."
+        )
     }
 
     func deleteProject(_ project: RepositoryProject, in modelContext: ModelContext) {
@@ -212,9 +206,14 @@ extension AppModel {
             repository.updatedAt = Date.now
         }
 
+        let projectName = project.name
         modelContext.delete(project)
         save(modelContext)
-        clearProjectDeletionRequest()
+        notifyOperationSuccess(
+            title: "Project deleted",
+            subtitle: projectName,
+            body: "Repositories were moved to \(Self.defaultNamespaceName) without a project."
+        )
     }
 
     func moveProject(_ project: RepositoryProject, to namespace: RepositoryNamespace, in modelContext: ModelContext) {

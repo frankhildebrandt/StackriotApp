@@ -65,12 +65,13 @@ extension AppModel {
 
     func removeRemote(_ remote: RepositoryRemote, from repository: ManagedRepository, in modelContext: ModelContext) async {
         do {
+            let remoteName = remote.name
             try await services.repositoryManager.removeRemote(
-                name: remote.name,
+                name: remoteName,
                 bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath)
             )
             modelContext.delete(remote)
-            if repository.defaultRemoteName == remote.name {
+            if repository.defaultRemoteName == remoteName {
                 repository.defaultRemoteName = repository.remotes
                     .filter { $0.id != remote.id }
                     .sorted {
@@ -83,8 +84,20 @@ extension AppModel {
             }
             repository.updatedAt = .now
             try modelContext.save()
+            notifyOperationSuccess(
+                title: "Remote removed",
+                subtitle: repository.displayName,
+                body: "\(remoteName) was removed from the repository.",
+                userInfo: ["repositoryID": repository.id.uuidString]
+            )
         } catch {
             pendingErrorMessage = error.localizedDescription
+            notifyOperationFailure(
+                title: "Remote removal failed",
+                subtitle: repository.displayName,
+                body: error.localizedDescription,
+                userInfo: ["repositoryID": repository.id.uuidString]
+            )
         }
     }
 
@@ -107,6 +120,8 @@ extension AppModel {
     }
 
     func removeSSHKey(_ key: StoredSSHKey, in modelContext: ModelContext) {
+        let keyName = key.displayName
+        let remoteCount = key.remotes.count
         for remote in key.remotes {
             remote.sshKey = nil
             remote.updatedAt = .now
@@ -114,6 +129,13 @@ extension AppModel {
         KeychainSSHKeyStore.delete(reference: key.privateKeyRef)
         modelContext.delete(key)
         save(modelContext)
+        notifyOperationSuccess(
+            title: "SSH key deleted",
+            subtitle: keyName,
+            body: remoteCount == 0
+                ? "The key was removed from Stackriot."
+                : "The key was removed and \(remoteCount) remote assignment\(remoteCount == 1 ? "" : "s") were cleared."
+        )
     }
 
     func publishSelectedBranch(in modelContext: ModelContext) async {
