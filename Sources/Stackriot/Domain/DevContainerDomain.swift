@@ -72,6 +72,92 @@ enum DevContainerOperation: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum DevContainerResolvedCLIKind: String, Codable, Sendable {
+    case devcontainerCLI
+    case npx
+
+    var displayName: String {
+        switch self {
+        case .devcontainerCLI:
+            "devcontainer CLI"
+        case .npx:
+            "npx @devcontainers/cli"
+        }
+    }
+}
+
+enum DevContainerDiagnosticIssue: String, Codable, Sendable {
+    case featureDisabled
+    case dockerMissing
+    case dockerUnreachable
+    case cliUnavailable
+    case noConfiguration
+    case containerUnreachable
+
+    var displayTitle: String {
+        switch self {
+        case .featureDisabled:
+            "Disabled in Settings"
+        case .dockerMissing:
+            "Docker CLI Missing"
+        case .dockerUnreachable:
+            "Docker Not Reachable"
+        case .cliUnavailable:
+            "Devcontainer CLI Missing"
+        case .noConfiguration:
+            "No Devcontainer Configuration"
+        case .containerUnreachable:
+            "Container Not Reachable"
+        }
+    }
+}
+
+struct DevContainerToolingStatus: Equatable, Sendable {
+    var isFeatureEnabled: Bool
+    var cliStrategy: DevContainerCLIStrategy
+    var dockerInstalled: Bool
+    var devcontainerInstalled: Bool
+    var npxInstalled: Bool
+    var resolvedCLI: DevContainerResolvedCLIKind?
+
+    init(
+        isFeatureEnabled: Bool = AppPreferences.devContainerEnabled,
+        cliStrategy: DevContainerCLIStrategy = AppPreferences.devContainerCLIStrategy,
+        dockerInstalled: Bool = false,
+        devcontainerInstalled: Bool = false,
+        npxInstalled: Bool = false,
+        resolvedCLI: DevContainerResolvedCLIKind? = nil
+    ) {
+        self.isFeatureEnabled = isFeatureEnabled
+        self.cliStrategy = cliStrategy
+        self.dockerInstalled = dockerInstalled
+        self.devcontainerInstalled = devcontainerInstalled
+        self.npxInstalled = npxInstalled
+        self.resolvedCLI = resolvedCLI
+    }
+
+    var isCLIAvailable: Bool {
+        resolvedCLI != nil
+    }
+
+    var missingRequiredTools: [String] {
+        var tools: [String] = []
+        if !dockerInstalled {
+            tools.append("docker")
+        }
+        if !isCLIAvailable {
+            tools.append("devcontainer")
+        }
+        return tools
+    }
+
+    var summaryLine: String {
+        let docker = dockerInstalled ? "docker" : "docker missing"
+        let cli = resolvedCLI?.displayName ?? "no devcontainer CLI"
+        return "\(docker) · \(cli)"
+    }
+}
+
 struct DevContainerConfiguration: Equatable, Sendable {
     let workspaceFolderURL: URL
     let configFileURL: URL
@@ -102,6 +188,8 @@ struct DevContainerWorkspaceSnapshot: Equatable, Sendable {
     var containerCount: Int
     var detailsErrorMessage: String?
     var lastUpdatedAt: Date?
+    var toolingStatus: DevContainerToolingStatus
+    var diagnosticIssue: DevContainerDiagnosticIssue?
 
     init(
         configuration: DevContainerConfiguration?,
@@ -112,7 +200,9 @@ struct DevContainerWorkspaceSnapshot: Equatable, Sendable {
         resourceUsage: DevContainerResourceUsage? = nil,
         containerCount: Int = 0,
         detailsErrorMessage: String? = nil,
-        lastUpdatedAt: Date? = nil
+        lastUpdatedAt: Date? = nil,
+        toolingStatus: DevContainerToolingStatus = DevContainerToolingStatus(),
+        diagnosticIssue: DevContainerDiagnosticIssue? = nil
     ) {
         self.configuration = configuration
         self.runtimeStatus = runtimeStatus
@@ -123,6 +213,8 @@ struct DevContainerWorkspaceSnapshot: Equatable, Sendable {
         self.containerCount = containerCount
         self.detailsErrorMessage = detailsErrorMessage
         self.lastUpdatedAt = lastUpdatedAt
+        self.toolingStatus = toolingStatus
+        self.diagnosticIssue = diagnosticIssue
     }
 
     var hasConfiguration: Bool {
@@ -131,6 +223,10 @@ struct DevContainerWorkspaceSnapshot: Equatable, Sendable {
 
     var hasContainer: Bool {
         containerID != nil || containerCount > 0
+    }
+
+    var canOpenTerminal: Bool {
+        runtimeStatus == .running && containerID?.nonEmpty != nil
     }
 }
 
@@ -147,6 +243,8 @@ struct DevContainerWorkspaceState: Equatable, Sendable {
     var activeOperation: DevContainerOperation?
     var logs: String
     var isLogStreaming: Bool
+    var toolingStatus: DevContainerToolingStatus
+    var diagnosticIssue: DevContainerDiagnosticIssue?
 
     init(
         configuration: DevContainerConfiguration? = nil,
@@ -160,7 +258,9 @@ struct DevContainerWorkspaceState: Equatable, Sendable {
         lastUpdatedAt: Date? = nil,
         activeOperation: DevContainerOperation? = nil,
         logs: String = "",
-        isLogStreaming: Bool = false
+        isLogStreaming: Bool = false,
+        toolingStatus: DevContainerToolingStatus = DevContainerToolingStatus(),
+        diagnosticIssue: DevContainerDiagnosticIssue? = nil
     ) {
         self.configuration = configuration
         self.runtimeStatus = runtimeStatus
@@ -174,6 +274,8 @@ struct DevContainerWorkspaceState: Equatable, Sendable {
         self.activeOperation = activeOperation
         self.logs = logs
         self.isLogStreaming = isLogStreaming
+        self.toolingStatus = toolingStatus
+        self.diagnosticIssue = diagnosticIssue
     }
 
     init(snapshot: DevContainerWorkspaceSnapshot) {
@@ -186,7 +288,9 @@ struct DevContainerWorkspaceState: Equatable, Sendable {
             resourceUsage: snapshot.resourceUsage,
             containerCount: snapshot.containerCount,
             detailsErrorMessage: snapshot.detailsErrorMessage,
-            lastUpdatedAt: snapshot.lastUpdatedAt
+            lastUpdatedAt: snapshot.lastUpdatedAt,
+            toolingStatus: snapshot.toolingStatus,
+            diagnosticIssue: snapshot.diagnosticIssue
         )
     }
 
@@ -207,23 +311,27 @@ struct DevContainerWorkspaceState: Equatable, Sendable {
     }
 
     var canStart: Bool {
-        hasConfiguration && !isBusy && !isRunning
+        toolingStatus.isFeatureEnabled && hasConfiguration && !isBusy && !isRunning
     }
 
     var canStop: Bool {
-        hasContainer && isRunning && !isBusy
+        toolingStatus.isFeatureEnabled && hasContainer && isRunning && !isBusy
     }
 
     var canRestart: Bool {
-        hasConfiguration && hasContainer && !isBusy
+        toolingStatus.isFeatureEnabled && hasConfiguration && hasContainer && !isBusy
     }
 
     var canRebuild: Bool {
-        hasConfiguration && !isBusy
+        toolingStatus.isFeatureEnabled && hasConfiguration && !isBusy
     }
 
     var canDelete: Bool {
-        hasContainer && !isBusy
+        toolingStatus.isFeatureEnabled && hasContainer && !isBusy
+    }
+
+    var canOpenTerminal: Bool {
+        toolingStatus.isFeatureEnabled && isRunning && containerID?.nonEmpty != nil && !isBusy
     }
 
     mutating func apply(snapshot: DevContainerWorkspaceSnapshot) {
@@ -236,5 +344,31 @@ struct DevContainerWorkspaceState: Equatable, Sendable {
         containerCount = snapshot.containerCount
         detailsErrorMessage = snapshot.detailsErrorMessage
         lastUpdatedAt = snapshot.lastUpdatedAt
+        toolingStatus = snapshot.toolingStatus
+        diagnosticIssue = snapshot.diagnosticIssue
+    }
+}
+
+struct DevContainerGlobalSummary: Identifiable, Equatable, Sendable {
+    let worktreeID: UUID
+    let repositoryID: UUID
+    let namespaceName: String
+    let repositoryName: String
+    let worktreeName: String
+    let runtimeStatus: DevContainerRuntimeStatus
+    let containerName: String?
+    let containerID: String?
+    let imageName: String?
+    let resourceUsage: DevContainerResourceUsage?
+    let activeOperation: DevContainerOperation?
+    let detailsErrorMessage: String?
+    let toolingStatus: DevContainerToolingStatus
+    let diagnosticIssue: DevContainerDiagnosticIssue?
+    let lastUpdatedAt: Date?
+
+    var id: UUID { worktreeID }
+
+    var isActive: Bool {
+        activeOperation != nil || runtimeStatus == .running
     }
 }

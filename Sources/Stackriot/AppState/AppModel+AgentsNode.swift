@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 extension AppModel {
-    private func materializedWorktreeContext(
+    func materializedWorktreeContext(
         for worktree: WorktreeRecord,
         in modelContext: ModelContext
     ) async -> (repository: ManagedRepository, url: URL)? {
@@ -535,6 +535,23 @@ extension AppModel {
                 guard let repository = self.selectedRepository(), self.storedModelContext != nil else { continue }
                 await self.refreshWorktreeStatuses(for: repository)
                 self.lastWorktreeStatusPollAt = Date.now
+            }
+        }
+    }
+
+    func startDevContainerMonitoringLoopIfNeeded() {
+        guard devContainerMonitoringTask == nil else { return }
+
+        devContainerMonitoringTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                let interval = AppPreferences.devContainerMonitoringInterval
+                try? await Task.sleep(for: .seconds(interval))
+                if Task.isCancelled {
+                    return
+                }
+                guard AppPreferences.devContainerMonitoringEnabled else { continue }
+                await self.refreshAllDevContainerStates()
             }
         }
     }

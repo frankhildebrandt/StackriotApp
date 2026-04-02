@@ -53,6 +53,8 @@ private struct SidebarRepositoryLayout {
 }
 
 struct SidebarView: View {
+    @Environment(AppModel.self) private var appModel
+
     let namespaces: [RepositoryNamespace]
     let projects: [RepositoryProject]
     let currentNamespace: RepositoryNamespace?
@@ -116,7 +118,8 @@ struct SidebarView: View {
                                     RepositoryRow(
                                         repository: repository,
                                         isRefreshing: refreshingRepositoryIDs.contains(repository.id),
-                                        isAgentRunning: isAgentRunningForRepository(repository)
+                                        isAgentRunning: isAgentRunningForRepository(repository),
+                                        activeDevContainerCount: AppPreferences.devContainerGlobalVisibilityEnabled ? appModel.activeDevContainerCount(in: repository) : 0
                                     )
                                     .padding(.leading, 18)
                                     .tag(repository.id)
@@ -140,7 +143,8 @@ struct SidebarView: View {
                         RepositoryRow(
                             repository: repository,
                             isRefreshing: refreshingRepositoryIDs.contains(repository.id),
-                            isAgentRunning: isAgentRunningForRepository(repository)
+                            isAgentRunning: isAgentRunningForRepository(repository),
+                            activeDevContainerCount: AppPreferences.devContainerGlobalVisibilityEnabled ? appModel.activeDevContainerCount(in: repository) : 0
                         )
                         .tag(repository.id)
                         .draggable(SidebarDragItem(kind: .repository, id: repository.id))
@@ -380,6 +384,7 @@ private struct RepositoryRow: View {
     let repository: ManagedRepository
     let isRefreshing: Bool
     let isAgentRunning: Bool
+    let activeDevContainerCount: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -388,6 +393,11 @@ private struct RepositoryRow: View {
                     .font(.headline)
                 if isAgentRunning {
                     AgentActivityDot()
+                }
+                if activeDevContainerCount > 0 {
+                    Label("\(activeDevContainerCount)", systemImage: "shippingbox.fill")
+                        .font(.caption)
+                        .foregroundStyle(.blue)
                 }
             }
             Text(repository.defaultRemote?.url ?? repository.remoteURL ?? "No remote configured")

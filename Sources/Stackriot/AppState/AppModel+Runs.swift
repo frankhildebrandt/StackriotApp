@@ -439,7 +439,7 @@ extension AppModel {
     }
 
     func shouldKeepCompletedRunVisible(_ run: RunRecord) -> Bool {
-        run.actionKind == .aiAgent || run.isFixableBuildFailure
+        run.actionKind == .aiAgent || run.actionKind == .devContainer || run.isFixableBuildFailure
     }
 
     func cancelAutoHide(for runID: UUID) {
@@ -454,7 +454,7 @@ extension AppModel {
                 self.handleRunOutput(runID: runID, chunk: merged)
             }
 
-            if descriptor.actionKind == .aiAgent && descriptor.usesTerminalSession {
+            if descriptor.usesTerminalSession {
                 let environment = await ShellEnvironment.resolvedEnvironment(
                     additional: [
                         "TERM": "xterm-256color",

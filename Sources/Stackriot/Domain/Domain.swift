@@ -39,10 +39,30 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     case npmScript
     case installDependencies
     case aiAgent
+    case devContainer
     case gitOperation
     case runConfiguration
 
     var id: String { rawValue }
+}
+
+enum DevContainerCLIStrategy: String, Codable, CaseIterable, Identifiable, Sendable {
+    case auto
+    case devcontainerCLI
+    case npx
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .auto:
+            "Auto"
+        case .devcontainerCLI:
+            "devcontainer CLI"
+        case .npx:
+            "npx @devcontainers/cli"
+        }
+    }
 }
 
 enum AIProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -1308,6 +1328,11 @@ enum AppPreferences {
     static let mcpListenAddressKey = "mcp.listenAddress"
     static let mcpPortKey = "mcp.port"
     static let mcpExposeReadOnlyToolsOnlyKey = "mcp.readOnlyOnly"
+    static let devContainerEnabledKey = "devcontainer.enabled"
+    static let devContainerCLIStrategyKey = "devcontainer.cliStrategy"
+    static let devContainerMonitoringEnabledKey = "devcontainer.monitoringEnabled"
+    static let devContainerMonitoringIntervalKey = "devcontainer.monitoringIntervalSeconds"
+    static let devContainerGlobalVisibilityEnabledKey = "devcontainer.globalVisibilityEnabled"
     static let defaultNodeAutoUpdateEnabled = true
     static let defaultNodeAutoUpdateInterval: Double = 21_600
     static let defaultNodeVersionSpec = "lts/*"
@@ -1317,6 +1342,11 @@ enum AppPreferences {
     static let defaultMCPListenAddress = "127.0.0.1"
     static let defaultMCPPort = 8765
     static let defaultMCPExposeReadOnlyToolsOnly = true
+    static let defaultDevContainerEnabled = true
+    static let defaultDevContainerCLIStrategy: DevContainerCLIStrategy = .auto
+    static let defaultDevContainerMonitoringEnabled = true
+    static let defaultDevContainerMonitoringInterval: Double = 30
+    static let defaultDevContainerGlobalVisibilityEnabled = true
 
     static var autoRefreshEnabled: Bool {
         let defaults = UserDefaults.standard
@@ -1512,6 +1542,47 @@ enum AppPreferences {
             apiToken: mcpAPIToken,
             exposeReadOnlyToolsOnly: mcpExposeReadOnlyToolsOnly
         )
+    }
+
+    static var devContainerEnabled: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: devContainerEnabledKey) == nil {
+            return defaultDevContainerEnabled
+        }
+        return defaults.bool(forKey: devContainerEnabledKey)
+    }
+
+    static var devContainerCLIStrategy: DevContainerCLIStrategy {
+        let defaults = UserDefaults.standard
+        guard
+            let value = defaults.string(forKey: devContainerCLIStrategyKey),
+            let strategy = DevContainerCLIStrategy(rawValue: value)
+        else {
+            return defaultDevContainerCLIStrategy
+        }
+        return strategy
+    }
+
+    static var devContainerMonitoringEnabled: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: devContainerMonitoringEnabledKey) == nil {
+            return defaultDevContainerMonitoringEnabled
+        }
+        return defaults.bool(forKey: devContainerMonitoringEnabledKey)
+    }
+
+    static var devContainerMonitoringInterval: TimeInterval {
+        let defaults = UserDefaults.standard
+        let value = defaults.double(forKey: devContainerMonitoringIntervalKey)
+        return value > 0 ? value : defaultDevContainerMonitoringInterval
+    }
+
+    static var devContainerGlobalVisibilityEnabled: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: devContainerGlobalVisibilityEnabledKey) == nil {
+            return defaultDevContainerGlobalVisibilityEnabled
+        }
+        return defaults.bool(forKey: devContainerGlobalVisibilityEnabledKey)
     }
 }
 

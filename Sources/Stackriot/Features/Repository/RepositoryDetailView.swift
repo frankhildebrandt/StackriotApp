@@ -272,11 +272,17 @@ struct RepositoryDetailView: View {
 
     private var activeJobsButtonTitle: String {
         let activeRunCount = appModel.activeRunIDs.count
-        return activeRunCount == 0 ? "Jobs" : "Jobs \(activeRunCount)"
+        let activeDevContainerCount = AppPreferences.devContainerGlobalVisibilityEnabled
+            ? appModel.activeDevContainerSummaries().filter(\.isActive).count
+            : 0
+        let total = activeRunCount + activeDevContainerCount
+        return total == 0 ? "Jobs" : "Jobs \(total)"
     }
 
     private var activeJobsButtonSystemImage: String {
-        appModel.activeRunIDs.isEmpty ? "list.bullet.circle" : "list.bullet.circle.fill"
+        let hasActiveDevContainers = AppPreferences.devContainerGlobalVisibilityEnabled
+            && appModel.activeDevContainerSummaries().contains(where: \.isActive)
+        return (appModel.activeRunIDs.isEmpty && !hasActiveDevContainers) ? "list.bullet.circle" : "list.bullet.circle.fill"
     }
 
     private func worktreeMoveConfirmationMessage(for draft: WorktreeMoveDraft) -> String {
@@ -434,6 +440,9 @@ struct RepositoryDetailView: View {
                         }
                         if appModel.isAgentRunning(for: worktree) {
                             AgentActivityDot()
+                        }
+                        if AppPreferences.devContainerGlobalVisibilityEnabled {
+                            devContainerBadge(for: worktree)
                         }
                     }
 
@@ -987,10 +996,30 @@ struct RepositoryDetailView: View {
             }
         }
     }
+
+    @ViewBuilder
+    private func devContainerBadge(for worktree: WorktreeRecord) -> some View {
+        let state = appModel.devContainerState(for: worktree)
+
+        if state.activeOperation != nil {
+            Label(state.activeOperation?.title ?? "Working", systemImage: "shippingbox.fill")
+                .font(.caption)
+                .foregroundStyle(.blue)
+        } else if state.isRunning {
+            Label("Devcontainer", systemImage: "shippingbox.fill")
+                .font(.caption)
+                .foregroundStyle(.blue)
+        } else if state.hasConfiguration {
+            Label("Devcontainer", systemImage: "shippingbox")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
 }
 
 private struct ActiveJobsPopover: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -1008,7 +1037,7 @@ private struct ActiveJobsPopover: View {
 
             Divider()
 
-            if activeRuns.isEmpty {
+            if activeRuns.isEmpty && devContainers.isEmpty {
                 ContentUnavailableView(
                     "No Running Jobs",
                     systemImage: "checkmark.circle",
@@ -1017,21 +1046,47 @@ private struct ActiveJobsPopover: View {
                 .frame(width: 360, height: 160)
             } else {
                 ScrollView {
-                    VStack(spacing: 2) {
-                        ForEach(activeRuns, id: \.id) { run in
-                            ActiveJobRow(run: run) {
-                                appModel.navigateToRun(run)
-                                dismiss()
+                    VStack(spacing: 10) {
+                        if !activeRuns.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Running jobs")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+
+                                VStack(spacing: 2) {
+                                    ForEach(activeRuns, id: \.id) { run in
+                                        ActiveJobRow(run: run) {
+                                            appModel.navigateToRun(run)
+                                            dismiss()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if AppPreferences.devContainerGlobalVisibilityEnabled && !devContainers.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Devcontainers")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+
+                                VStack(spacing: 6) {
+                                    ForEach(devContainers) { summary in
+                                        ActiveDevContainerRow(summary: summary) { action in
+                                            handleDevContainerAction(action, summary: summary)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                     .padding(6)
                 }
-                .frame(width: 360)
-                .frame(maxHeight: 320)
+                .frame(width: 420)
+                .frame(maxHeight: 380)
             }
         }
-        .frame(minWidth: 360)
+        .frame(minWidth: 420)
     }
 
     private var activeRuns: [RunRecord] {
@@ -1044,6 +1099,38 @@ private struct ActiveJobsPopover: View {
                 }
                 return lhs.id.uuidString > rhs.id.uuidString
             }
+    }
+
+    private var devContainers: [DevContainerGlobalSummary] {
+        appModel.activeDevContainerSummaries()
+    }
+
+    private func handleDevContainerAction(_ action: ActiveDevContainerAction, summary: DevContainerGlobalSummary) {
+        guard let worktree = appModel.worktreeRecord(with: summary.worktreeID) else { return }
+
+        switch action {
+        case .open:
+            appModel.navigateToDevContainer(summary)
+            dismiss()
+        case .logs:
+            appModel.navigateToDevContainer(summary)
+            appModel.setDevContainerLogsVisible(true, for: summary.worktreeID)
+            dismiss()
+        case .terminal:
+            appModel.navigateToDevContainer(summary)
+            Task {
+                await appModel.openDevContainerTerminal(for: worktree, in: modelContext)
+            }
+            dismiss()
+        case .stop:
+            Task {
+                await appModel.stopDevContainer(for: worktree)
+            }
+        case .restart:
+            Task {
+                await appModel.restartDevContainer(for: worktree)
+            }
+        }
     }
 }
 
@@ -1098,6 +1185,95 @@ private struct ActiveJobRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .lineLimit(1)
+    }
+}
+
+private enum ActiveDevContainerAction {
+    case open
+    case logs
+    case terminal
+    case stop
+    case restart
+}
+
+private struct ActiveDevContainerRow: View {
+    let summary: DevContainerGlobalSummary
+    let onAction: (ActiveDevContainerAction) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                onAction(.open)
+            } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: summary.runtimeStatus == .running ? "shippingbox.fill" : "shippingbox")
+                        .foregroundStyle(summary.runtimeStatus == .running ? .blue : .secondary)
+                        .padding(.top, 2)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(summary.containerName?.nonEmpty ?? summary.worktreeName)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+
+                        Label(summary.repositoryName, systemImage: "shippingbox")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Label(summary.worktreeName, systemImage: "point.3.connected.trianglepath.dotted")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 10) {
+                            Label(summary.activeOperation?.progressTitle ?? summary.runtimeStatus.displayName, systemImage: "waveform.path.ecg")
+                                .font(.caption)
+                                .foregroundStyle(summary.runtimeStatus == .running ? .blue : .secondary)
+                            if let imageName = summary.imageName?.nonEmpty {
+                                Label(imageName, systemImage: "square.stack.3d.up")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+                .background(
+                    Color.blue.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 6) {
+                Button("Logs") {
+                    onAction(.logs)
+                }
+                .buttonStyle(.bordered)
+
+                Button("Terminal") {
+                    onAction(.terminal)
+                }
+                .buttonStyle(.bordered)
+                .disabled(summary.runtimeStatus != .running || summary.containerID?.isEmpty != false)
+
+                Button("Stop") {
+                    onAction(.stop)
+                }
+                .buttonStyle(.bordered)
+                .disabled(summary.runtimeStatus != .running)
+
+                Button("Restart") {
+                    onAction(.restart)
+                }
+                .buttonStyle(.bordered)
+                .disabled(summary.activeOperation != nil)
+            }
+        }
     }
 }
 

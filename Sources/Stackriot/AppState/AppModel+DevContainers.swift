@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 extension AppModel {
     func hasDevContainerConfiguration(for worktree: WorktreeRecord) -> Bool {
@@ -13,6 +14,18 @@ extension AppModel {
         return state
     }
 
+    func isDevContainerLogsVisible(for worktreeID: UUID) -> Bool {
+        visibleDevContainerLogWorktreeIDs.contains(worktreeID)
+    }
+
+    func setDevContainerLogsVisible(_ isVisible: Bool, for worktreeID: UUID) {
+        if isVisible {
+            visibleDevContainerLogWorktreeIDs.insert(worktreeID)
+        } else {
+            visibleDevContainerLogWorktreeIDs.remove(worktreeID)
+        }
+    }
+
     func refreshDevContainerState(for worktree: WorktreeRecord) async {
         guard let worktreeURL = worktree.materializedURL else {
             devContainerStatesByWorktreeID[worktree.id] = DevContainerWorkspaceState(configuration: nil)
@@ -20,6 +33,17 @@ extension AppModel {
         }
         let snapshot = await services.devContainerService.status(for: worktreeURL)
         mergeDevContainerSnapshot(snapshot, into: worktree.id)
+    }
+
+    func refreshAllDevContainerStates() async {
+        guard let modelContext = storedModelContext else { return }
+        let worktrees = (try? modelContext.fetch(FetchDescriptor<WorktreeRecord>())) ?? []
+        for worktree in worktrees {
+            guard let worktreeURL = worktree.materializedURL else { continue }
+            let hasConfiguration = services.devContainerService.configuration(at: worktreeURL) != nil
+            guard hasConfiguration || devContainerStatesByWorktreeID[worktree.id] != nil else { continue }
+            await refreshDevContainerState(for: worktree)
+        }
     }
 
     func startDevContainer(for worktree: WorktreeRecord) async {
@@ -53,6 +77,87 @@ extension AppModel {
         stopDevContainerLogStreaming(for: worktree.id)
         await performDevContainerOperation(.delete, for: worktree) { worktreeURL in
             try await services.devContainerService.delete(worktreeURL: worktreeURL)
+        }
+    }
+
+    func openDevContainerTerminal(for worktree: WorktreeRecord, in modelContext: ModelContext) async {
+        guard let (repository, worktreeURL) = await materializedWorktreeContext(for: worktree, in: modelContext) else { return }
+
+        do {
+            let descriptor = try await services.devContainerService.terminalDescriptor(
+                for: worktreeURL,
+                repositoryID: repository.id,
+                worktreeID: worktree.id
+            )
+            startRun(descriptor, repository: repository, worktree: worktree, modelContext: modelContext)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+            var state = devContainerState(for: worktree)
+            state.detailsErrorMessage = error.localizedDescription
+            devContainerStatesByWorktreeID[worktree.id] = state
+        }
+    }
+
+    func navigateToDevContainer(_ summary: DevContainerGlobalSummary) {
+        selectedRepositoryID = summary.repositoryID
+        if let repository = repositoryRecord(with: summary.repositoryID),
+           let worktree = worktreeRecord(with: summary.worktreeID) {
+            selectWorktree(worktree, in: repository)
+        }
+    }
+
+    func activeDevContainerSummaries() -> [DevContainerGlobalSummary] {
+        devContainerStatesByWorktreeID.compactMap { worktreeID, state in
+            guard let worktree = worktreeRecord(with: worktreeID),
+                  let repository = worktree.repository
+            else {
+                return nil
+            }
+            guard state.isRunning || state.activeOperation != nil || (state.diagnosticIssue != nil && state.hasConfiguration) else {
+                return nil
+            }
+            return DevContainerGlobalSummary(
+                worktreeID: worktreeID,
+                repositoryID: repository.id,
+                namespaceName: repository.namespace?.name ?? "Unknown Namespace",
+                repositoryName: repository.displayName,
+                worktreeName: worktree.isDefaultBranchWorkspace ? "Main/Default" : worktree.branchName,
+                runtimeStatus: state.runtimeStatus,
+                containerName: state.containerName,
+                containerID: state.containerID,
+                imageName: state.imageName,
+                resourceUsage: state.resourceUsage,
+                activeOperation: state.activeOperation,
+                detailsErrorMessage: state.detailsErrorMessage,
+                toolingStatus: state.toolingStatus,
+                diagnosticIssue: state.diagnosticIssue,
+                lastUpdatedAt: state.lastUpdatedAt
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.isActive != rhs.isActive {
+                return lhs.isActive && !rhs.isActive
+            }
+            if lhs.lastUpdatedAt != rhs.lastUpdatedAt {
+                return (lhs.lastUpdatedAt ?? .distantPast) > (rhs.lastUpdatedAt ?? .distantPast)
+            }
+            return lhs.worktreeName.localizedStandardCompare(rhs.worktreeName) == .orderedAscending
+        }
+    }
+
+    func hasActiveDevContainer(in repository: ManagedRepository) -> Bool {
+        repository.worktrees.contains { worktree in
+            let state = devContainerStatesByWorktreeID[worktree.id]
+            return state?.isRunning == true || state?.activeOperation != nil
+        }
+    }
+
+    func activeDevContainerCount(in repository: ManagedRepository) -> Int {
+        repository.worktrees.reduce(into: 0) { partialResult, worktree in
+            let state = devContainerStatesByWorktreeID[worktree.id]
+            if state?.isRunning == true || state?.activeOperation != nil {
+                partialResult += 1
+            }
         }
     }
 

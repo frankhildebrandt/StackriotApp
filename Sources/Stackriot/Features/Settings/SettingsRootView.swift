@@ -21,6 +21,8 @@ struct SettingsRootView: View {
                 ShortcutsSettingsView()
             case .terminal:
                 TerminalSettingsView()
+            case .devContainers:
+                DevContainerSettingsView()
             case .node:
                 NodeSettingsView()
             case .aiProvider:

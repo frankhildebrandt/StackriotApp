@@ -60,6 +60,7 @@ final class AppModel: @unchecked Sendable {
     var intentContentVersionsByWorktreeID: [UUID: Int] = [:]
     var implementationPlanContentVersionsByWorktreeID: [UUID: Int] = [:]
     var devContainerStatesByWorktreeID: [UUID: DevContainerWorkspaceState] = [:]
+    var visibleDevContainerLogWorktreeIDs: Set<UUID> = []
     var mcpServerStatus = MCPServerStatus.idle()
     var mcpLogEntries: [MCPLogEntry] = []
     /// When set, `RootView` opens `WindowGroup(id: "cursor-agent-markdown")` with this payload.
@@ -109,6 +110,8 @@ final class AppModel: @unchecked Sendable {
     var worktreeStatusPollingTask: Task<Void, Never>?
     @ObservationIgnored
     var lastWorktreeStatusPollAt: Date?
+    @ObservationIgnored
+    var devContainerMonitoringTask: Task<Void, Never>?
 
     init(
         services: AppServices = .production,
@@ -130,11 +133,13 @@ final class AppModel: @unchecked Sendable {
             startAutoRefreshLoopIfNeeded()
             startNodeRuntimeRefreshLoopIfNeeded()
             startWorktreeStatusPollingIfNeeded()
+            startDevContainerMonitoringLoopIfNeeded()
             Task {
                 nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
                 await services.nodeRuntimeManager.refreshDefaultRuntimeIfNeeded(force: false)
                 nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
                 await refreshAllRepositories(force: false)
+                await refreshAllDevContainerStates()
                 restoreAllPRMonitoring(in: modelContext)
                 await configureMCPServer()
             }
@@ -575,6 +580,8 @@ private extension ActionKind {
             "Dependency Install"
         case .aiAgent:
             "AI Agent"
+        case .devContainer:
+            "Devcontainer"
         case .gitOperation:
             "Git Operation"
         case .runConfiguration:

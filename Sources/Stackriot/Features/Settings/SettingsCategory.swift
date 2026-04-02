@@ -4,6 +4,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     case repositories
     case shortcuts
     case terminal
+    case devContainers
     case node
     case aiProvider
     case browserSessions
@@ -24,6 +25,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
             "Shortcuts"
         case .terminal:
             "Terminal"
+        case .devContainers:
+            "Devcontainers"
         case .node:
             "Node"
         case .aiProvider:
@@ -49,6 +52,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
             "keyboard"
         case .terminal:
             "terminal"
+        case .devContainers:
+            "shippingbox.fill"
         case .node:
             "cpu"
         case .aiProvider:
@@ -74,6 +79,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
             "Global quick-intent shortcut, recorder, and accessibility hints."
         case .terminal:
             "How finished terminal tabs are kept and presented."
+        case .devContainers:
+            "CLI detection, container monitoring, and global devcontainer visibility."
         case .node:
             "Managed runtime defaults, status, and maintenance actions."
         case .aiProvider:

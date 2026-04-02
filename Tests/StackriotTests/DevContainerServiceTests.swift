@@ -49,7 +49,8 @@ struct DevContainerServiceTests {
         let config = workspace.appendingPathComponent(".devcontainer.json")
         try "{}".write(to: config, atomically: true, encoding: .utf8)
 
-        let service = DevContainerService(commandExecutor: { executable, arguments, _ in
+        let service = DevContainerService(
+            commandExecutor: { executable, arguments, _ in
             if executable == "docker",
                arguments.count == 8,
                arguments[0] == "ps",
@@ -91,7 +92,11 @@ struct DevContainerServiceTests {
             default:
                 return CommandResult(stdout: "", stderr: "unexpected command: \(executable) \(arguments.joined(separator: " "))", exitCode: 1)
             }
-        })
+        },
+            commandLocator: { command in
+                ["docker", "devcontainer"].contains(command)
+            }
+        )
 
         let snapshot = await service.status(for: workspace)
 
@@ -101,6 +106,8 @@ struct DevContainerServiceTests {
         #expect(snapshot.resourceUsage?.cpuPercent == "1.23%")
         #expect(snapshot.resourceUsage?.memoryUsage == "512MiB / 8GiB")
         #expect(snapshot.resourceUsage?.memoryPercent == "6.25%")
+        #expect(snapshot.toolingStatus.dockerInstalled)
+        #expect(snapshot.toolingStatus.resolvedCLI == .devcontainerCLI)
     }
 
     @Test
@@ -109,14 +116,101 @@ struct DevContainerServiceTests {
         let config = workspace.appendingPathComponent(".devcontainer.json")
         try "{}".write(to: config, atomically: true, encoding: .utf8)
 
-        let service = DevContainerService(commandExecutor: { _, _, _ in
-            CommandResult(stdout: "", stderr: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?", exitCode: 1)
-        })
+        let service = DevContainerService(
+            commandExecutor: { _, _, _ in
+                CommandResult(stdout: "", stderr: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?", exitCode: 1)
+            },
+            commandLocator: { command in
+                ["docker", "devcontainer"].contains(command)
+            }
+        )
 
         let snapshot = await service.status(for: workspace)
 
         #expect(snapshot.runtimeStatus == DevContainerRuntimeStatus.unknown)
         #expect(snapshot.detailsErrorMessage == "Docker is not reachable. Start Docker Desktop or another Docker engine and try again.")
+        #expect(snapshot.diagnosticIssue == .dockerUnreachable)
+    }
+
+    @Test
+    func toolingStatusPrefersDevcontainerCLIInAutoMode() async {
+        let service = DevContainerService(commandLocator: { command in
+            ["docker", "devcontainer", "npx"].contains(command)
+        })
+
+        let tooling = await service.toolingStatus(strategy: .auto)
+
+        #expect(tooling.dockerInstalled)
+        #expect(tooling.resolvedCLI == .devcontainerCLI)
+    }
+
+    @Test
+    func toolingStatusFallsBackToNpxInAutoMode() async {
+        let service = DevContainerService(commandLocator: { command in
+            ["docker", "npx"].contains(command)
+        })
+
+        let tooling = await service.toolingStatus(strategy: .auto)
+
+        #expect(tooling.dockerInstalled)
+        #expect(!tooling.devcontainerInstalled)
+        #expect(tooling.resolvedCLI == .npx)
+    }
+
+    @Test
+    func toolingStatusRespectsExplicitStrategy() async {
+        let service = DevContainerService(commandLocator: { command in
+            ["docker", "npx"].contains(command)
+        })
+
+        let tooling = await service.toolingStatus(strategy: .devcontainerCLI)
+
+        #expect(tooling.dockerInstalled)
+        #expect(tooling.resolvedCLI == nil)
+    }
+
+    @Test
+    func terminalDescriptorTargetsPrimaryRunningContainer() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        let config = workspace.appendingPathComponent(".devcontainer.json")
+        try "{}".write(to: config, atomically: true, encoding: .utf8)
+
+        let service = DevContainerService(
+            commandExecutor: { executable, arguments, _ in
+                if executable == "docker",
+                   arguments.count == 7,
+                   arguments[0] == "ps",
+                   arguments[1] == "--filter",
+                   arguments[3] == "--filter",
+                   arguments[5] == "--format",
+                   arguments[6] == "{{.ID}}" {
+                    return CommandResult(stdout: "run123\nrun456\n", stderr: "", exitCode: 0)
+                }
+
+                if executable == "docker", arguments == ["inspect", "run123"] {
+                    return CommandResult(
+                        stdout: #"[{"Id":"run123","Name":"/primary-devcontainer","Config":{"Image":"ghcr.io/demo/image:latest"}}]"#,
+                        stderr: "",
+                        exitCode: 0
+                    )
+                }
+
+                return CommandResult(stdout: "", stderr: "unexpected", exitCode: 1)
+            },
+            commandLocator: { command in
+                command == "docker"
+            }
+        )
+
+        let descriptor = try await service.terminalDescriptor(
+            for: workspace,
+            repositoryID: UUID(),
+            worktreeID: UUID()
+        )
+
+        #expect(descriptor.actionKind == .devContainer)
+        #expect(descriptor.executable == "docker")
+        #expect(descriptor.arguments.prefix(3).elementsEqual(["exec", "-it", "run123"]))
     }
 
     private func makeTemporaryWorkspace() throws -> URL {
