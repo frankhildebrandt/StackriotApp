@@ -9,8 +9,16 @@ enum AppPaths {
         applicationSupportDirectory.appendingPathComponent("NodeRuntime", isDirectory: true)
     }
 
+    static var nodeRuntimeAliasRoot: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("stackriot-node-runtime", isDirectory: true)
+    }
+
     static var nvmDirectory: URL {
         nodeRuntimeRoot.appendingPathComponent("nvm", isDirectory: true)
+    }
+
+    static var aliasedNVMDirectory: URL {
+        nodeRuntimeAliasRoot.appendingPathComponent("nvm", isDirectory: true)
     }
 
     static var nodeVersionsRoot: URL {
@@ -21,20 +29,60 @@ enum AppPaths {
         nodeRuntimeRoot.appendingPathComponent("Caches", isDirectory: true)
     }
 
+    static var aliasedRuntimeCacheRoot: URL {
+        nodeRuntimeAliasRoot.appendingPathComponent("Caches", isDirectory: true)
+    }
+
     static var npmCacheDirectory: URL {
         runtimeCacheRoot.appendingPathComponent("npm", isDirectory: true)
+    }
+
+    static var aliasedNPMCacheDirectory: URL {
+        aliasedRuntimeCacheRoot.appendingPathComponent("npm", isDirectory: true)
     }
 
     static var corepackCacheDirectory: URL {
         runtimeCacheRoot.appendingPathComponent("corepack", isDirectory: true)
     }
 
+    static var aliasedCorepackCacheDirectory: URL {
+        aliasedRuntimeCacheRoot.appendingPathComponent("corepack", isDirectory: true)
+    }
+
     static var runtimeTemporaryDirectory: URL {
         nodeRuntimeRoot.appendingPathComponent("tmp", isDirectory: true)
     }
 
+    static var aliasedRuntimeTemporaryDirectory: URL {
+        nodeRuntimeAliasRoot.appendingPathComponent("tmp", isDirectory: true)
+    }
+
     static var nodeRuntimeStateFile: URL {
         nodeRuntimeRoot.appendingPathComponent("runtime-state.json", isDirectory: false)
+    }
+
+    static var localToolsRoot: URL {
+        applicationSupportDirectory.appendingPathComponent("LocalTools", isDirectory: true)
+    }
+
+    static var localToolsBinDirectory: URL {
+        localToolsRoot.appendingPathComponent("bin", isDirectory: true)
+    }
+
+    static var localToolsNPMPrefix: URL {
+        localToolsRoot.appendingPathComponent("npm", isDirectory: true)
+    }
+
+    static var localToolsCursorHome: URL {
+        localToolsRoot.appendingPathComponent("cursor-home", isDirectory: true)
+    }
+
+    static var localToolsCursorBinDirectory: URL {
+        localToolsCursorHome.appendingPathComponent(".local/bin", isDirectory: true)
+    }
+
+    static var localToolsShimsDirectory: URL {
+        localToolsRoot.appendingPathComponent("shims", isDirectory: true)
     }
 
     static var bareRepositoriesRoot: URL {
@@ -103,12 +151,17 @@ enum AppPaths {
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: applicationSupportDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: nodeRuntimeRoot, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: nvmDirectory, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: nodeVersionsRoot, withIntermediateDirectories: true)
+        try ensureNodeRuntimeAlias(fileManager: fileManager)
         try fileManager.createDirectory(at: runtimeCacheRoot, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: npmCacheDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: corepackCacheDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: runtimeTemporaryDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: localToolsRoot, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: localToolsBinDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: localToolsNPMPrefix, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: localToolsCursorHome, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: localToolsCursorBinDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: localToolsShimsDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: bareRepositoriesRoot, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: worktreesRoot, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: plansDirectory, withIntermediateDirectories: true)
@@ -116,6 +169,18 @@ enum AppPaths {
         try fileManager.createDirectory(at: diagnosticsDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: codexPlanArtifactsDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: agentPlanArtifactsDirectory(for: .cursorCLI), withIntermediateDirectories: true)
+    }
+
+    private static func ensureNodeRuntimeAlias(fileManager: FileManager) throws {
+        let aliasRoot = nodeRuntimeAliasRoot
+        if fileManager.fileExists(atPath: aliasRoot.path) {
+            let values = try aliasRoot.resourceValues(forKeys: [.isSymbolicLinkKey])
+            if values.isSymbolicLink == true {
+                return
+            }
+            try fileManager.removeItem(at: aliasRoot)
+        }
+        try fileManager.createSymbolicLink(at: aliasRoot, withDestinationURL: nodeRuntimeRoot)
     }
 
     static func suggestedRepositoryName(from remoteURL: URL) -> String {

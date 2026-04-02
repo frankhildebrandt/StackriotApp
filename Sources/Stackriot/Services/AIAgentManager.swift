@@ -6,36 +6,14 @@ import SwiftData
 final class AIAgentManager {
     private(set) var activeSessions: [UUID: AgentSessionState] = [:]
     var onSessionsChanged: (([UUID: AgentSessionState]) -> Void)?
+    private let localToolManager: LocalToolManager
+
+    init(localToolManager: LocalToolManager = LocalToolManager()) {
+        self.localToolManager = localToolManager
+    }
 
     func checkAvailability() async -> Set<AIAgentTool> {
-        var available: Set<AIAgentTool> = []
-        let path = await ShellEnvironment.loginShellPath()
-
-        await withTaskGroup(of: AIAgentTool?.self) { group in
-            for tool in AIAgentTool.allCases where tool != .none {
-                guard let executable = tool.executableName else { continue }
-                group.addTask {
-                    do {
-                        let result = try await CommandRunner.runCollected(
-                            executable: "which",
-                            arguments: [executable],
-                            environment: ["PATH": path]
-                        )
-                        return result.exitCode == 0 ? tool : nil
-                    } catch {
-                        return nil
-                    }
-                }
-            }
-
-            for await maybeTool in group {
-                if let tool = maybeTool {
-                    available.insert(tool)
-                }
-            }
-        }
-
-        return available
+        await localToolManager.availableAgentTools()
     }
 
     @discardableResult

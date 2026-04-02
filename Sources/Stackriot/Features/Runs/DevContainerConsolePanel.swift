@@ -128,7 +128,7 @@ struct DevContainerConsolePanel: View {
                 }
                 .buttonStyle(.bordered)
 
-                if state.diagnosticIssue == .dockerMissing || state.diagnosticIssue == .cliUnavailable || state.diagnosticIssue == .featureDisabled {
+                if state.diagnosticIssue == .containerEngineMissing || state.diagnosticIssue == .cliUnavailable || state.diagnosticIssue == .featureDisabled {
                     Button("Refresh") {
                         Task {
                             await appModel.refreshDevContainerState(for: worktree)
@@ -187,9 +187,9 @@ struct DevContainerConsolePanel: View {
         switch state.diagnosticIssue {
         case .featureDisabled:
             "gearshape.2"
-        case .dockerMissing, .cliUnavailable:
+        case .containerEngineMissing, .cliUnavailable:
             "wrench.and.screwdriver"
-        case .dockerUnreachable, .containerUnreachable:
+        case .containerEngineUnreachable, .containerUnreachable:
             "exclamationmark.triangle.fill"
         case .noConfiguration, nil:
             "info.circle"
@@ -198,7 +198,7 @@ struct DevContainerConsolePanel: View {
 
     private var diagnosticsColor: Color {
         switch state.diagnosticIssue {
-        case .dockerMissing, .cliUnavailable, .dockerUnreachable, .containerUnreachable:
+        case .containerEngineMissing, .cliUnavailable, .containerEngineUnreachable, .containerUnreachable:
             .orange
         case .featureDisabled:
             .blue
@@ -211,10 +211,10 @@ struct DevContainerConsolePanel: View {
         switch state.diagnosticIssue {
         case .featureDisabled:
             return "Devcontainer support is disabled globally. Re-enable it in Settings to inspect or control containers."
-        case .dockerMissing:
-            return "Stackriot needs the `docker` command to inspect, stop, remove, and attach to devcontainers."
-        case .dockerUnreachable:
-            return state.detailsErrorMessage?.nonEmpty ?? "Docker is installed but not reachable."
+        case .containerEngineMissing:
+            return "Stackriot needs a Docker-compatible engine to inspect, stop, remove, and attach to devcontainers."
+        case .containerEngineUnreachable:
+            return state.detailsErrorMessage?.nonEmpty ?? "The configured container engine is installed but not reachable."
         case .cliUnavailable:
             return "No supported devcontainer CLI is currently available for the configured strategy."
         case .containerUnreachable:
@@ -228,10 +228,10 @@ struct DevContainerConsolePanel: View {
 
     private var installHelpText: String? {
         switch state.diagnosticIssue {
-        case .dockerMissing:
-            return "Install Docker Desktop or another Docker engine so the `docker` CLI is available in your shell."
+        case .containerEngineMissing:
+            return "Install Docker, Podman, or another Docker-compatible engine so a container CLI is available."
         case .cliUnavailable:
-            return "Either install the Dev Containers CLI so `devcontainer` exists, or use Node.js so Stackriot can fall back to `npx @devcontainers/cli`."
+            return "Either install the Dev Containers CLI so `devcontainer` exists, use Stackriot local CLI management, or use Node.js so Stackriot can fall back to `npx @devcontainers/cli`."
         case .featureDisabled:
             return "Settings > Devcontainers controls whether Stackriot monitors and exposes devcontainer workflows."
         default:

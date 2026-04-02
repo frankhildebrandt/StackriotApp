@@ -94,7 +94,10 @@ struct GitCommitSheet: View {
 
         Task {
             do {
-                let diff = try await fetchGitDiff(at: worktreePath)
+                // `waitUntilExit()` is synchronous; must not run on the main actor or the UI beachballs.
+                let diff = try await Task.detached(priority: .userInitiated) {
+                    try Self.collectGitDiff(at: worktreePath)
+                }.value
                 guard diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
                     await MainActor.run {
                         generationError = "Keine Änderungen gefunden."
@@ -117,7 +120,7 @@ struct GitCommitSheet: View {
         }
     }
 
-    private func fetchGitDiff(at path: String) async throws -> String {
+    private nonisolated static func collectGitDiff(at path: String) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["diff", "HEAD"]

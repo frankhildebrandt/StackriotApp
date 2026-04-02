@@ -424,19 +424,20 @@ extension AppModel {
 
             let shellCommand: String
             let stdinText: String?
+            let managedPathExport = "export PATH=\(AppPaths.localToolsBinDirectory.path.shellEscaped):$PATH"
             if let prompt = promptText {
                 let cmd = tool.launchCommandWithPrompt(prompt, in: worktreeURL.path, options: options)
                 if cmd != tool.launchCommand(in: worktreeURL.path) {
                     // Tool handles the prompt via flag — no PTY stdin injection needed
-                    shellCommand = cmd
+                    shellCommand = "\(managedPathExport) && \(cmd)"
                     stdinText = nil
                 } else {
                     // Tool uses interactive mode — inject prompt via PTY stdin
-                    shellCommand = tool.launchCommand(in: worktreeURL.path)
+                    shellCommand = "\(managedPathExport) && \(tool.launchCommand(in: worktreeURL.path))"
                     stdinText = "\(prompt)\n"
                 }
             } else {
-                shellCommand = tool.launchCommand(in: worktreeURL.path)
+                shellCommand = "\(managedPathExport) && \(tool.launchCommand(in: worktreeURL.path))"
                 stdinText = nil
             }
             let descriptor = CommandExecutionDescriptor(
@@ -575,6 +576,25 @@ extension AppModel {
         Task {
             await services.nodeRuntimeManager.rebuildManagedRuntime()
             nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
+        }
+    }
+
+    func refreshLocalToolStatuses() {
+        Task {
+            localToolStatuses = await services.localToolManager.allStatuses()
+            availableAgents = await services.agentManager.checkAvailability()
+        }
+    }
+
+    func installLocalTool(_ tool: AppManagedTool) {
+        Task {
+            do {
+                _ = try await services.localToolManager.install(tool)
+                localToolStatuses = await services.localToolManager.allStatuses()
+                availableAgents = await services.agentManager.checkAvailability()
+            } catch {
+                pendingErrorMessage = error.localizedDescription
+            }
         }
     }
 
