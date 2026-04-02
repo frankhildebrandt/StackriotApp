@@ -9,7 +9,6 @@ struct RemoteManagementSheet: View {
 
     let repository: ManagedRepository
     @State private var editingRemote: RepositoryRemote?
-    @State private var remotePendingRemoval: RepositoryRemote?
     @State private var isEditorPresented = false
 
     var body: some View {
@@ -58,7 +57,9 @@ struct RemoteManagementSheet: View {
                                     isEditorPresented = true
                                 }
                                 Button("Remove", role: .destructive) {
-                                    remotePendingRemoval = remote
+                                    Task {
+                                        await appModel.removeRemote(remote, from: repository, in: modelContext)
+                                    }
                                 }
                             }
                             Text(remote.url)
@@ -98,15 +99,6 @@ struct RemoteManagementSheet: View {
         .sheet(isPresented: $isEditorPresented) {
             RemoteEditorSheet(repository: repository, remote: editingRemote)
                 .environment(appModel)
-        }
-        .confirmationDialog("Remove remote?", item: $remotePendingRemoval) { remote in
-            Button("Remove", role: .destructive) {
-                Task {
-                    await appModel.removeRemote(remote, from: repository, in: modelContext)
-                }
-            }
-        } message: { remote in
-            Text("Remove \(remote.name) from \(repository.displayName)?")
         }
     }
 }

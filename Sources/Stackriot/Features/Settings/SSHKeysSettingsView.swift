@@ -9,7 +9,6 @@ struct SSHKeysSettingsView: View {
 
     @State private var isImportingKey = false
     @State private var isGenerateSheetPresented = false
-    @State private var pendingKeyDeletion: StoredSSHKey?
     @State private var expandedKeyIDs: Set<UUID> = []
 
     var body: some View {
@@ -31,7 +30,7 @@ struct SSHKeysSettingsView: View {
                                 toggleExpansion(for: key.id)
                             },
                             onDelete: {
-                                pendingKeyDeletion = key
+                                appModel.removeSSHKey(key, in: modelContext)
                             }
                         )
                     }
@@ -74,18 +73,6 @@ struct SSHKeysSettingsView: View {
         .sheet(isPresented: $isGenerateSheetPresented) {
             GenerateSSHKeySheet()
                 .environment(appModel)
-        }
-        .confirmationDialog("Delete SSH key?", item: $pendingKeyDeletion) { key in
-            Button("Delete", role: .destructive) {
-                appModel.removeSSHKey(key, in: modelContext)
-            }
-        } message: { key in
-            let remoteCount = key.remotes.count
-            if remoteCount == 0 {
-                Text("Remove \(key.displayName) from Stackriot?")
-            } else {
-                Text("Remove \(key.displayName) from Stackriot and clear \(remoteCount) remote assignment\(remoteCount == 1 ? "" : "s")?")
-            }
         }
     }
 

@@ -6,7 +6,6 @@ struct LegacyRepositoryDetailView: View {
     @Environment(\.modelContext) private var modelContext
 
     let repository: ManagedRepository
-    @State private var worktreePendingRemoval: WorktreeRemovalDraft?
     @State private var showRunHistory = false
 
     var body: some View {
@@ -29,47 +28,6 @@ struct LegacyRepositoryDetailView: View {
         .task(id: repository.id) {
             appModel.ensureSelectedWorktree(in: repository)
             await appModel.refreshWorktreeStatuses(for: repository)
-        }
-        .confirmationDialog("Remove worktree?", item: $worktreePendingRemoval) { worktree in
-            Button("Remove", role: .destructive) {
-                worktreePendingRemoval = nil
-                if let record = appModel.worktreeRecord(with: worktree.id) {
-                    Task {
-                        await appModel.removeWorktree(record, in: modelContext)
-                    }
-                }
-            }
-        } message: { worktree in
-            Text(worktree.path)
-        }
-        .alert("Rebase fehlgeschlagen", isPresented: Binding(
-            get: { appModel.worktreePendingMergeOfferID != nil },
-            set: { newValue in
-                if !newValue {
-                    appModel.worktreePendingMergeOfferID = nil
-                }
-            }
-        )) {
-            Button("Merge versuchen") {
-                if
-                    let worktreeID = appModel.worktreePendingMergeOfferID,
-                    let worktree = appModel.worktreeRecord(with: worktreeID)
-                {
-                    Task {
-                        await appModel.syncWorktreeFromMain(
-                            worktree,
-                            repository: repository,
-                            strategy: .merge,
-                            modelContext: modelContext
-                        )
-                    }
-                }
-            }
-            Button("Abbrechen", role: .cancel) {
-                appModel.worktreePendingMergeOfferID = nil
-            }
-        } message: {
-            Text("Der Rebase von \(repository.defaultBranch) konnte nicht abgeschlossen werden. Möchtest du stattdessen einen Merge versuchen?")
         }
     }
 
@@ -211,7 +169,9 @@ struct LegacyRepositoryDetailView: View {
                             }
                             Divider()
                             Button("Remove Worktree", role: .destructive) {
-                                worktreePendingRemoval = WorktreeRemovalDraft(id: worktree.id, path: worktree.path)
+                                Task {
+                                    await appModel.removeWorktree(worktree, in: modelContext)
+                                }
                             }
                         }
                     }

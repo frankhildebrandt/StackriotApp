@@ -6,7 +6,6 @@ struct CloneRepositorySheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @State private var isCloning = false
-    @State private var pendingCloneConfirmation = false
 
     private var trimmedRemoteURL: String {
         appModel.cloneDraft.remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -42,7 +41,7 @@ struct CloneRepositorySheet: View {
                 }
                 .disabled(isCloning)
                 Button("Clone") {
-                    pendingCloneConfirmation = true
+                    startClone()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canClone)
@@ -51,16 +50,6 @@ struct CloneRepositorySheet: View {
         .padding(24)
         .frame(width: 460)
         .background(.regularMaterial)
-        .confirmationDialog("Repository klonen?", isPresented: $pendingCloneConfirmation) {
-            Button("Klonen") {
-                startClone()
-            }
-            Button("Abbrechen", role: .cancel) {}
-        } message: {
-            Text("""
-            Das klont \(trimmedRemoteURL) in ein neues Bare-Repository auf diesem Mac, legt den Default-Worktree an und aktualisiert die lokalen Repository-Daten.
-            """)
-        }
     }
 
     private func startClone() {

@@ -60,6 +60,8 @@ struct MCPServerTests {
 
         #expect(ipv4.endpointURLString == "http://127.0.0.1:8765/mcp")
         #expect(ipv6.endpointURLString == "http://[::1]:8765/mcp")
+        #expect(ipv4.sseEndpointURLString == "http://127.0.0.1:8765/sse")
+        #expect(ipv6.sseEndpointURLString == "http://[::1]:8765/sse")
     }
 
     @Test
@@ -159,6 +161,7 @@ struct MCPServerTests {
         try await waitUntilRunning(manager)
 
         let endpoint = URL(string: configuration.endpointURLString)!
+        let sseEndpoint = URL(string: configuration.sseEndpointURLString)!
         let initializeResponse = try await postJSON(
             to: endpoint,
             token: token,
@@ -171,7 +174,7 @@ struct MCPServerTests {
         let sessionID = try #require(initializeResponse.headers["Mcp-Session-Id"])
 
         let streamTask = Task { () throws -> (statusCode: Int, contentType: String?, payload: String) in
-            var request = URLRequest(url: endpoint)
+            var request = URLRequest(url: sseEndpoint)
             request.httpMethod = "GET"
             request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

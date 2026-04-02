@@ -793,9 +793,6 @@ extension AppModel {
             if selectedWorktreeIDsByRepository[repositoryID] == worktreeID {
                 selectedWorktreeIDsByRepository[repositoryID] = remainingWorktreeID
             }
-            if worktreePendingMergeOfferID == worktreeID {
-                worktreePendingMergeOfferID = nil
-            }
             refreshRepositorySidebarSnapshot(for: repository)
             await refreshWorktreeStatuses(for: repository)
             notifyOperationSuccess(
@@ -1036,11 +1033,10 @@ extension AppModel {
             )
             switch result {
             case .committed:
-                pendingIntegrationConflict = nil
                 selectedWorktreeIDsByRepository[repository.id] = target.worktree.id
                 return .committed
             case let .conflicts(message):
-                pendingIntegrationConflict = IntegrationConflictDraft(
+                let draft = IntegrationConflictDraft(
                     repositoryID: repository.id,
                     sourceWorktreeID: sourceWorktree.id,
                     defaultWorktreeID: target.worktree.id,
@@ -1049,6 +1045,17 @@ extension AppModel {
                     message: message
                 )
                 selectedWorktreeIDsByRepository[repository.id] = target.worktree.id
+                let preferredAgent = sourceWorktree.assignedAgent
+                if preferredAgent != .none, availableAgents.contains(preferredAgent) {
+                    await launchConflictResolutionAgent(preferredAgent, for: draft, in: modelContext)
+                } else {
+                    pendingErrorMessage = message
+                    notifyOperationFailure(
+                        title: "Merge conflicts detected",
+                        subtitle: repository.displayName,
+                        body: "Conflicts occurred while integrating \(sourceWorktree.branchName) into \(target.branchName). Resolve them manually or assign an available agent."
+                    )
+                }
                 return .conflict
             }
         } catch {
@@ -1203,9 +1210,13 @@ extension AppModel {
                         worktreePath: worktreeURL,
                         onto: repository.defaultBranch
                     )
-                    worktreePendingMergeOfferID = nil
                 } catch {
-                    worktreePendingMergeOfferID = worktree.id
+                    pendingErrorMessage = error.localizedDescription
+                    notifyOperationFailure(
+                        title: "Rebase failed",
+                        subtitle: repository.displayName,
+                        body: "Could not rebase \(worktree.branchName) onto \(repository.defaultBranch). Start a merge manually if you want to continue."
+                    )
                     return
                 }
             case .merge:
@@ -1213,7 +1224,6 @@ extension AppModel {
                     worktreePath: worktreeURL,
                     from: repository.defaultBranch
                 )
-                worktreePendingMergeOfferID = nil
             }
 
             await refreshWorktreeStatuses(for: repository)

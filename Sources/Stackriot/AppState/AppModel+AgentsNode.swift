@@ -438,7 +438,6 @@ extension AppModel {
         3. Create the merge commit with the exact message: \(draft.commitMessage)
         4. Leave the repository in a clean state if the resolution succeeds.
         """
-        pendingIntegrationConflict = nil
         selectedWorktreeIDsByRepository[repository.id] = defaultWorktree.id
         _ = await launchAgent(tool, for: defaultWorktree, in: modelContext, initialPrompt: prompt)
     }

@@ -285,7 +285,7 @@ actor MCPServerManager {
     private func handle(request: HTTPRequest, connectionID: UUID) async -> HTTPResponse {
         let configuration = configurationProvider()
 
-        guard request.path == MCPServerConfiguration.endpointPath else {
+        guard request.path == MCPServerConfiguration.endpointPath || request.path == MCPServerConfiguration.sseEndpointPath else {
             return makePlainResponse(statusCode: 404, statusText: "Not Found", body: "Unknown MCP endpoint.")
         }
 
@@ -299,10 +299,19 @@ actor MCPServerManager {
 
         switch request.method {
         case "DELETE":
+            guard request.path == MCPServerConfiguration.endpointPath else {
+                return makePlainResponse(statusCode: 405, statusText: "Method Not Allowed", body: "DELETE is only supported on /mcp.")
+            }
             return await handleDelete(headers: request.headers, configuration: configuration)
         case "GET":
+            guard request.path == MCPServerConfiguration.sseEndpointPath else {
+                return makePlainResponse(statusCode: 405, statusText: "Method Not Allowed", body: "Use GET /sse for the MCP event stream.")
+            }
             return await handleGet(headers: request.headers, connectionID: connectionID, configuration: configuration)
         case "POST":
+            guard request.path == MCPServerConfiguration.endpointPath else {
+                return makePlainResponse(statusCode: 405, statusText: "Method Not Allowed", body: "POST is only supported on /mcp.")
+            }
             return await handlePost(body: request.body, headers: request.headers, configuration: configuration)
         default:
             return makePlainResponse(statusCode: 405, statusText: "Method Not Allowed", body: "Unsupported HTTP method.")
@@ -318,7 +327,7 @@ actor MCPServerManager {
             return makePlainResponse(
                 statusCode: 406,
                 statusText: "Not Acceptable",
-                body: "GET /mcp requires Accept: text/event-stream."
+                body: "GET /sse requires Accept: text/event-stream."
             )
         }
         guard let sessionID = headers["mcp-session-id"]?.nonEmpty else {

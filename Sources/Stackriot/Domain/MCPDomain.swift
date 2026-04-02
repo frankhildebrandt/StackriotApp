@@ -17,6 +17,7 @@ enum MCPLogLevel: String, Codable, CaseIterable, Sendable {
 
 struct MCPServerConfiguration: Sendable, Equatable {
     static let endpointPath = "/mcp"
+    static let sseEndpointPath = "/sse"
 
     var enabled: Bool
     var listenAddress: String
@@ -26,6 +27,10 @@ struct MCPServerConfiguration: Sendable, Equatable {
 
     var endpointURLString: String {
         "http://\(formattedHost):\(port)\(Self.endpointPath)"
+    }
+
+    var sseEndpointURLString: String {
+        "http://\(formattedHost):\(port)\(Self.sseEndpointPath)"
     }
 
     var formattedHost: String {
@@ -72,6 +77,17 @@ struct MCPServerStatus: Sendable, Equatable {
             exposeReadOnlyToolsOnly: true
         )
         .endpointURLString
+    }
+
+    var sseEndpointURLString: String {
+        MCPServerConfiguration(
+            enabled: state != .stopped,
+            listenAddress: listenAddress,
+            port: port,
+            apiToken: nil,
+            exposeReadOnlyToolsOnly: true
+        )
+        .sseEndpointURLString
     }
 }
 

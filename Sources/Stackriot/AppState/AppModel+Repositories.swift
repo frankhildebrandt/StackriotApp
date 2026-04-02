@@ -273,7 +273,6 @@ extension AppModel {
                 invalidateWorktreeDiscoverySnapshot(for: worktree.id)
                 devContainerStatesByWorktreeID.removeValue(forKey: worktree.id)
             }
-            clearRepositoryDeletionRequest()
             notifyOperationSuccess(
                 title: "Repository deleted",
                 subtitle: repository.displayName,

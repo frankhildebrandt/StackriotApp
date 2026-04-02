@@ -85,24 +85,16 @@ extension AppModel {
             guard let self else { return }
 
             if let draft = await self.terminalCloseConfirmation(for: run) {
-                self.pendingTerminalCloseConfirmation = draft
-                return
+                self.notifyOperationSuccess(
+                    title: "Terminal force-closed",
+                    subtitle: run.title,
+                    body: draft.message,
+                    userInfo: ["runID": run.id.uuidString]
+                )
             }
 
             self.forceCloseTab(run, in: modelContext)
         }
-    }
-
-    func confirmPendingTerminalClose(in modelContext: ModelContext) {
-        guard
-            let runID = pendingTerminalCloseConfirmation?.runID,
-            let run = runRecord(with: runID)
-        else {
-            pendingTerminalCloseConfirmation = nil
-            return
-        }
-
-        forceCloseTab(run, in: modelContext)
     }
 
     func cancelRun(_ run: RunRecord, in modelContext: ModelContext) {
@@ -796,7 +788,6 @@ extension AppModel {
     }
 
     private func forceCloseTab(_ run: RunRecord, in modelContext: ModelContext) {
-        pendingTerminalCloseConfirmation = nil
         cancelAutoHide(for: run.id)
         terminalTabs.hide(runID: run.id)
 

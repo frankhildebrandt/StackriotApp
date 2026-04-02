@@ -39,7 +39,9 @@ struct RootView: View {
                     appModel.presentNamespaceEditor()
                 },
                 onEditNamespace: appModel.presentNamespaceEditor,
-                onDeleteNamespace: appModel.requestNamespaceDeletion,
+                onDeleteNamespace: { namespace in
+                    appModel.deleteNamespace(namespace, in: modelContext)
+                },
                 onCreateProject: { namespace in
                     appModel.presentProjectEditor(in: namespace)
                 },
@@ -47,7 +49,9 @@ struct RootView: View {
                 onMoveProject: { project, namespace in
                     appModel.moveProject(project, to: namespace, in: modelContext)
                 },
-                onDeleteProject: appModel.requestProjectDeletion,
+                onDeleteProject: { project in
+                    appModel.deleteProject(project, in: modelContext)
+                },
                 onAssignRepository: { repository, namespace, project in
                     appModel.assignRepository(repository, to: namespace, project: project, in: modelContext)
                 },
@@ -63,7 +67,11 @@ struct RootView: View {
                     }
                 },
                 onManageRemotes: appModel.presentRemoteManagement,
-                onDeleteRepository: appModel.requestRepositoryDeletion
+                onDeleteRepository: { repository in
+                    Task {
+                        await appModel.deleteRepository(repository, in: modelContext)
+                    }
+                }
             )
             .navigationSplitViewColumnWidth(min: 280, ideal: 340)
         } content: {
@@ -192,93 +200,6 @@ struct RootView: View {
                     .environment(appModel)
             }
         }
-        .confirmationDialog("Delete repository?", isPresented: Binding(
-            get: { appModel.pendingRepositoryDeletionID != nil },
-            set: { newValue in
-                if !newValue {
-                    appModel.clearRepositoryDeletionRequest()
-                }
-            }
-        )) {
-            if
-                let repositoryID = appModel.pendingRepositoryDeletionID,
-                let repository = appModel.repositoryRecord(with: repositoryID)
-            {
-                Button("Delete Repository", role: .destructive) {
-                    Task {
-                        await appModel.deleteRepository(repository, in: modelContext)
-                    }
-                }
-            }
-        } message: {
-            if
-                let repositoryID = appModel.pendingRepositoryDeletionID,
-                let repository = appModel.repositoryRecord(with: repositoryID)
-            {
-                Text("This removes the bare repository and all associated worktrees for \(repository.displayName).")
-            }
-        }
-        .confirmationDialog("Delete namespace?", isPresented: Binding(
-            get: { appModel.pendingNamespaceDeletionID != nil },
-            set: { newValue in
-                if !newValue {
-                    appModel.clearNamespaceDeletionRequest()
-                }
-            }
-        )) {
-            if
-                let namespaceID = appModel.pendingNamespaceDeletionID,
-                let namespace = appModel.namespaceRecord(with: namespaceID)
-            {
-                Button("Delete Namespace", role: .destructive) {
-                    appModel.deleteNamespace(namespace, in: modelContext)
-                }
-            }
-        } message: {
-            if
-                let namespaceID = appModel.pendingNamespaceDeletionID,
-                let namespace = appModel.namespaceRecord(with: namespaceID)
-            {
-                Text("Projects in \(namespace.name) are removed and all contained repositories move to \(AppModel.defaultNamespaceName).")
-            }
-        }
-        .confirmationDialog("Delete project?", isPresented: Binding(
-            get: { appModel.pendingProjectDeletionID != nil },
-            set: { newValue in
-                if !newValue {
-                    appModel.clearProjectDeletionRequest()
-                }
-            }
-        )) {
-            if
-                let projectID = appModel.pendingProjectDeletionID,
-                let project = appModel.projectRecord(with: projectID)
-            {
-                Button("Delete Project", role: .destructive) {
-                    appModel.deleteProject(project, in: modelContext)
-                }
-            }
-        } message: {
-            if
-                let projectID = appModel.pendingProjectDeletionID,
-                let project = appModel.projectRecord(with: projectID)
-            {
-                Text("Repositories in \(project.name) move to \(AppModel.defaultNamespaceName) without a project.")
-            }
-        }
-        .confirmationDialog(
-            pendingTerminalCloseTitle,
-            isPresented: pendingTerminalCloseBinding
-        ) {
-            Button("Force Close", role: .destructive) {
-                appModel.confirmPendingTerminalClose(in: modelContext)
-            }
-            Button("Cancel", role: .cancel) {
-                appModel.clearPendingTerminalCloseConfirmation()
-            }
-        } message: {
-            Text(pendingTerminalCloseMessage)
-        }
         .alert(isPresented: pendingErrorBinding) {
             Alert(
                 title: Text("Stackriot"),
@@ -303,37 +224,5 @@ struct RootView: View {
 
     private var pendingErrorText: String {
         appModel.pendingErrorMessage ?? ""
-    }
-
-    private var pendingTerminalCloseBinding: Binding<Bool> {
-        Binding(
-            get: { appModel.pendingTerminalCloseConfirmation != nil },
-            set: { newValue in
-                if !newValue {
-                    appModel.clearPendingTerminalCloseConfirmation()
-                }
-            }
-        )
-    }
-
-    private var pendingTerminalCloseTitle: String {
-        appModel.pendingTerminalCloseConfirmation?.title ?? "Terminal schließen?"
-    }
-
-    private var pendingTerminalCloseMessage: String {
-        appModel.pendingTerminalCloseConfirmation?.message ?? ""
-    }
-}
-extension View {
-    func confirmationDialog<Item: Identifiable>(
-        _ title: String,
-        item: Binding<Item?>,
-        @ViewBuilder actions: @escaping (Item) -> some View,
-        @ViewBuilder message: @escaping (Item) -> some View
-    ) -> some View {
-        confirmationDialog(title, isPresented: Binding(
-            get: { item.wrappedValue != nil },
-            set: { if !$0 { item.wrappedValue = nil } }
-        ), presenting: item.wrappedValue, actions: actions, message: message)
     }
 }
