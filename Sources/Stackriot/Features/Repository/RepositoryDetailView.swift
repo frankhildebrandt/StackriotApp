@@ -98,10 +98,11 @@ struct RepositoryDetailView: View {
     var body: some View {
         let worktrees = appModel.worktrees(for: repository)
         let worktreeBuckets = WorktreeBuckets(worktrees: worktrees)
+        let detailSnapshot = appModel.repositoryDetailSnapshot(for: repository)
 
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                worktreeSection(worktrees: worktrees, buckets: worktreeBuckets)
+                worktreeSection(worktrees: worktrees, buckets: worktreeBuckets, detailSnapshot: detailSnapshot)
 
                 if selectedWorktree == nil {
                     emptyWorktreeState
@@ -142,7 +143,11 @@ struct RepositoryDetailView: View {
         }
     }
 
-    private func worktreeSection(worktrees: [WorktreeRecord], buckets: WorktreeBuckets) -> AnyView {
+    private func worktreeSection(
+        worktrees: [WorktreeRecord],
+        buckets: WorktreeBuckets,
+        detailSnapshot: RepositoryDetailSnapshot
+    ) -> AnyView {
         let defaultWorktree = buckets.defaultWorktree
         let pinnedWorktrees = buckets.pinnedWorktrees
         let ideaTrees = buckets.ideaTrees
@@ -198,7 +203,8 @@ struct RepositoryDetailView: View {
                         worktreeGroup(
                             title: "Main / Default",
                             subtitle: "Die geschützte Haupt-Workspace für \(repository.defaultBranch).",
-                            worktrees: [defaultWorktree]
+                            worktrees: [defaultWorktree],
+                            detailSnapshot: detailSnapshot
                         )
                     }
 
@@ -206,7 +212,8 @@ struct RepositoryDetailView: View {
                         worktreeGroup(
                             title: "Angepinnt",
                             subtitle: "Bleiben bei der Integration erhalten und liegen über den normalen Worktrees.",
-                            worktrees: pinnedWorktrees
+                            worktrees: pinnedWorktrees,
+                            detailSnapshot: detailSnapshot
                         )
                     }
 
@@ -214,13 +221,15 @@ struct RepositoryDetailView: View {
                         worktreeGroup(
                             title: "IdeaTrees",
                             subtitle: "Leichte Worktree-Entwuerfe ohne lokalen Checkout. Materialisieren erst bei Plan/Agent/Terminal.",
-                            worktrees: ideaTrees
+                            worktrees: ideaTrees,
+                            detailSnapshot: detailSnapshot
                         )
                     }
 
                     worktreeGroup(
                         title: (defaultWorktree != nil || !pinnedWorktrees.isEmpty || !ideaTrees.isEmpty) ? "Weitere Worktrees" : nil,
-                        worktrees: regularWorktrees
+                        worktrees: regularWorktrees,
+                        detailSnapshot: detailSnapshot
                     )
                 }
 
@@ -237,31 +246,33 @@ struct RepositoryDetailView: View {
     }
 
     private var activeJobsButtonTitle: String {
-        let activeRunCount = appModel.activeRunIDs.count
+        let detailSnapshot = appModel.repositoryDetailSnapshot(for: repository)
+        let activeRunCount = detailSnapshot.activeRunCount
         let activeDevContainerCount = AppPreferences.devContainerGlobalVisibilityEnabled
-            ? appModel.activeDevContainerCount(in: repository)
+            ? detailSnapshot.activeDevContainerCount
             : 0
         let total = activeRunCount + activeDevContainerCount
         return total == 0 ? "Jobs" : "Jobs \(total)"
     }
 
     private var activeJobsButtonSystemImage: String {
+        let detailSnapshot = appModel.repositoryDetailSnapshot(for: repository)
         let hasActiveDevContainers = AppPreferences.devContainerGlobalVisibilityEnabled
-            && appModel.activeDevContainerCount(in: repository) > 0
-        return (appModel.activeRunIDs.isEmpty && !hasActiveDevContainers) ? "list.bullet.circle" : "list.bullet.circle.fill"
+            && detailSnapshot.activeDevContainerCount > 0
+        return (detailSnapshot.activeRunCount == 0 && !hasActiveDevContainers) ? "list.bullet.circle" : "list.bullet.circle.fill"
     }
 
     private var selectedWorktree: WorktreeRecord? {
         appModel.selectedWorktree(for: repository)
     }
 
-    private func autoSyncAvailable(for worktree: WorktreeRecord) -> Bool {
+    private func autoSyncAvailable(for worktree: WorktreeRecord, detailSnapshot: RepositoryDetailSnapshot) -> Bool {
         guard !worktree.isDefaultBranchWorkspace else { return false }
         guard worktree.allowsSyncFromDefaultBranch else { return false }
-        let status = appModel.worktreeStatuses[worktree.id]
-        return (status?.behindCount ?? 0) > 0
-            && !(status?.hasUncommittedChanges ?? false)
-            && !(status?.hasConflicts ?? false)
+        let status = detailSnapshot.snapshot(for: worktree.id).status
+        return status.behindCount > 0
+            && !status.hasUncommittedChanges
+            && !status.hasConflicts
     }
 
     private func isRemovingWorktree(_ worktree: WorktreeRecord) -> Bool {
@@ -275,7 +286,8 @@ struct RepositoryDetailView: View {
     private func worktreeGroup(
         title: String?,
         subtitle: String? = nil,
-        worktrees: [WorktreeRecord]
+        worktrees: [WorktreeRecord],
+        detailSnapshot: RepositoryDetailSnapshot
     ) -> AnyView {
         let layout = WorktreeTreeLayout(worktrees: worktrees)
         if !worktrees.isEmpty {
@@ -294,7 +306,7 @@ struct RepositoryDetailView: View {
 
                 VStack(spacing: 10) {
                     ForEach(layout.rootWorktrees) { worktree in
-                        worktreeTree(worktree, layout: layout, indentationLevel: 0)
+                        worktreeTree(worktree, layout: layout, indentationLevel: 0, detailSnapshot: detailSnapshot)
                     }
                 }
             })
@@ -302,25 +314,35 @@ struct RepositoryDetailView: View {
         return AnyView(EmptyView())
     }
 
-    private func worktreeTree(_ worktree: WorktreeRecord, layout: WorktreeTreeLayout, indentationLevel: Int) -> AnyView {
+    private func worktreeTree(
+        _ worktree: WorktreeRecord,
+        layout: WorktreeTreeLayout,
+        indentationLevel: Int,
+        detailSnapshot: RepositoryDetailSnapshot
+    ) -> AnyView {
         AnyView(VStack(spacing: 10) {
-            worktreeCard(worktree, indentationLevel: indentationLevel)
+            worktreeCard(worktree, indentationLevel: indentationLevel, detailSnapshot: detailSnapshot)
 
             let descendants = layout.children(of: worktree.id)
             if !descendants.isEmpty {
                 VStack(spacing: 10) {
                     ForEach(descendants) { child in
-                        worktreeTree(child, layout: layout, indentationLevel: indentationLevel + 1)
+                        worktreeTree(child, layout: layout, indentationLevel: indentationLevel + 1, detailSnapshot: detailSnapshot)
                     }
                 }
             }
         })
     }
 
-    private func worktreeCard(_ worktree: WorktreeRecord, indentationLevel: Int) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func worktreeCard(
+        _ worktree: WorktreeRecord,
+        indentationLevel: Int,
+        detailSnapshot: RepositoryDetailSnapshot
+    ) -> some View {
+        let rowSnapshot = detailSnapshot.snapshot(for: worktree.id)
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
-                if autoSyncAvailable(for: worktree) {
+                if autoSyncAvailable(for: worktree, detailSnapshot: detailSnapshot) {
                     Button {
                         Task {
                             await appModel.syncWorktreeFromMain(
@@ -342,7 +364,7 @@ struct RepositoryDetailView: View {
                 }
 
                 Rectangle()
-                    .fill(selectedWorktree?.id == worktree.id ? worktreeAccentColor(for: worktree) : Color.clear)
+                    .fill(rowSnapshot.isSelected ? worktreeAccentColor(for: worktree) : Color.clear)
                     .frame(width: 2)
                     .padding(.vertical, 4)
 
@@ -381,8 +403,8 @@ struct RepositoryDetailView: View {
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
                                 .background(.regularMaterial, in: Capsule())
-                            if let defaultRemote = appModel.resolvedDefaultRemote(for: repository) {
-                                Text(defaultRemote.name)
+                            if let defaultRemoteName = detailSnapshot.defaultRemoteName {
+                                Text(defaultRemoteName)
                                     .font(.caption.weight(.medium))
                                     .foregroundStyle(.blue)
                                     .padding(.horizontal, 8)
@@ -390,25 +412,24 @@ struct RepositoryDetailView: View {
                                     .background(.blue.opacity(0.12), in: Capsule())
                             }
                         }
-                        if appModel.isAgentRunning(for: worktree) {
+                        if rowSnapshot.isAgentRunning {
                             AgentActivityDot()
                         }
                         if AppPreferences.devContainerGlobalVisibilityEnabled {
-                            devContainerBadge(for: worktree)
+                            devContainerBadge(for: rowSnapshot.devContainerState)
                         }
                     }
 
-                    worktreeStatusRow(for: worktree)
-                    worktreeLifecycleIndicator(for: worktree)
+                    worktreeStatusRow(for: worktree, rowSnapshot: rowSnapshot)
+                    worktreeLifecycleIndicator(for: worktree, rowSnapshot: rowSnapshot)
 
                     if let context = worktree.resolvedPrimaryContext {
                         HStack(spacing: 8) {
                             Label(context.label, systemImage: context.kind == .pullRequest ? "arrow.triangle.merge" : (context.provider == .jira ? "link" : "number.square"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            if let prStatus = appModel.pullRequestUpstreamStatuses[worktree.id],
-                               context.kind == .pullRequest,
-                               prStatus.hasRemoteUpdate
+                            if context.kind == .pullRequest,
+                               rowSnapshot.pullRequestStatus?.hasRemoteUpdate == true
                             {
                                 Label("Update verfuegbar", systemImage: "arrow.down.circle.fill")
                                     .font(.caption)
@@ -441,9 +462,8 @@ struct RepositoryDetailView: View {
                         .help(isRemovingWorktree(worktree) ? "Worktree wird entfernt" : "Worktree wird verschoben")
                 } else {
                     HStack(spacing: 10) {
-                        if let prStatus = appModel.pullRequestUpstreamStatuses[worktree.id],
-                           worktree.resolvedPrimaryContext?.kind == .pullRequest,
-                           prStatus.hasRemoteUpdate
+                        if worktree.resolvedPrimaryContext?.kind == .pullRequest,
+                           rowSnapshot.pullRequestStatus?.hasRemoteUpdate == true
                         {
                             Button {
                                 Task {
@@ -470,7 +490,7 @@ struct RepositoryDetailView: View {
                             .help(worktree.isPinned ? "Worktree entpinnen" : "Worktree anpinnen")
                         }
 
-                        if showsIntegrationButton(for: worktree) {
+                        if showsIntegrationButton(for: worktree, rowSnapshot: rowSnapshot) {
                             Button {
                                 appModel.integrationDraft = IntegrationDraft(
                                     prTitle: worktree.branchName
@@ -494,7 +514,7 @@ struct RepositoryDetailView: View {
             }
 
             if worktree.isDefaultBranchWorkspace {
-                defaultBranchIndicatorRow(for: worktree)
+                defaultBranchIndicatorRow(for: worktree, detailSnapshot: detailSnapshot)
             }
         }
         .padding(.leading, CGFloat(indentationLevel) * 24)
@@ -506,14 +526,14 @@ struct RepositoryDetailView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(.thinMaterial)
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(worktreeCardTint(for: worktree))
+                    .fill(worktreeCardTint(for: worktree, rowSnapshot: rowSnapshot))
             }
         }
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(
-                    worktreeCardBorder(for: worktree),
-                    lineWidth: selectedWorktree?.id == worktree.id ? 1.5 : 1
+                    worktreeCardBorder(for: worktree, rowSnapshot: rowSnapshot),
+                    lineWidth: rowSnapshot.isSelected ? 1.5 : 1
                 )
         }
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -629,15 +649,14 @@ struct RepositoryDetailView: View {
         moveWorktree(worktree, to: destinationRoot)
     }
 
-    private func showsIntegrationButton(for worktree: WorktreeRecord) -> Bool {
+    private func showsIntegrationButton(for worktree: WorktreeRecord, rowSnapshot: WorktreePresentationSnapshot) -> Bool {
         guard !worktree.isDefaultBranchWorkspace else { return false }
         guard !worktree.isIdeaTree else { return false }
         guard worktree.resolvedPrimaryContext?.kind != .pullRequest else { return false }
         if worktree.lifecycleState == .integrating {
             return true
         }
-        let status = appModel.worktreeStatuses[worktree.id]
-        return (status?.aheadCount ?? 0) > 0
+        return rowSnapshot.status.aheadCount > 0
     }
 
     private func integrationTargetBranchName(for worktree: WorktreeRecord) -> String {
@@ -676,8 +695,8 @@ struct RepositoryDetailView: View {
         }
     }
 
-    private func worktreeCardTint(for worktree: WorktreeRecord) -> Color {
-        let isSelected = selectedWorktree?.id == worktree.id
+    private func worktreeCardTint(for worktree: WorktreeRecord, rowSnapshot: WorktreePresentationSnapshot) -> Color {
+        let isSelected = rowSnapshot.isSelected
         let isHovered = hoveredWorktreeID == worktree.id
 
         if worktree.cardColor == .none {
@@ -700,20 +719,20 @@ struct RepositoryDetailView: View {
         return accent.opacity(0.12)
     }
 
-    private func worktreeCardBorder(for worktree: WorktreeRecord) -> Color {
+    private func worktreeCardBorder(for worktree: WorktreeRecord, rowSnapshot: WorktreePresentationSnapshot) -> Color {
         if worktree.cardColor == .none {
-            return selectedWorktree?.id == worktree.id
+            return rowSnapshot.isSelected
                 ? Color.accentColor.opacity(0.30)
                 : Color.primary.opacity(0.07)
         }
 
-        return worktreeAccentColor(for: worktree).opacity(selectedWorktree?.id == worktree.id ? 0.42 : 0.24)
+        return worktreeAccentColor(for: worktree).opacity(rowSnapshot.isSelected ? 0.42 : 0.24)
     }
 
     // MARK: - Lifecycle Indicator
 
     @ViewBuilder
-    private func worktreeLifecycleIndicator(for worktree: WorktreeRecord) -> some View {
+    private func worktreeLifecycleIndicator(for worktree: WorktreeRecord, rowSnapshot: WorktreePresentationSnapshot) -> some View {
         switch worktree.lifecycleState {
         case .active:
             if worktree.isIdeaTree {
@@ -725,7 +744,7 @@ struct RepositoryDetailView: View {
                     Label("PR Worktree", systemImage: "arrow.triangle.merge")
                         .font(.caption)
                         .foregroundStyle(.blue)
-                    if let prStatus = appModel.pullRequestUpstreamStatuses[worktree.id], prStatus.hasRemoteUpdate {
+                    if rowSnapshot.pullRequestStatus?.hasRemoteUpdate == true {
                         Label("Update verfuegbar", systemImage: "arrow.down.circle")
                             .font(.caption)
                             .foregroundStyle(.orange)
@@ -739,7 +758,7 @@ struct RepositoryDetailView: View {
                 Label("PR offen", systemImage: "arrow.triangle.merge")
                     .font(.caption)
                     .foregroundStyle(.blue)
-                if let prStatus = appModel.pullRequestUpstreamStatuses[worktree.id], prStatus.hasRemoteUpdate {
+                if rowSnapshot.pullRequestStatus?.hasRemoteUpdate == true {
                     Label("Update verfuegbar", systemImage: "arrow.down.circle")
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -823,14 +842,14 @@ struct RepositoryDetailView: View {
     }
 
     @ViewBuilder
-    private func defaultBranchIndicatorRow(for worktree: WorktreeRecord) -> some View {
-        let status = appModel.worktreeStatuses[worktree.id]
-        let ahead = status?.aheadCount ?? 0
-        let behind = status?.behindCount ?? 0
+    private func defaultBranchIndicatorRow(for worktree: WorktreeRecord, detailSnapshot: RepositoryDetailSnapshot) -> some View {
+        let status = detailSnapshot.snapshot(for: worktree.id).status
+        let ahead = status.aheadCount
+        let behind = status.behindCount
 
         HStack(spacing: 10) {
-            if let defaultRemote = appModel.resolvedDefaultRemote(for: repository) {
-                Text("Basis von \(defaultRemote.name)")
+            if let defaultRemoteName = detailSnapshot.defaultRemoteName {
+                Text("Basis von \(defaultRemoteName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -884,7 +903,7 @@ struct RepositoryDetailView: View {
             )
         }
         Group {
-            if let log = appModel.syncLogs[repository.id] {
+            if let log = detailSnapshot.syncLog {
                 Text(log)
                     .font(.caption.monospaced())
                     .foregroundStyle(log.contains("⚠") ? .orange : .secondary)
@@ -901,18 +920,18 @@ struct RepositoryDetailView: View {
     }
 
     @ViewBuilder
-    private func worktreeStatusRow(for worktree: WorktreeRecord) -> some View {
+    private func worktreeStatusRow(for worktree: WorktreeRecord, rowSnapshot: WorktreePresentationSnapshot) -> some View {
         if worktree.isIdeaTree {
             Label("Materialisiert bei Bedarf", systemImage: "wand.and.stars")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
-            let status = appModel.worktreeStatuses[worktree.id]
-            let ahead = worktree.isDefaultBranchWorkspace ? 0 : (status?.aheadCount ?? 0)
-            let behind = worktree.isDefaultBranchWorkspace ? 0 : (status?.behindCount ?? 0)
-            let added = status?.addedLines ?? 0
-            let deleted = status?.deletedLines ?? 0
-            let hasChanges = status?.hasUncommittedChanges ?? false
+            let status = rowSnapshot.status
+            let ahead = worktree.isDefaultBranchWorkspace ? 0 : status.aheadCount
+            let behind = worktree.isDefaultBranchWorkspace ? 0 : status.behindCount
+            let added = status.addedLines
+            let deleted = status.deletedLines
+            let hasChanges = status.hasUncommittedChanges
 
             if ahead > 0 || behind > 0 || hasChanges {
                 HStack(spacing: 8) {
@@ -944,9 +963,7 @@ struct RepositoryDetailView: View {
     }
 
     @ViewBuilder
-    private func devContainerBadge(for worktree: WorktreeRecord) -> some View {
-        let state = appModel.devContainerState(for: worktree)
-
+    private func devContainerBadge(for state: DevContainerWorkspaceState) -> some View {
         if state.activeOperation != nil {
             Label(state.activeOperation?.title ?? "Working", systemImage: "shippingbox.fill")
                 .font(.caption)

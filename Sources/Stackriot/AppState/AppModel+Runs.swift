@@ -536,6 +536,7 @@ extension AppModel {
         let repositories = (try? modelContext.fetch(FetchDescriptor<ManagedRepository>())) ?? []
         for repository in repositories {
             refreshRepositorySidebarSnapshot(for: repository)
+            refreshRepositoryDetailSnapshot(for: repository)
         }
     }
 

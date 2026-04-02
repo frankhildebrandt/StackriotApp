@@ -53,6 +53,14 @@ enum AppPaths {
         applicationSupportDirectory.appendingPathComponent("RawLogs", isDirectory: true)
     }
 
+    static var diagnosticsDirectory: URL {
+        applicationSupportDirectory.appendingPathComponent("Diagnostics", isDirectory: true)
+    }
+
+    static var performanceDebugArtifactFile: URL {
+        diagnosticsDirectory.appendingPathComponent("performance-debug.jsonl", isDirectory: false)
+    }
+
     static var codexPlanArtifactsDirectory: URL {
         agentPlanArtifactsDirectory(for: .codex)
     }
@@ -105,6 +113,7 @@ enum AppPaths {
         try fileManager.createDirectory(at: worktreesRoot, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: plansDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: rawLogsDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: diagnosticsDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: codexPlanArtifactsDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: agentPlanArtifactsDirectory(for: .cursorCLI), withIntermediateDirectories: true)
     }
