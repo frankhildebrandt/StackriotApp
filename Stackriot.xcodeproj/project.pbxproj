@@ -68,6 +68,7 @@
 		E00000000000000000000032 /* ShellEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000032 /* ShellEnvironment.swift */; };
 		E00000000000000000000033 /* WorktreeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000033 /* WorktreeManager.swift */; };
 		E00000000000000000000034 /* WorktreeStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000034 /* WorktreeStatusService.swift */; };
+		E0000000000000000000007A /* WorktreeStatusRefreshCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000007A /* WorktreeStatusRefreshCoordinator.swift */; };
 		E00000000000000000000035 /* TerminalSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000035 /* TerminalSessions.swift */; };
 		E00000000000000000000036 /* WorktreeActionBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000036 /* WorktreeActionBar.swift */; };
 		E00000000000000000000037 /* GitCommitSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000037 /* GitCommitSheet.swift */; };
@@ -102,6 +103,7 @@
 		E0000000000000000000005C /* SettingsScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000005C /* SettingsScaffold.swift */; };
 		E0000000000000000000005D /* SSHKeysSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000005D /* SSHKeysSettingsView.swift */; };
 		E0000000000000000000005E /* TerminalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000005E /* TerminalSettingsView.swift */; };
+		E0000000000000000000007B /* DevContainerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000007B /* DevContainerSettingsView.swift */; };
 		E00000000000000000000060 /* JiraSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000060 /* JiraSettingsView.swift */; };
 		E00000000000000000000061 /* JiraCloudService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000061 /* JiraCloudService.swift */; };
 		E00000000000000000000062 /* KeychainSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000062 /* KeychainSecretStore.swift */; };
@@ -186,6 +188,7 @@
 		D00000000000000000000032 /* ShellEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellEnvironment.swift; sourceTree = "<group>"; };
 		D00000000000000000000033 /* WorktreeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeManager.swift; sourceTree = "<group>"; };
 		D00000000000000000000034 /* WorktreeStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeStatusService.swift; sourceTree = "<group>"; };
+		D0000000000000000000007A /* WorktreeStatusRefreshCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeStatusRefreshCoordinator.swift; sourceTree = "<group>"; };
 		D00000000000000000000035 /* TerminalSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessions.swift; sourceTree = "<group>"; };
 		D00000000000000000000036 /* WorktreeActionBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeActionBar.swift; sourceTree = "<group>"; };
 		D00000000000000000000037 /* GitCommitSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitCommitSheet.swift; sourceTree = "<group>"; };
@@ -220,6 +223,7 @@
 		D0000000000000000000005C /* SettingsScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScaffold.swift; sourceTree = "<group>"; };
 		D0000000000000000000005D /* SSHKeysSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeysSettingsView.swift; sourceTree = "<group>"; };
 		D0000000000000000000005E /* TerminalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsView.swift; sourceTree = "<group>"; };
+		D0000000000000000000007B /* DevContainerSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevContainerSettingsView.swift; sourceTree = "<group>"; };
 		D00000000000000000000060 /* JiraSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraSettingsView.swift; sourceTree = "<group>"; };
 		D00000000000000000000061 /* JiraCloudService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JiraCloudService.swift; sourceTree = "<group>"; };
 		D00000000000000000000062 /* KeychainSecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecretStore.swift; sourceTree = "<group>"; };
@@ -404,6 +408,7 @@
 				D00000000000000000000054 /* StructuredAgentOutputParser.swift */,
 				D00000000000000000000063 /* TicketProviderService.swift */,
 				D00000000000000000000033 /* WorktreeManager.swift */,
+				D0000000000000000000007A /* WorktreeStatusRefreshCoordinator.swift */,
 				D00000000000000000000034 /* WorktreeStatusService.swift */,
 			);
 			path = Services;
@@ -498,6 +503,7 @@
 				D00000000000000000000056 /* AboutSettingsView.swift */,
 				D00000000000000000000057 /* AIProviderSettingsView.swift */,
 				D00000000000000000000068 /* BrowserSessionsSettingsView.swift */,
+				D0000000000000000000007B /* DevContainerSettingsView.swift */,
 				D00000000000000000000060 /* JiraSettingsView.swift */,
 				D0000000000000000000006F /* MCPSettingsView.swift */,
 				D00000000000000000000058 /* NodeSettingsView.swift */,
@@ -621,6 +627,7 @@
 				E00000000000000000000056 /* AboutSettingsView.swift in Sources */,
 				E00000000000000000000057 /* AIProviderSettingsView.swift in Sources */,
 				E00000000000000000000068 /* BrowserSessionsSettingsView.swift in Sources */,
+				E0000000000000000000007B /* DevContainerSettingsView.swift in Sources */,
 				E00000000000000000000060 /* JiraSettingsView.swift in Sources */,
 				E0000000000000000000006F /* MCPSettingsView.swift in Sources */,
 				E00000000000000000000058 /* NodeSettingsView.swift in Sources */,
@@ -696,6 +703,7 @@
 				E00000000000000000000032 /* ShellEnvironment.swift in Sources */,
 				E00000000000000000000063 /* TicketProviderService.swift in Sources */,
 				E00000000000000000000033 /* WorktreeManager.swift in Sources */,
+				E0000000000000000000007A /* WorktreeStatusRefreshCoordinator.swift in Sources */,
 				E00000000000000000000034 /* WorktreeStatusService.swift in Sources */,
 				E00000000000000000000035 /* TerminalSessions.swift in Sources */,
 				E00000000000000000000042 /* AIProviderService.swift in Sources */,
