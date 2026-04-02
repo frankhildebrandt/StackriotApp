@@ -24,6 +24,69 @@ extension AppModel {
         }
     }
 
+    func cachedAvailableRunConfigurations(for worktree: WorktreeRecord) -> [RunConfiguration] {
+        let workspacePath = worktree.materializedURL?.path
+        guard
+            let cachedPath = runConfigurationWorkspacePathsByWorktreeID[worktree.id],
+            cachedPath == workspacePath
+        else {
+            return []
+        }
+        return runConfigurationsByWorktreeID[worktree.id] ?? []
+    }
+
+    func hasCachedDependencyActions(for worktree: WorktreeRecord) -> Bool {
+        let workspacePath = worktree.materializedURL?.path
+        guard
+            let cachedPath = runConfigurationWorkspacePathsByWorktreeID[worktree.id],
+            cachedPath == workspacePath
+        else {
+            return false
+        }
+        return dependencyActionAvailabilityByWorktreeID[worktree.id] ?? false
+    }
+
+    func invalidateRunConfigurationCache(for worktreeID: UUID) {
+        runConfigurationRefreshTasksByWorktreeID[worktreeID]?.cancel()
+        runConfigurationRefreshTasksByWorktreeID.removeValue(forKey: worktreeID)
+        runConfigurationsByWorktreeID.removeValue(forKey: worktreeID)
+        runConfigurationWorkspacePathsByWorktreeID.removeValue(forKey: worktreeID)
+        dependencyActionAvailabilityByWorktreeID.removeValue(forKey: worktreeID)
+    }
+
+    @discardableResult
+    func refreshAvailableRunConfigurationsCache(for worktree: WorktreeRecord) async -> [RunConfiguration] {
+        guard let worktreeURL = worktree.materializedURL else {
+            runConfigurationsByWorktreeID[worktree.id] = []
+            runConfigurationWorkspacePathsByWorktreeID[worktree.id] = nil
+            dependencyActionAvailabilityByWorktreeID[worktree.id] = false
+            return []
+        }
+
+        let currentPath = worktreeURL.path
+        if let inFlightTask = runConfigurationRefreshTasksByWorktreeID[worktree.id] {
+            let configurations = await inFlightTask.value
+            runConfigurationsByWorktreeID[worktree.id] = configurations
+            runConfigurationWorkspacePathsByWorktreeID[worktree.id] = currentPath
+            dependencyActionAvailabilityByWorktreeID[worktree.id] =
+                FileManager.default.fileExists(atPath: worktreeURL.appendingPathComponent("package.json").path)
+            return configurations
+        }
+
+        let packageManifestExists = FileManager.default.fileExists(atPath: worktreeURL.appendingPathComponent("package.json").path)
+        let task = Task.detached(priority: .utility) { [nodeTooling = services.nodeTooling, worktreeURL] in
+            let discovery = RunConfigurationDiscoveryService(nodeTooling: nodeTooling)
+            return discovery.discoverRunConfigurations(in: worktreeURL)
+        }
+        runConfigurationRefreshTasksByWorktreeID[worktree.id] = task
+        let configurations = await task.value
+        runConfigurationRefreshTasksByWorktreeID.removeValue(forKey: worktree.id)
+        runConfigurationsByWorktreeID[worktree.id] = configurations
+        runConfigurationWorkspacePathsByWorktreeID[worktree.id] = currentPath
+        dependencyActionAvailabilityByWorktreeID[worktree.id] = packageManifestExists
+        return configurations
+    }
+
     func availableRunConfigurations(for worktree: WorktreeRecord) -> [RunConfiguration] {
         guard let worktreeURL = worktree.materializedURL else { return [] }
         return services.runConfigurationDiscovery.discoverRunConfigurations(in: worktreeURL)

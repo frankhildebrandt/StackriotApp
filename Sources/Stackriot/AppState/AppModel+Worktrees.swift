@@ -784,6 +784,7 @@ extension AppModel {
                 services.devToolDiscovery.invalidateCache(for: worktreeURL)
             }
             invalidateWorktreeDiscoverySnapshot(for: worktreeID)
+            invalidateRunConfigurationCache(for: worktreeID)
             modelContext.delete(worktree)
             repository.updatedAt = .now
             try modelContext.save()

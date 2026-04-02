@@ -66,7 +66,7 @@ struct CreateWorktreeSheet: View {
         let status = draft.selectedTicketProviderStatus
         let selectedProvider = draft.ticketProvider ?? draft.availableTicketProviders.first
 
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
             mainContent(draft: draft, status: status, selectedProvider: selectedProvider)
 
             if isTicketDrawerPresented {
@@ -77,11 +77,11 @@ struct CreateWorktreeSheet: View {
                     triggerImmediateSearch: triggerImmediateSearch,
                     closeDrawer: closeTicketDrawer
                 )
-                .frame(width: 340, height: 620)
+                .frame(width: 340)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .frame(width: isTicketDrawerPresented ? 980 : 640, height: 620)
+        .frame(minWidth: isTicketDrawerPresented ? 981 : 640)
         .background(.regularMaterial)
         .animation(.spring(response: 0.28, dampingFraction: 0.82), value: isTicketDrawerPresented)
         .task(id: repository.id) {
@@ -118,57 +118,40 @@ struct CreateWorktreeSheet: View {
         status: TicketProviderStatus?,
         selectedProvider: TicketProviderKind?
     ) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                headerSection(draft: draft)
-                creationModeSection(draft: draft)
-                worktreeInputSection(draft: draft)
-                ticketSummarySection(draft: draft, status: status, selectedProvider: selectedProvider)
-
-                if isCreating {
-                    ProgressView(draft.creationMode.progressTitle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                actionButtons(draft: draft)
+        VStack(alignment: .leading, spacing: 20) {
+            headerSection(draft: draft)
+            worktreeInputSection(draft: draft)
+            if isCreating {
+                ProgressView(draft.creationMode.progressTitle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(24)
+
+            actionButtons(draft: draft)
         }
-        .frame(width: 640, height: 620, alignment: .topLeading)
+        .padding(24)
+        .frame(minWidth: 640, alignment: .topLeading)
     }
 
     private func headerSection(draft: WorktreeDraft) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        @Bindable var appModel = appModel
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(draft.creationMode.sheetTitle)
                 .font(.title2.weight(.semibold))
-
-            Text(creationSummaryText)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func creationModeSection(draft: WorktreeDraft) -> some View {
-        @Bindable var appModel = appModel
-
-        return VStack(alignment: .leading, spacing: 12) {
-            Text("Erstellungsart")
-                .font(.headline)
-
-            Picker("Erstellungsart", selection: $appModel.worktreeDraft.creationMode) {
+                .lineLimit(1)
+            Picker("", selection: $appModel.worktreeDraft.creationMode) {
                 ForEach(WorktreeCreationMode.allCases) { mode in
                     Text(mode.displayName).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
+            .frame(maxWidth: .infinity)
             .disabled(isCreating)
-
-            Text(draft.creationMode.formDescription)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Button(action: toggleTicketDrawer) {
+                Label(isTicketDrawerPresented ? "Close" : "Open", systemImage: "sidebar.right")
+            }
+            .disabled(isCreating)
         }
-        .padding(16)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func worktreeInputSection(draft: WorktreeDraft) -> some View {
@@ -519,8 +502,6 @@ private struct WorktreeTicketDrawer: View {
             if let selectedTicket = draft.selectedTicket {
                 selectedTicketDetailsCard(draft: draft, selectedTicket: selectedTicket)
             }
-
-            Spacer(minLength: 0)
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

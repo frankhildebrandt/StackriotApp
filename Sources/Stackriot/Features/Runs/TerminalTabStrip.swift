@@ -80,6 +80,20 @@ struct TerminalTabStrip: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .task(id: worktree.id) {
+            await Task.yield()
+            appModel.recordSelectionPhase(
+                repositoryID: repository.id,
+                worktreeID: worktree.id,
+                phase: "terminal-tab-strip-visible",
+                metadata: [
+                    "tabCount": tabs.count,
+                    "repositoryRunCount": repository.runs.count,
+                    "selectedPane": appModel.primaryPane(for: worktree).rawValue,
+                    "hasDevContainerConfiguration": discovery.hasDevContainerConfiguration
+                ]
+            )
+        }
     }
 
     // MARK: - Primary Context Chips

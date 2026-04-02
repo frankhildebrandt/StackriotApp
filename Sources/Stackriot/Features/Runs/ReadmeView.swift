@@ -190,7 +190,7 @@ private func renderHTML(for markdown: String) -> String {
 }
 
 struct MarkdownWebView: NSViewRepresentable {
-    let markdown: String
+    let html: String
     let baseURL: URL
 
     func makeCoordinator() -> Coordinator {
@@ -205,13 +205,13 @@ struct MarkdownWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        guard context.coordinator.lastMarkdown != markdown else { return }
-        context.coordinator.lastMarkdown = markdown
-        webView.loadHTMLString(renderHTML(for: markdown), baseURL: baseURL)
+        guard context.coordinator.lastHTML != html else { return }
+        context.coordinator.lastHTML = html
+        webView.loadHTMLString(html, baseURL: baseURL)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
-        var lastMarkdown: String?
+        var lastHTML: String?
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction
@@ -230,7 +230,8 @@ struct MarkdownWebView: NSViewRepresentable {
 struct ReadmeView: View {
     let worktreePath: String
 
-    @State private var content: String?
+    @State private var renderedHTML: String?
+    @State private var isLoading = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -247,8 +248,11 @@ struct ReadmeView: View {
 
             Divider()
 
-            if let content {
-                MarkdownWebView(markdown: content, baseURL: repositoryURL)
+            if isLoading && renderedHTML == nil {
+                ProgressView("Loading README…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let renderedHTML {
+                MarkdownWebView(html: renderedHTML, baseURL: repositoryURL)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView(
@@ -260,11 +264,8 @@ struct ReadmeView: View {
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
-        .onAppear {
-            loadReadme()
-        }
-        .onChange(of: worktreePath) { _, _ in
-            loadReadme()
+        .task(id: worktreePath) {
+            await loadReadme()
         }
     }
 
@@ -272,7 +273,8 @@ struct ReadmeView: View {
         URL(fileURLWithPath: worktreePath, isDirectory: true)
     }
 
-    private func loadReadme() {
+    private func loadReadme() async {
+        isLoading = true
         let candidates = [
             "README.md",
             "readme.md",
@@ -282,12 +284,18 @@ struct ReadmeView: View {
             "README.txt",
             "readme.txt",
         ]
-
-        content = candidates.lazy
-            .compactMap { candidate in
-                try? String(contentsOf: repositoryURL.appendingPathComponent(candidate), encoding: .utf8)
-            }
-            .first
+        let repositoryURL = repositoryURL
+        let renderedHTML = await Task.detached(priority: .utility) {
+            let content = candidates.lazy
+                .compactMap { candidate in
+                    try? String(contentsOf: repositoryURL.appendingPathComponent(candidate), encoding: .utf8)
+                }
+                .first
+            return content.map(renderHTML(for:))
+        }.value
+        guard !Task.isCancelled else { return }
+        self.renderedHTML = renderedHTML
+        isLoading = false
     }
 }
 
