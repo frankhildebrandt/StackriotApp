@@ -392,20 +392,6 @@ extension AppModel {
                 if let components = tool.promptCommandComponents(for: promptText, options: options),
                    let executable = tool.executableName
                 {
-                    let outputInterpreter: RunOutputInterpreterKind?
-                    switch tool {
-                    case .codex:
-                        outputInterpreter = .codexExecJSONL
-                    case .claudeCode:
-                        outputInterpreter = .claudePrintStreamJSON
-                    case .githubCopilot:
-                        outputInterpreter = .copilotPromptJSONL
-                    case .cursorCLI:
-                        outputInterpreter = .cursorAgentPrintJSON
-                    case .none:
-                        outputInterpreter = nil
-                    }
-
                     descriptor = CommandExecutionDescriptor(
                         title: tool.displayName,
                         actionKind: .aiAgent,
@@ -421,7 +407,7 @@ extension AppModel {
                         stdinText: nil,
                         environment: [:],
                         usesTerminalSession: false,
-                        outputInterpreter: outputInterpreter,
+                        outputInterpreter: tool.promptOutputInterpreter,
                         agentTool: tool,
                         initialPrompt: promptText
                     )

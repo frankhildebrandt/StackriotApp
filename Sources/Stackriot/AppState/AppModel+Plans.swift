@@ -800,103 +800,24 @@ extension AppModel {
             currentIntentText: currentIntentText,
             existingImplementationPlan: existingImplementationPlan
         )
-        switch tool {
-        case .claudeCode:
-            guard let components = tool.promptCommandComponents(for: prompt) else { return nil }
-            return CommandExecutionDescriptor(
-                title: "\(tool.displayName) Plan",
-                actionKind: .aiAgent,
-                showsAgentIndicator: false,
-                executable: "claude",
-                arguments: components.arguments,
-                displayCommandLine: components.displayCommandLine,
-                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
-                repositoryID: repositoryID,
-                worktreeID: worktree.id,
-                runtimeRequirement: nil,
-                stdinText: nil,
-                environment: [:],
-                usesTerminalSession: false,
-                outputInterpreter: .claudePrintStreamJSON,
-                agentTool: tool,
-                initialPrompt: prompt
-            )
-        case .codex:
-            return CommandExecutionDescriptor(
-                title: "\(tool.displayName) Plan",
-                actionKind: .aiAgent,
-                showsAgentIndicator: false,
-                executable: "codex",
-                arguments: [
-                    "exec",
-                    "--full-auto",
-                    "--json",
-                    "--color", "never",
-                    "--output-schema", artifactURLs.schema.path,
-                    "--output-last-message", artifactURLs.response.path,
-                    prompt,
-                ],
-                displayCommandLine: "codex exec --full-auto --json --color never --output-schema \(artifactURLs.schema.path.shellEscaped) --output-last-message \(artifactURLs.response.path.shellEscaped) <prompt>",
-                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
-                repositoryID: repositoryID,
-                worktreeID: worktree.id,
-                runtimeRequirement: nil,
-                stdinText: nil,
-                environment: [:],
-                usesTerminalSession: false,
-                outputInterpreter: .codexExecJSONL,
-                agentTool: tool,
-                initialPrompt: prompt
-            )
-        case .githubCopilot:
-            guard let components = tool.promptCommandComponents(for: prompt, options: options) else { return nil }
-            return CommandExecutionDescriptor(
-                title: "\(tool.displayName) Plan",
-                actionKind: .aiAgent,
-                showsAgentIndicator: false,
-                executable: "copilot",
-                arguments: components.arguments,
-                displayCommandLine: components.displayCommandLine,
-                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
-                repositoryID: repositoryID,
-                worktreeID: worktree.id,
-                runtimeRequirement: nil,
-                stdinText: nil,
-                environment: [:],
-                usesTerminalSession: false,
-                outputInterpreter: .copilotPromptJSONL,
-                agentTool: tool,
-                initialPrompt: prompt
-            )
-        case .cursorCLI:
-            return CommandExecutionDescriptor(
-                title: "\(tool.displayName) Plan",
-                actionKind: .aiAgent,
-                showsAgentIndicator: false,
-                executable: "cursor-agent",
-                arguments: [
-                    "--print",
-                    "--output-format", "stream-json",
-                    "--stream-partial-output",
-                    "--trust",
-                    "--plan",
-                    prompt,
-                ],
-                displayCommandLine: "cursor-agent --print --output-format stream-json --stream-partial-output --trust --plan <prompt>",
-                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
-                repositoryID: repositoryID,
-                worktreeID: worktree.id,
-                runtimeRequirement: nil,
-                stdinText: nil,
-                environment: [:],
-                usesTerminalSession: false,
-                outputInterpreter: .cursorAgentPrintJSON,
-                agentTool: tool,
-                initialPrompt: prompt
-            )
-        default:
+        guard let executable = tool.executableName,
+              let components = tool.planDraftCommandComponents(
+                  for: prompt,
+                  artifactURLs: artifactURLs,
+                  options: options
+              )
+        else {
             return nil
         }
+        return makeAgentPlanDescriptor(
+            title: "\(tool.displayName) Plan",
+            tool: tool,
+            executable: executable,
+            components: components,
+            worktree: worktree,
+            repositoryID: repositoryID,
+            initialPrompt: prompt
+        )
     }
 
     private nonisolated static func makePlanReplyDescriptor(
@@ -908,65 +829,53 @@ extension AppModel {
         reply: String
     ) -> CommandExecutionDescriptor? {
         let prompt = agentPlanFollowUpPrompt(for: tool, reply: reply)
-        switch tool {
-        case .codex:
-            guard let responseFilePath = responseFilePath?.nonEmpty else { return nil }
-            return CommandExecutionDescriptor(
-                title: "\(tool.displayName) Plan",
-                actionKind: .aiAgent,
-                showsAgentIndicator: false,
-                executable: "codex",
-                arguments: [
-                    "exec",
-                    "resume",
-                    "--full-auto",
-                    "--json",
-                    "--output-last-message", responseFilePath,
-                    sessionID,
-                    prompt,
-                ],
-                displayCommandLine: "codex exec resume --full-auto --json --output-last-message \(responseFilePath.shellEscaped) \(sessionID.shellEscaped) <reply>",
-                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
-                repositoryID: repositoryID,
-                worktreeID: worktree.id,
-                runtimeRequirement: nil,
-                stdinText: nil,
-                environment: [:],
-                usesTerminalSession: false,
-                outputInterpreter: .codexExecJSONL,
-                agentTool: tool,
-                initialPrompt: prompt
-            )
-        case .cursorCLI:
-            return CommandExecutionDescriptor(
-                title: "\(tool.displayName) Plan",
-                actionKind: .aiAgent,
-                showsAgentIndicator: false,
-                executable: "cursor-agent",
-                arguments: [
-                    "--resume", sessionID,
-                    "--print",
-                    "--output-format", "stream-json",
-                    "--stream-partial-output",
-                    "--trust",
-                    "--plan",
-                    prompt,
-                ],
-                displayCommandLine: "cursor-agent --resume \(sessionID.shellEscaped) --print --output-format stream-json --stream-partial-output --trust --plan <reply>",
-                currentDirectoryURL: URL(fileURLWithPath: worktree.path),
-                repositoryID: repositoryID,
-                worktreeID: worktree.id,
-                runtimeRequirement: nil,
-                stdinText: nil,
-                environment: [:],
-                usesTerminalSession: false,
-                outputInterpreter: .cursorAgentPrintJSON,
-                agentTool: tool,
-                initialPrompt: prompt
-            )
-        default:
+        guard let executable = tool.executableName,
+              let components = tool.planReplyCommandComponents(
+                  for: prompt,
+                  sessionID: sessionID,
+                  responseFilePath: responseFilePath
+              )
+        else {
             return nil
         }
+        return makeAgentPlanDescriptor(
+            title: "\(tool.displayName) Plan",
+            tool: tool,
+            executable: executable,
+            components: components,
+            worktree: worktree,
+            repositoryID: repositoryID,
+            initialPrompt: prompt
+        )
+    }
+
+    private nonisolated static func makeAgentPlanDescriptor(
+        title: String,
+        tool: AIAgentTool,
+        executable: String,
+        components: AgentPromptCommandComponents,
+        worktree: WorktreeRecord,
+        repositoryID: UUID,
+        initialPrompt: String
+    ) -> CommandExecutionDescriptor {
+        CommandExecutionDescriptor(
+            title: title,
+            actionKind: .aiAgent,
+            showsAgentIndicator: false,
+            executable: executable,
+            arguments: components.arguments,
+            displayCommandLine: components.displayCommandLine,
+            currentDirectoryURL: URL(fileURLWithPath: worktree.path),
+            repositoryID: repositoryID,
+            worktreeID: worktree.id,
+            runtimeRequirement: nil,
+            stdinText: nil,
+            environment: [:],
+            usesTerminalSession: false,
+            outputInterpreter: tool.promptOutputInterpreter,
+            agentTool: tool,
+            initialPrompt: initialPrompt
+        )
     }
 
     private nonisolated static func agentPlanPrompt(

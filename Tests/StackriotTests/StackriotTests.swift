@@ -203,6 +203,70 @@ struct StackriotTests {
     }
 
     @Test
+    func aiAgentPlanCommandsReuseSharedAutomationContracts() throws {
+        let prompt = "Plan the migration"
+        let reply = "Please include rollout steps"
+        let schemaURL = URL(fileURLWithPath: "/tmp/plan-schema.json")
+        let responseURL = URL(fileURLWithPath: "/tmp/plan-response.json")
+
+        let claudePlan = try #require(AIAgentTool.claudeCode.planDraftCommandComponents(for: prompt))
+        #expect(claudePlan.displayCommandLine.contains("claude -p --dangerously-skip-permissions --output-format stream-json"))
+        #expect(claudePlan.arguments.last == prompt)
+
+        let codexPlan = try #require(AIAgentTool.codex.planDraftCommandComponents(
+            for: prompt,
+            artifactURLs: (schema: schemaURL, response: responseURL)
+        ))
+        #expect(codexPlan.arguments.contains("--output-schema"))
+        #expect(codexPlan.arguments.contains(schemaURL.path))
+        #expect(codexPlan.arguments.contains("--output-last-message"))
+        #expect(codexPlan.arguments.contains(responseURL.path))
+        #expect(codexPlan.displayCommandLine.contains("--output-schema"))
+        #expect(codexPlan.displayCommandLine.contains("<prompt>"))
+
+        let cursorPlan = try #require(AIAgentTool.cursorCLI.planDraftCommandComponents(for: prompt))
+        #expect(cursorPlan.arguments == [
+            "--print",
+            "--output-format", "stream-json",
+            "--stream-partial-output",
+            "--trust",
+            "--plan",
+            prompt,
+        ])
+        #expect(cursorPlan.displayCommandLine == "cursor-agent --print --output-format stream-json --stream-partial-output --trust --plan <prompt>")
+
+        let cursorReply = try #require(AIAgentTool.cursorCLI.planReplyCommandComponents(
+            for: reply,
+            sessionID: "chat-123"
+        ))
+        #expect(cursorReply.arguments == [
+            "--resume", "chat-123",
+            "--print",
+            "--output-format", "stream-json",
+            "--stream-partial-output",
+            "--trust",
+            "--plan",
+            reply,
+        ])
+        #expect(cursorReply.displayCommandLine == "cursor-agent --resume \("chat-123".shellEscaped) --print --output-format stream-json --stream-partial-output --trust --plan <reply>")
+
+        let codexReply = try #require(AIAgentTool.codex.planReplyCommandComponents(
+            for: reply,
+            sessionID: "codex-session-1",
+            responseFilePath: responseURL.path
+        ))
+        #expect(codexReply.arguments == [
+            "exec",
+            "resume",
+            "--full-auto",
+            "--json",
+            "--output-last-message", responseURL.path,
+            "codex-session-1",
+            reply,
+        ])
+    }
+
+    @Test
     func planningSupportAddsCopilotAndClaudeWithoutResume() {
         #expect(AIAgentTool.codex.supportsPlanning)
         #expect(AIAgentTool.cursorCLI.supportsPlanning)
