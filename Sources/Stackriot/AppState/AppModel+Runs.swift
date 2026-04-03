@@ -98,7 +98,7 @@ extension AppModel {
     }
 
     func cancelRun(_ run: RunRecord, in modelContext: ModelContext) {
-        if run.isTransientPlanRun, let worktreeID = run.worktree?.id {
+        if run.isTransientPlanRun, let worktreeID = run.worktreeID {
             cancelAgentPlanDraft(for: worktreeID)
             return
         }
@@ -529,7 +529,7 @@ extension AppModel {
                     return nil
                 }
                 guard delegatedAgentRunIDs.contains(runID) else { return nil }
-                return run.worktree?.id
+                return run.worktreeID
             }
         )
         guard let modelContext = storedModelContext else { return }
@@ -649,8 +649,8 @@ extension AppModel {
         guard activateTerminal else { return }
         guard
             run.actionKind == .aiAgent,
-            let repositoryID = run.repository?.id,
-            let worktreeID = run.worktree?.id,
+            let repositoryID = run.repositoryID,
+            let worktreeID = run.worktreeID,
             selectedRepositoryID == repositoryID,
             selectedWorktreeIDsByRepository[repositoryID] == worktreeID
         else {

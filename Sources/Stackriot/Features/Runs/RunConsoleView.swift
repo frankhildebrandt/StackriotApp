@@ -76,8 +76,8 @@ struct RunConsoleView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: run?.id) {
             guard let run,
-                  let repositoryID = run.repository?.id,
-                  let worktreeID = run.worktree?.id
+                  let repositoryID = run.repositoryID,
+                  let worktreeID = run.worktreeID
             else {
                 return
             }
