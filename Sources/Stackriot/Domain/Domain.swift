@@ -556,6 +556,7 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
     case codex
     case githubCopilot
     case cursorCLI
+    case openCode
 
     var id: String { rawValue }
 
@@ -571,6 +572,8 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             "GitHub Copilot"
         case .cursorCLI:
             "Cursor"
+        case .openCode:
+            "OpenCode"
         }
     }
 
@@ -586,6 +589,8 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             "chevron.left.forwardslash.chevron.right"
         case .cursorCLI:
             "cursorarrow.click.2"
+        case .openCode:
+            "square.stack.3d.up"
         }
     }
 
@@ -601,6 +606,8 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             "copilot"
         case .cursorCLI:
             "cursor-agent"
+        case .openCode:
+            "opencode"
         }
     }
 
@@ -612,6 +619,8 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             .codex
         case .cursorCLI:
             .cursorAgent
+        case .openCode:
+            .openCode
         case .none, .githubCopilot:
             nil
         }
@@ -627,6 +636,8 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             .copilotPromptJSONL
         case .cursorCLI:
             .cursorAgentPrintJSON
+        case .openCode:
+            .openCodePromptJSONL
         case .none:
             nil
         }
@@ -634,7 +645,7 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
 
     var supportsPlanning: Bool {
         switch self {
-        case .claudeCode, .codex, .githubCopilot, .cursorCLI:
+        case .claudeCode, .codex, .githubCopilot, .cursorCLI, .openCode:
             true
         default:
             false
@@ -643,7 +654,7 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
 
     var supportsPlanResume: Bool {
         switch self {
-        case .codex, .cursorCLI:
+        case .codex, .cursorCLI, .openCode:
             true
         default:
             false
@@ -662,6 +673,8 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             "cd \(path.shellEscaped) && copilot"
         case .cursorCLI:
             "cd \(path.shellEscaped) && cursor-agent"
+        case .openCode:
+            "cd \(path.shellEscaped) && opencode"
         }
     }
 
@@ -709,6 +722,8 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             )
         case .cursorCLI:
             return cursorPromptCommandComponents(for: prompt, mode: .execute)
+        case .openCode:
+            return openCodePromptCommandComponents(for: prompt, mode: .execute)
         }
     }
 
@@ -736,6 +751,8 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             )
         case .cursorCLI:
             return cursorPromptCommandComponents(for: prompt, mode: .plan)
+        case .openCode:
+            return openCodePromptCommandComponents(for: prompt, mode: .plan)
         case .none:
             return nil
         }
@@ -763,6 +780,8 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             )
         case .cursorCLI:
             return cursorPromptCommandComponents(for: prompt, mode: .planResume(sessionID: sessionID))
+        case .openCode:
+            return openCodePromptCommandComponents(for: prompt, mode: .planResume(sessionID: sessionID))
         default:
             return nil
         }
@@ -802,6 +821,37 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
 
         arguments.append(prompt)
         displayCommand += " \(displayPrompt)"
+        return AgentPromptCommandComponents(arguments: arguments, displayCommandLine: displayCommand)
+    }
+
+    private func openCodePromptCommandComponents(
+        for prompt: String,
+        mode: AgentPromptCommandMode
+    ) -> AgentPromptCommandComponents {
+        var arguments = ["run"]
+        var displayCommand = "opencode run"
+
+        switch mode {
+        case .execute:
+            break
+        case .plan:
+            arguments += ["--agent", "plan"]
+            displayCommand += " --agent plan"
+        case .planResume(let sessionID):
+            arguments += ["--session", sessionID, "--agent", "plan"]
+            displayCommand += " --session \(sessionID.shellEscaped) --agent plan"
+        }
+
+        arguments += ["--format", "json", prompt]
+        let displayPrompt: String = switch mode {
+        case .execute:
+            prompt.shellEscaped
+        case .plan:
+            "<prompt>"
+        case .planResume:
+            "<reply>"
+        }
+        displayCommand += " --format json \(displayPrompt)"
         return AgentPromptCommandComponents(arguments: arguments, displayCommandLine: displayCommand)
     }
 }
@@ -1104,6 +1154,7 @@ enum RunOutputInterpreterKind: String, Codable, Sendable {
     case claudePrintStreamJSON
     case copilotPromptJSONL
     case cursorAgentPrintJSON
+    case openCodePromptJSONL
 }
 
 struct CursorAgentPrintedResponse: Decodable, Equatable, Sendable {
@@ -1446,6 +1497,7 @@ enum AppManagedTool: String, Codable, CaseIterable, Identifiable, Sendable {
     case claude
     case cursorAgent
     case codex
+    case openCode
     case vscode
 
     var id: String { rawValue }
@@ -1460,6 +1512,8 @@ enum AppManagedTool: String, Codable, CaseIterable, Identifiable, Sendable {
             "Cursor Agent CLI"
         case .codex:
             "Codex CLI"
+        case .openCode:
+            "OpenCode CLI"
         case .vscode:
             "VS Code CLI"
         }
@@ -1475,6 +1529,8 @@ enum AppManagedTool: String, Codable, CaseIterable, Identifiable, Sendable {
             "cursor-agent"
         case .codex:
             "codex"
+        case .openCode:
+            "opencode"
         case .vscode:
             "code"
         }

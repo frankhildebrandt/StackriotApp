@@ -21,6 +21,8 @@ enum StructuredAgentOutputParserFactory {
             CopilotPromptJSONLParser()
         case .cursorAgentPrintJSON:
             CursorAgentPrintJSONParser()
+        case .openCodePromptJSONL:
+            OpenCodePromptJSONLParser()
         }
     }
 }

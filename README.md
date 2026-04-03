@@ -25,7 +25,7 @@
 - Zeigt den Worktree-Pfad im Finder an
 
 ### KI-Agenten
-- Weist jedem Worktree einen **AI-Agent** zu: Claude Code, Codex, GitHub Copilot CLI oder Cursor CLI
+- Weist jedem Worktree einen **AI-Agent** zu: Claude Code, Codex, GitHub Copilot CLI, Cursor CLI oder OpenCode
 - Startet den Agenten per AppleScript in einem Terminal.app-Fenster
 - Überwacht den laufenden Agenten-Prozess via PID-Polling
 - Zeigt laufende Agenten mit einem animierten **lila Indikator** in der Sidebar und in der Worktree-Liste

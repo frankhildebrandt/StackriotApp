@@ -613,6 +613,8 @@ extension AppModel {
             sessionID = (parser as? CopilotPromptJSONLParser)?.currentSessionID?.nonEmpty
         case .cursorCLI:
             sessionID = (parser as? CursorAgentPrintJSONParser)?.currentSessionID?.nonEmpty
+        case .openCode:
+            sessionID = (parser as? OpenCodePromptJSONLParser)?.currentSessionID?.nonEmpty
         default:
             sessionID = nil
         }
@@ -633,6 +635,8 @@ extension AppModel {
             responseText = (parser as? ClaudePrintStreamJSONParser)?.latestAssistantMessageText?.nonEmpty
         case .githubCopilot:
             responseText = (parser as? CopilotPromptJSONLParser)?.latestAssistantMessageText?.nonEmpty
+        case .openCode:
+            responseText = (parser as? OpenCodePromptJSONLParser)?.latestAssistantMessageText?.nonEmpty
         default:
             responseText = nil
         }
@@ -684,6 +688,8 @@ extension AppModel {
             return (parser as? CopilotPromptJSONLParser)?.latestAssistantMessageText.flatMap(Self.parseAgentPlanResponse(from:))
         case .cursorCLI:
             return (parser as? CursorAgentPrintJSONParser)?.latestResultText.flatMap(Self.parseAgentPlanResponse(from:))
+        case .openCode:
+            return (parser as? OpenCodePromptJSONLParser)?.latestAssistantMessageText.flatMap(Self.parseAgentPlanResponse(from:))
         default:
             return nil
         }

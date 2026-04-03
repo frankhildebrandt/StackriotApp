@@ -200,6 +200,10 @@ struct StackriotTests {
         let cursor = AIAgentTool.cursorCLI.launchCommandWithPrompt(prompt, in: path)
         #expect(cursor.contains("cursor-agent --print --output-format stream-json --stream-partial-output --trust --force"))
         #expect(cursor.contains(prompt.shellEscaped))
+
+        let openCode = AIAgentTool.openCode.launchCommandWithPrompt(prompt, in: path)
+        #expect(openCode.contains("opencode run --format json"))
+        #expect(openCode.contains(prompt.shellEscaped))
     }
 
     @Test
@@ -264,6 +268,28 @@ struct StackriotTests {
             "codex-session-1",
             reply,
         ])
+
+        let openCodePlan = try #require(AIAgentTool.openCode.planDraftCommandComponents(for: prompt))
+        #expect(openCodePlan.arguments == [
+            "run",
+            "--agent", "plan",
+            "--format", "json",
+            prompt,
+        ])
+        #expect(openCodePlan.displayCommandLine == "opencode run --agent plan --format json <prompt>")
+
+        let openCodeReply = try #require(AIAgentTool.openCode.planReplyCommandComponents(
+            for: reply,
+            sessionID: "ses_123"
+        ))
+        #expect(openCodeReply.arguments == [
+            "run",
+            "--session", "ses_123",
+            "--agent", "plan",
+            "--format", "json",
+            reply,
+        ])
+        #expect(openCodeReply.displayCommandLine == "opencode run --session \("ses_123".shellEscaped) --agent plan --format json <reply>")
     }
 
     @Test
@@ -272,8 +298,10 @@ struct StackriotTests {
         #expect(AIAgentTool.cursorCLI.supportsPlanning)
         #expect(AIAgentTool.claudeCode.supportsPlanning)
         #expect(AIAgentTool.githubCopilot.supportsPlanning)
+        #expect(AIAgentTool.openCode.supportsPlanning)
         #expect(AIAgentTool.codex.supportsPlanResume)
         #expect(AIAgentTool.cursorCLI.supportsPlanResume)
+        #expect(AIAgentTool.openCode.supportsPlanResume)
         #expect(!AIAgentTool.claudeCode.supportsPlanResume)
         #expect(!AIAgentTool.githubCopilot.supportsPlanResume)
     }
