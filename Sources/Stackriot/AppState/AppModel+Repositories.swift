@@ -166,16 +166,18 @@ extension AppModel {
         var logLines: [String] = []
         if let fetchErr = result.fetchErrorMessage {
             logLines.append("⚠ Fetch: \(fetchErr)")
+        } else if result.fetchedAt != nil {
+            let remoteName = defaultRemoteName ?? "remote"
+            logLines.append("✓ Fetch von \(remoteName) abgeschlossen")
         }
         if let syncErr = result.defaultBranchSyncErrorMessage {
             logLines.append("⚠ Sync: \(syncErr)")
-        } else if result.defaultBranchSyncSummary != nil {
+        } else if let syncSummary = result.defaultBranchSyncSummary {
+            logLines.append("✓ Sync: \(syncSummary)")
         } else {
             logLines.append("✓ Sync: Kein Default-Worktree für \(result.defaultBranch) gefunden")
         }
-        if logLines != [] {
-            syncLogs[repository.id] = logLines.joined(separator: "\n")
-        }
+        syncLogs[repository.id] = logLines.isEmpty ? nil : logLines.joined(separator: "\n")
 
         _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
         primeWorktreeConfigurationSnapshots(for: repository)
