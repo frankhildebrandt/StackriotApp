@@ -84,7 +84,7 @@ struct AgentRunFeedView: View {
 
     private var usesAssistantDrawer: Bool {
         switch run.outputInterpreter {
-        case .cursorAgentPrintJSON, .copilotPromptJSONL:
+        case .cursorAgentPrintJSON, .copilotPromptJSONL, .openCodePromptJSONL:
             true
         default:
             false
@@ -121,6 +121,8 @@ struct AgentRunFeedView: View {
             ["assistant"]
         case .copilotPromptJSONL:
             ["assistant.message", "assistant.message_delta"]
+        case .openCodePromptJSONL:
+            ["text"]
         default:
             []
         }

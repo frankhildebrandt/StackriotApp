@@ -95,6 +95,7 @@
 		E00000000000000000000053 /* CopilotPromptJSONLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000053 /* CopilotPromptJSONLParser.swift */; };
 		E00000000000000000000054 /* StructuredAgentOutputParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000054 /* StructuredAgentOutputParser.swift */; };
 		E0000000000000000000005F /* CursorAgentPrintJSONParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000005F /* CursorAgentPrintJSONParser.swift */; };
+		E00000000000000000000080 /* OpenCodePromptJSONLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000080 /* OpenCodePromptJSONLParser.swift */; };
 		E00000000000000000000056 /* AboutSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000056 /* AboutSettingsView.swift */; };
 		E00000000000000000000057 /* AIProviderSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000057 /* AIProviderSettingsView.swift */; };
 		E00000000000000000000058 /* NodeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000058 /* NodeSettingsView.swift */; };
@@ -216,6 +217,7 @@
 		D00000000000000000000053 /* CopilotPromptJSONLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotPromptJSONLParser.swift; sourceTree = "<group>"; };
 		D00000000000000000000054 /* StructuredAgentOutputParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredAgentOutputParser.swift; sourceTree = "<group>"; };
 		D0000000000000000000005F /* CursorAgentPrintJSONParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorAgentPrintJSONParser.swift; sourceTree = "<group>"; };
+		D00000000000000000000080 /* OpenCodePromptJSONLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodePromptJSONLParser.swift; sourceTree = "<group>"; };
 		D00000000000000000000056 /* AboutSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutSettingsView.swift; sourceTree = "<group>"; };
 		D00000000000000000000057 /* AIProviderSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderSettingsView.swift; sourceTree = "<group>"; };
 		D00000000000000000000058 /* NodeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeSettingsView.swift; sourceTree = "<group>"; };
@@ -387,6 +389,7 @@
 				D0000000000000000000007C /* LocalToolManager.swift */,
 				D00000000000000000000053 /* CopilotPromptJSONLParser.swift */,
 				D0000000000000000000005F /* CursorAgentPrintJSONParser.swift */,
+				D00000000000000000000080 /* OpenCodePromptJSONLParser.swift */,
 				D00000000000000000000077 /* DevContainerService.swift */,
 				D00000000000000000000044 /* DevToolDiscoveryService.swift */,
 				D00000000000000000000069 /* EmbeddedBrowserSessionStore.swift */,
@@ -716,6 +719,7 @@
 				E00000000000000000000052 /* ClaudePrintStreamJSONParser.swift in Sources */,
 				E00000000000000000000053 /* CopilotPromptJSONLParser.swift in Sources */,
 				E0000000000000000000005F /* CursorAgentPrintJSONParser.swift in Sources */,
+				E00000000000000000000080 /* OpenCodePromptJSONLParser.swift in Sources */,
 				E00000000000000000000044 /* DevToolDiscoveryService.swift in Sources */,
 				E00000000000000000000069 /* EmbeddedBrowserSessionStore.swift in Sources */,
 				E00000000000000000000045 /* RunConfigurationDiscoveryService.swift in Sources */,

@@ -88,6 +88,8 @@ final class LocalToolManager {
             try await installCursorAgent()
         case .codex:
             try await installNPMPackage("@openai/codex")
+        case .openCode:
+            try await installNPMPackage("opencode-ai")
         case .vscode:
             try installVSCodeShim()
         }
@@ -213,6 +215,8 @@ final class LocalToolManager {
             "Install via Stackriot or run the official Cursor Agent installer."
         case .codex:
             "Install via Stackriot or install @openai/codex globally."
+        case .openCode:
+            "Install via Stackriot or install opencode-ai globally."
         case .vscode:
             "Install via Stackriot to link the VS Code app bundle as code."
         }

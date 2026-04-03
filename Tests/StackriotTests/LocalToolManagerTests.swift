@@ -49,6 +49,7 @@ struct LocalToolManagerTests {
         #expect(AppManagedTool.claude.executableName == "claude")
         #expect(AppManagedTool.cursorAgent.executableName == "cursor-agent")
         #expect(AppManagedTool.codex.executableName == "codex")
+        #expect(AppManagedTool.openCode.executableName == "opencode")
         #expect(AppManagedTool.vscode.executableName == "code")
     }
 
