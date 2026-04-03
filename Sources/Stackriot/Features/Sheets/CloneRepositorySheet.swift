@@ -45,6 +45,7 @@ struct CloneRepositorySheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canClone)
+                .commandEnterAction(disabled: !canClone) { startClone() }
             }
         }
         .padding(24)

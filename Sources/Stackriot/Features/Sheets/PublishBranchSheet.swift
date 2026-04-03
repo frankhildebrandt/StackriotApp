@@ -42,6 +42,12 @@ struct PublishBranchSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(appModel.publishDraft.remoteName.isEmpty)
+                .commandEnterAction(disabled: appModel.publishDraft.remoteName.isEmpty) {
+                    Task {
+                        await appModel.publishSelectedBranch(in: modelContext)
+                        dismiss()
+                    }
+                }
             }
         }
         .padding(24)

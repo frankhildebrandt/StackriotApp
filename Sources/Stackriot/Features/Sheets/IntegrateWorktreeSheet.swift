@@ -213,6 +213,20 @@ struct IntegrateWorktreeSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isRunning || targetUnavailableMessage != nil || (draft.method == .githubPR && !canUseGitHubPR) || (draft.method == .githubPR && draft.prTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                .commandEnterAction(disabled: isRunning || targetUnavailableMessage != nil || (draft.method == .githubPR && !canUseGitHubPR) || (draft.method == .githubPR && draft.prTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)) {
+                    guard let worktree else { dismiss(); return }
+                    isRunning = true
+                    Task {
+                        await appModel.startIntegration(
+                            worktree,
+                            repository: repository,
+                            draft: draft,
+                            modelContext: modelContext
+                        )
+                        isRunning = false
+                        dismiss()
+                    }
+                }
             }
         }
         .padding(24)

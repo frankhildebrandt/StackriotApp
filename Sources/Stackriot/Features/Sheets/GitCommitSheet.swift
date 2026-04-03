@@ -77,6 +77,17 @@ struct GitCommitSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .commandEnterAction(disabled: message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                    Task {
+                        await appModel.runGitCommit(
+                            message: message,
+                            in: worktree,
+                            repository: repository,
+                            modelContext: modelContext
+                        )
+                    }
+                    dismiss()
+                }
             }
         }
         .padding(24)
