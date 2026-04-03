@@ -737,6 +737,43 @@ extension AppModel {
         save(modelContext)
     }
 
+    func discardAgentImplementation(
+        _ worktree: WorktreeRecord,
+        repository: ManagedRepository,
+        modelContext: ModelContext
+    ) async {
+        guard let worktreePath = worktree.materializedURL else {
+            pendingErrorMessage = "Worktree ist nicht materialisiert."
+            return
+        }
+        let sourceBranch = worktree.sourceBranchName ?? repository.defaultBranch
+        do {
+            try await services.worktreeManager.resetToSourceBranch(
+                worktreePath: worktreePath,
+                sourceBranch: sourceBranch
+            )
+            invalidateWorktreeDiscoverySnapshot(for: worktree.id)
+            await refreshWorktreeStatuses(for: repository)
+            notifyOperationSuccess(
+                title: "AI-Implementierung verworfen",
+                subtitle: repository.displayName,
+                body: "\(worktree.branchName) wurde auf \(sourceBranch) zurückgesetzt.",
+                userInfo: [
+                    "repositoryID": repository.id.uuidString,
+                    "worktreeID": worktree.id.uuidString,
+                ]
+            )
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+            notifyOperationFailure(
+                title: "Fehler beim Verwerfen",
+                subtitle: repository.displayName,
+                body: error.localizedDescription,
+                userInfo: ["worktreeID": worktree.id.uuidString]
+            )
+        }
+    }
+
     func removeWorktree(_ worktree: WorktreeRecord, in modelContext: ModelContext) async {
         do {
             if worktree.isDefaultBranchWorkspace {

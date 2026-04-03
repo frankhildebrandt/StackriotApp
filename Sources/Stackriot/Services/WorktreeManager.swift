@@ -302,6 +302,28 @@ struct WorktreeManager {
         return destination
     }
 
+    func resetToSourceBranch(worktreePath: URL, sourceBranch: String) async throws {
+        let resetResult = try await runCommand(
+            "git",
+            ["-C", worktreePath.path, "reset", "--hard", sourceBranch],
+            nil,
+            [:]
+        )
+        guard resetResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(resetResult.stderr.isEmpty ? resetResult.stdout : resetResult.stderr)
+        }
+
+        let cleanResult = try await runCommand(
+            "git",
+            ["-C", worktreePath.path, "clean", "-fd"],
+            nil,
+            [:]
+        )
+        guard cleanResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(cleanResult.stderr.isEmpty ? cleanResult.stdout : cleanResult.stderr)
+        }
+    }
+
     func removeWorktree(bareRepositoryPath: URL, worktreePath: URL) async throws {
         let result = try await runCommand(
             "git",

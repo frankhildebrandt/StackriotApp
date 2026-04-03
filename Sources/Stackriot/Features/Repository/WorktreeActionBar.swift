@@ -15,6 +15,7 @@ struct WorktreeActionBar: View {
     let repository: ManagedRepository
 
     @State private var pendingGitCommit = false
+    @State private var showDiscardAIChangesConfirmation = false
 
     var body: some View {
         let discovery = appModel.cachedWorktreeDiscoverySnapshot(for: worktree)
@@ -87,6 +88,25 @@ struct WorktreeActionBar: View {
         }
         .sheet(isPresented: $pendingGitCommit) {
             GitCommitSheet(worktree: worktree, repository: repository)
+        }
+        .confirmationDialog(
+            "AI-Implementierung verwerfen?",
+            isPresented: $showDiscardAIChangesConfirmation,
+            titleVisibility: .visible
+        ) {
+            let sourceBranch = worktree.sourceBranchName ?? "Quell-Branch"
+            Button("Auf \(sourceBranch) zurücksetzen", role: .destructive) {
+                Task {
+                    await appModel.discardAgentImplementation(
+                        worktree,
+                        repository: repository,
+                        modelContext: modelContext
+                    )
+                }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Alle nicht integrierten Änderungen im Worktree werden unwiderruflich gelöscht. Intent und Implementierungsplan bleiben erhalten.")
         }
     }
 
@@ -316,6 +336,10 @@ struct WorktreeActionBar: View {
             Divider()
             Button("Publish Branch…") {
                 appModel.presentPublishSheet(for: repository, worktree: worktree)
+            }
+            Divider()
+            Button("AI-Implementierung verwerfen…", role: .destructive) {
+                showDiscardAIChangesConfirmation = true
             }
         } label: {
             Image(systemName: "arrow.triangle.branch")
