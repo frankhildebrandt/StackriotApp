@@ -280,12 +280,40 @@ enum AgentPromptCommandMode: Sendable, Equatable {
     case planResume(sessionID: String)
 }
 
-struct CopilotModelOption: Identifiable, Sendable, Equatable, Hashable {
+struct CopilotModelOption: Identifiable, Sendable, Equatable, Hashable, Codable {
     let id: String
     let displayName: String
     let isAuto: Bool
 
     static let auto = CopilotModelOption(id: "auto", displayName: "Auto", isAuto: true)
+    static let defaultManualOptions: [CopilotModelOption] = [
+        CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
+        CopilotModelOption(id: "claude-sonnet-4.6", displayName: "Claude Sonnet 4.6", isAuto: false),
+        CopilotModelOption(id: "claude-opus-4.6", displayName: "Claude Opus 4.6", isAuto: false),
+        CopilotModelOption(id: "gemini-3.1-pro", displayName: "Google Gemini 3.1 Pro", isAuto: false),
+    ]
+
+    static let defaultOptions: [CopilotModelOption] = [.auto] + defaultManualOptions
+
+    static func defaultDisplayName(for modelID: String) -> String {
+        switch modelID {
+        case auto.id:
+            auto.displayName
+        case "claude-sonnet-4.6":
+            "Claude Sonnet 4.6"
+        case "claude-opus-4.6":
+            "Claude Opus 4.6"
+        case "gemini-3.1-pro":
+            "Google Gemini 3.1 Pro"
+        default:
+            modelID
+        }
+    }
+}
+
+private struct StoredCopilotModelPreference: Codable {
+    let id: String
+    let displayName: String
 }
 
 enum RunConfigurationSource: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -1518,6 +1546,8 @@ enum AppPreferences {
     static let aiAPIKeyKey = "ai.apiKey"
     static let aiBaseURLKey = "ai.baseURL"
     static let aiModelKey = "ai.model"
+    static let copilotModelsKey = "copilot.models"
+    static let copilotDefaultModelIDKey = "copilot.defaultModelID"
     static let jiraBaseURLKey = "jira.baseURL"
     static let jiraUserEmailKey = "jira.userEmail"
     static let mcpEnabledKey = "mcp.enabled"
@@ -1535,6 +1565,7 @@ enum AppPreferences {
     static let defaultTerminalTabRetentionMode = TerminalTabRetentionMode.shortRetain
     static let defaultPerformanceDebugModeEnabled = false
     static let defaultAIProvider = AIProviderKind.openAI
+    static let fallbackCopilotModelID = CopilotModelOption.auto.id
     static let defaultMCPEnabled = false
     static let defaultMCPListenAddress = "127.0.0.1"
     static let defaultMCPPort = 8765
@@ -1670,6 +1701,83 @@ enum AppPreferences {
             model: aiModel,
             baseURL: aiBaseURL
         )
+    }
+
+    static var copilotModelOptions: [CopilotModelOption] {
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: copilotModelsKey) else {
+            return CopilotModelOption.defaultOptions
+        }
+        guard let storedModels = try? JSONDecoder().decode([StoredCopilotModelPreference].self, from: data) else {
+            return CopilotModelOption.defaultOptions
+        }
+
+        return normalizedCopilotModelOptions(
+            from: storedModels.map { CopilotModelOption(id: $0.id, displayName: $0.displayName, isAuto: false) }
+        )
+    }
+
+    static var defaultCopilotModelID: String {
+        validatedCopilotModelID(
+            UserDefaults.standard.string(forKey: copilotDefaultModelIDKey),
+            availableModels: copilotModelOptions
+        )
+    }
+
+    static func normalizedCopilotModelOptions(from options: [CopilotModelOption]) -> [CopilotModelOption] {
+        var seen = Set<String>()
+        let manualOptions = options.compactMap { option -> CopilotModelOption? in
+            let trimmedID = option.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmedID.isEmpty == false else { return nil }
+            guard trimmedID.caseInsensitiveCompare(CopilotModelOption.auto.id) != .orderedSame else { return nil }
+            guard seen.insert(trimmedID.lowercased()).inserted else { return nil }
+
+            let trimmedDisplayName = option.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return CopilotModelOption(
+                id: trimmedID,
+                displayName: trimmedDisplayName.nonEmpty ?? CopilotModelOption.defaultDisplayName(for: trimmedID),
+                isAuto: false
+            )
+        }
+
+        return [.auto] + manualOptions
+    }
+
+    static func validatedCopilotModelID(_ candidate: String?, availableModels: [CopilotModelOption]) -> String {
+        let trimmedCandidate = candidate?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedCandidate,
+           availableModels.contains(where: { $0.id == trimmedCandidate }) {
+            return trimmedCandidate
+        }
+        return availableModels.first(where: \.isAuto)?.id
+            ?? availableModels.first?.id
+            ?? fallbackCopilotModelID
+    }
+
+    static func setCopilotModelOptions(_ options: [CopilotModelOption]) {
+        let normalizedOptions = normalizedCopilotModelOptions(from: options)
+        let storedModels = normalizedOptions
+            .filter { !$0.isAuto }
+            .map { StoredCopilotModelPreference(id: $0.id, displayName: $0.displayName) }
+
+        let defaults = UserDefaults.standard
+        do {
+            let data = try JSONEncoder().encode(storedModels)
+            defaults.set(data, forKey: copilotModelsKey)
+        } catch {
+            defaults.removeObject(forKey: copilotModelsKey)
+        }
+
+        let validatedDefault = validatedCopilotModelID(
+            defaults.string(forKey: copilotDefaultModelIDKey),
+            availableModels: normalizedOptions
+        )
+        defaults.set(validatedDefault, forKey: copilotDefaultModelIDKey)
+    }
+
+    static func setDefaultCopilotModelID(_ modelID: String) {
+        let validatedModelID = validatedCopilotModelID(modelID, availableModels: copilotModelOptions)
+        UserDefaults.standard.set(validatedModelID, forKey: copilotDefaultModelIDKey)
     }
 
     static var jiraBaseURL: String {

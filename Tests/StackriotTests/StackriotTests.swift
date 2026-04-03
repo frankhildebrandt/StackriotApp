@@ -1201,6 +1201,50 @@ struct StackriotTests {
         #expect(AppPreferences.worktreeStatusPollingInterval == AppPreferences.defaultWorktreeStatusPollingInterval)
     }
 
+    @Test
+    func copilotModelPreferencesDefaultAndNormalizeConfiguredModels() {
+        let defaults = UserDefaults.standard
+        let previousModels = defaults.object(forKey: AppPreferences.copilotModelsKey)
+        let previousDefaultModel = defaults.object(forKey: AppPreferences.copilotDefaultModelIDKey)
+        defer {
+            if let previousModels {
+                defaults.set(previousModels, forKey: AppPreferences.copilotModelsKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.copilotModelsKey)
+            }
+            if let previousDefaultModel {
+                defaults.set(previousDefaultModel, forKey: AppPreferences.copilotDefaultModelIDKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.copilotDefaultModelIDKey)
+            }
+        }
+
+        defaults.removeObject(forKey: AppPreferences.copilotModelsKey)
+        defaults.removeObject(forKey: AppPreferences.copilotDefaultModelIDKey)
+
+        #expect(AppPreferences.copilotModelOptions == CopilotModelOption.defaultOptions)
+        #expect(AppPreferences.defaultCopilotModelID == CopilotModelOption.auto.id)
+
+        AppPreferences.setCopilotModelOptions([
+            CopilotModelOption(id: " auto ", displayName: "Auto override", isAuto: false),
+            CopilotModelOption(id: " claude-sonnet-4.6 ", displayName: " Claude Sonnet 4.6 ", isAuto: false),
+            CopilotModelOption(id: "claude-sonnet-4.6", displayName: "Duplicate", isAuto: false),
+            CopilotModelOption(id: "  ", displayName: "Ignored", isAuto: false),
+            CopilotModelOption(id: "gemini-3.1-pro", displayName: "", isAuto: false),
+        ])
+        AppPreferences.setDefaultCopilotModelID("missing")
+
+        #expect(AppPreferences.copilotModelOptions == [
+            .auto,
+            CopilotModelOption(id: "claude-sonnet-4.6", displayName: "Claude Sonnet 4.6", isAuto: false),
+            CopilotModelOption(id: "gemini-3.1-pro", displayName: "Google Gemini 3.1 Pro", isAuto: false),
+        ])
+        #expect(AppPreferences.defaultCopilotModelID == CopilotModelOption.auto.id)
+
+        AppPreferences.setDefaultCopilotModelID("gemini-3.1-pro")
+        #expect(AppPreferences.defaultCopilotModelID == "gemini-3.1-pro")
+    }
+
     @MainActor
     @Test
     func refreshAllRepositoriesUsesDefaultBranchSyncPath() async throws {
