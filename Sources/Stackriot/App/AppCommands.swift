@@ -85,3 +85,17 @@ struct StackriotAppCommands: Commands {
         }
     }
 }
+
+extension View {
+    /// Adds Command + Return as a hidden shortcut for sheet confirmation buttons.
+    func commandEnterAction(disabled: Bool = false, _ action: @escaping () -> Void) -> some View {
+        background(
+            Button("") { action() }
+                .keyboardShortcut(.return, modifiers: [.command])
+                .disabled(disabled)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .allowsHitTesting(false)
+        )
+    }
+}
