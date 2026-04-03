@@ -279,12 +279,7 @@ struct RawLogBrowserWindow: View {
                     ContentUnavailableView("Log konnte nicht geladen werden", systemImage: "exclamationmark.triangle", description: Text(logLoadError))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    TextEditor(text: .constant(logText))
-                        .font(.system(.body, design: .monospaced))
-                        .scrollContentBackground(.hidden)
-                        .padding(8)
-                        .background(Color.black.opacity(0.92))
-                        .foregroundStyle(.white)
+                    RawLogDetailCard(text: logText, emptyMessage: "Kein Loginhalt geladen.")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -396,5 +391,59 @@ struct RawLogBrowserWindow: View {
         case .cancelled:
             .gray
         }
+    }
+}
+
+private struct RawLogDetailCard: View {
+    let text: String
+    let emptyMessage: String
+
+    @State private var isExpanded = false
+
+    private var expandedText: String {
+        text.nonEmpty ?? emptyMessage
+    }
+
+    private var collapsedText: String {
+        LogPreviewText.tail(from: text, lineCount: 3).nonEmpty ?? emptyMessage
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("RAW Log", systemImage: "doc.text")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Label(isExpanded ? "Reduzieren" : "Erweitern", systemImage: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if isExpanded {
+                ScrollView {
+                    Text(expandedText)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .textSelection(.enabled)
+                        .padding(12)
+                }
+            } else {
+                Text(collapsedText)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .textSelection(.enabled)
+                    .padding(12)
+            }
+        }
+        .padding(12)
+        .background(Color.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .foregroundStyle(.white)
     }
 }

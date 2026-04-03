@@ -603,6 +603,18 @@ private struct AgentTurnGroupRow: View {
         return filtered.isEmpty ? segments : filtered
     }
 
+    private var toolSegments: [AgentRunSegment] {
+        visibleSegments.filter { $0.kind == .commandExecution || $0.kind == .toolCall }
+    }
+
+    private var currentToolSegment: AgentRunSegment? {
+        toolSegments.last
+    }
+
+    private var previousToolCallCount: Int {
+        max(0, toolSegments.count - 1)
+    }
+
     private var expandedSegments: [AgentRunSegment] {
         visibleSegments.filter { !$0.isSummarizableCompletedTool }
     }
@@ -613,56 +625,54 @@ private struct AgentTurnGroupRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let header, header != title {
+                        Text(header)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let header, header != title {
-                            Text(header)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
 
-                        Text(title)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
 
-                        if let subtitle, !subtitle.isEmpty {
-                            Text(subtitle)
+                    HStack(spacing: 8) {
+                        Text(sourceAgent.displayName)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        if !isExpanded, currentToolSegment == nil, let summary {
+                            Text(summary)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                                .lineLimit(2)
+                                .lineLimit(1)
                         }
-
-                        HStack(spacing: 8) {
-                            Text(sourceAgent.displayName)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            if !isExpanded, let summary {
-                                Text(summary)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-
-                    Spacer(minLength: 12)
-
-                    if let status {
-                        AgentStatusChip(text: status.displayText, color: statusColor(status))
                     }
                 }
-                .contentShape(Rectangle())
+
+                Spacer(minLength: 12)
+
+                if let status {
+                    AgentStatusChip(text: status.displayText, color: statusColor(status))
+                }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Label(isExpanded ? "Reduzieren" : "Erweitern", systemImage: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.plain)
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 10) {
@@ -674,6 +684,12 @@ private struct AgentTurnGroupRow: View {
                         AgentRunSegmentRow(segment: segment)
                     }
                 }
+            } else if let currentToolSegment {
+                AgentToolCallPreviewCard(
+                    segment: currentToolSegment,
+                    previousToolCallCount: previousToolCallCount,
+                    summary: summary
+                )
             }
         }
         .padding(14)
@@ -695,6 +711,118 @@ private struct AgentTurnGroupRow: View {
             true
         default:
             false
+        }
+    }
+
+    private func statusColor(_ status: AgentRunSegment.Status) -> Color {
+        switch status {
+        case .pending:
+            .gray
+        case .running:
+            .blue
+        case .completed:
+            .green
+        case .failed:
+            .red
+        case .cancelled:
+            .orange
+        case .unknown:
+            .secondary
+        }
+    }
+}
+
+private struct AgentToolCallPreviewCard: View {
+    let segment: AgentRunSegment
+    let previousToolCallCount: Int
+    let summary: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle()
+                    .fill(accentColor.opacity(0.18))
+                    .frame(width: 24, height: 24)
+                    .overlay {
+                        Image(systemName: iconName)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(accentColor)
+                    }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(segment.title)
+                        .font(.subheadline.weight(.semibold))
+                    if let subtitle = segment.subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: 12)
+
+                if previousToolCallCount > 0 {
+                    Text("\(previousToolCallCount) vorherige Aufrufe")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.secondary.opacity(0.1), in: Capsule())
+                }
+            }
+
+            if let bodyText = segment.bodyText {
+                Text(bodyText)
+                    .font(.subheadline)
+                    .textSelection(.enabled)
+                    .lineLimit(4)
+            }
+
+            HStack(spacing: 8) {
+                if let status = segment.status {
+                    AgentStatusChip(text: status.displayText, color: statusColor(status))
+                }
+                if let summary {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            if let output = segment.aggregatedOutput {
+                AgentDisclosureTextBlock(title: "Output", text: output)
+            }
+
+            if let detail = segment.detailText {
+                AgentDisclosureTextBlock(title: "Details", text: detail)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var iconName: String {
+        switch segment.kind {
+        case .commandExecution:
+            "terminal"
+        case .toolCall:
+            "hammer"
+        default:
+            "circle"
+        }
+    }
+
+    private var accentColor: Color {
+        switch segment.kind {
+        case .commandExecution:
+            .blue
+        case .toolCall:
+            .purple
+        default:
+            .secondary
         }
     }
 

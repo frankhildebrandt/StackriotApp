@@ -276,41 +276,78 @@ struct DevContainerLogView: View {
     let isStreaming: Bool
     let emptyMessage: String
 
+    @State private var isExpanded = false
+
+    private var expandedText: String {
+        text.nonEmpty ?? emptyMessage
+    }
+
+    private var collapsedText: String {
+        LogPreviewText.tail(from: text, lineCount: 3).nonEmpty ?? emptyMessage
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Container Logs")
-                            .font(.caption.weight(.semibold))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Container Logs")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if isStreaming {
+                        Label("Streaming", systemImage: "dot.radiowaves.left.and.right")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                        Spacer()
-                        if isStreaming {
-                            Label("Streaming", systemImage: "dot.radiowaves.left.and.right")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
                     }
-
-                    Text(text.nonEmpty ?? emptyMessage)
-                        .font(.system(.caption, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .textSelection(.enabled)
-
-                    Color.clear
-                        .frame(height: 1)
-                        .id("bottom")
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            isExpanded.toggle()
+                        }
+                    } label: {
+                        Label(isExpanded ? "Reduzieren" : "Erweitern", systemImage: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .padding(12)
+
+                Group {
+                    if isExpanded {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(expandedText)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                                    .textSelection(.enabled)
+                                    .padding(12)
+
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("bottom")
+                            }
+                        }
+                        .onAppear {
+                            scrollToBottom(using: proxy)
+                        }
+                        .onChange(of: text) { _, _ in
+                            scrollToBottom(using: proxy)
+                        }
+                    } else {
+                        Text(collapsedText)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .textSelection(.enabled)
+                            .padding(12)
+                    }
+                }
+                .background(Color.black.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
-            .background(Color.black.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .onAppear {
+        }
+    }
+
+    private func scrollToBottom(using proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.12)) {
                 proxy.scrollTo("bottom", anchor: .bottom)
-            }
-            .onChange(of: text) { _, _ in
-                withAnimation(.easeOut(duration: 0.12)) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
             }
         }
     }
