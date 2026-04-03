@@ -42,6 +42,7 @@
 		E00000000000000000000017 /* ActionPillGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000017 /* ActionPillGroup.swift */; };
 		E00000000000000000000018 /* FlowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000018 /* FlowLayout.swift */; };
 		E00000000000000000000019 /* StatChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000019 /* StatChip.swift */; };
+		E0000000000000000000007D /* LogPreviewText.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000007D /* LogPreviewText.swift */; };
 		E0000000000000000000001A /* CloneRepositorySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000001A /* CloneRepositorySheet.swift */; };
 		E0000000000000000000001B /* CreateWorktreeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000001B /* CreateWorktreeSheet.swift */; };
 		E0000000000000000000001C /* PublishBranchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000001C /* PublishBranchSheet.swift */; };
@@ -165,6 +166,7 @@
 		D00000000000000000000017 /* ActionPillGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionPillGroup.swift; sourceTree = "<group>"; };
 		D00000000000000000000018 /* FlowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowLayout.swift; sourceTree = "<group>"; };
 		D00000000000000000000019 /* StatChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatChip.swift; sourceTree = "<group>"; };
+		D0000000000000000000007D /* LogPreviewText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogPreviewText.swift; sourceTree = "<group>"; };
 		D0000000000000000000001A /* CloneRepositorySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloneRepositorySheet.swift; sourceTree = "<group>"; };
 		D0000000000000000000001B /* CreateWorktreeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateWorktreeSheet.swift; sourceTree = "<group>"; };
 		D0000000000000000000001C /* PublishBranchSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublishBranchSheet.swift; sourceTree = "<group>"; };
@@ -475,6 +477,7 @@
 			children = (
 				D00000000000000000000017 /* ActionPillGroup.swift */,
 				D00000000000000000000018 /* FlowLayout.swift */,
+				D0000000000000000000007D /* LogPreviewText.swift */,
 				D00000000000000000000019 /* StatChip.swift */,
 			);
 			path = Shared;
@@ -668,6 +671,7 @@
 				E00000000000000000000066 /* WorktreePrimaryContextView.swift in Sources */,
 				E00000000000000000000017 /* ActionPillGroup.swift in Sources */,
 				E00000000000000000000018 /* FlowLayout.swift in Sources */,
+				E0000000000000000000007D /* LogPreviewText.swift in Sources */,
 				E00000000000000000000019 /* StatChip.swift in Sources */,
 				E0000000000000000000001A /* CloneRepositorySheet.swift in Sources */,
 				E0000000000000000000001B /* CreateWorktreeSheet.swift in Sources */,
