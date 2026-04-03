@@ -269,9 +269,9 @@ extension AppModel {
             promptSourceTitle: prompt.sourceTitle,
             promptText: prompt.text,
             activatesTerminalTab: options.activatesTerminalTab,
-            availableCopilotModels: [.auto],
-            selectedCopilotModelID: CopilotModelOption.auto.id,
-            isLoadingCopilotModels: true,
+            availableCopilotModels: AppPreferences.copilotModelOptions,
+            selectedCopilotModelID: AppPreferences.defaultCopilotModelID,
+            isLoadingCopilotModels: false,
             modelDiscoveryErrorMessage: nil
         )
 
@@ -300,9 +300,9 @@ extension AppModel {
             promptSourceTitle: "Intent",
             promptText: trimmedIntent,
             activatesTerminalTab: true,
-            availableCopilotModels: [.auto],
-            selectedCopilotModelID: CopilotModelOption.auto.id,
-            isLoadingCopilotModels: true,
+            availableCopilotModels: AppPreferences.copilotModelOptions,
+            selectedCopilotModelID: AppPreferences.defaultCopilotModelID,
+            isLoadingCopilotModels: false,
             modelDiscoveryErrorMessage: nil
         )
 
@@ -311,24 +311,16 @@ extension AppModel {
 
     func reloadPendingCopilotExecutionModels() async {
         guard let draft = pendingCopilotExecutionDraft else { return }
-        pendingCopilotExecutionDraft?.isLoadingCopilotModels = true
-        pendingCopilotExecutionDraft?.modelDiscoveryErrorMessage = nil
+        let configuredModels = AppPreferences.copilotModelOptions
+        let selectedModelID = AppPreferences.validatedCopilotModelID(
+            draft.selectedCopilotModelID,
+            availableModels: configuredModels
+        )
 
-        do {
-            let discoveredModels = try await services.copilotModelDiscovery.discoverModels()
-            guard pendingCopilotExecutionDraft?.id == draft.id else { return }
-            pendingCopilotExecutionDraft?.availableCopilotModels = discoveredModels
-            pendingCopilotExecutionDraft?.selectedCopilotModelID = discoveredModels.first(where: \.isAuto)?.id
-                ?? discoveredModels.first?.id
-                ?? CopilotModelOption.auto.id
-            pendingCopilotExecutionDraft?.isLoadingCopilotModels = false
-        } catch {
-            guard pendingCopilotExecutionDraft?.id == draft.id else { return }
-            pendingCopilotExecutionDraft?.availableCopilotModels = [.auto]
-            pendingCopilotExecutionDraft?.selectedCopilotModelID = CopilotModelOption.auto.id
-            pendingCopilotExecutionDraft?.isLoadingCopilotModels = false
-            pendingCopilotExecutionDraft?.modelDiscoveryErrorMessage = "GitHub Copilot models could not be loaded: \(error.localizedDescription)"
-        }
+        pendingCopilotExecutionDraft?.modelDiscoveryErrorMessage = nil
+        pendingCopilotExecutionDraft?.availableCopilotModels = configuredModels
+        pendingCopilotExecutionDraft?.selectedCopilotModelID = selectedModelID
+        pendingCopilotExecutionDraft?.isLoadingCopilotModels = false
     }
 
     func dismissPendingCopilotExecutionDraft() {

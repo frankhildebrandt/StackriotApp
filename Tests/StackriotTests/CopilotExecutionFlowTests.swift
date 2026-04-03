@@ -47,20 +47,29 @@ struct CopilotExecutionFlowTests {
     @MainActor
     @Test
     func prepareCopilotExecutionWithPlanBuildsDraftAndDefaultsToAuto() async throws {
-        let discovery = CopilotModelDiscoveryService(
-            runCommand: { _, _, _, _ in
-                CommandResult(
-                    stdout: "",
-                    stderr: #"Error: Invalid value for option "--model" (choices: "gpt-5.4-mini", "claude-sonnet-4.5")"#,
-                    exitCode: 1
-                )
-            },
-            environmentProvider: { [:] }
-        )
-        let appModel = AppModel(services: AppServices(
-            copilotModelDiscovery: discovery,
-            notificationService: NoopNotificationService()
-        ))
+        let defaults = UserDefaults.standard
+        let previousModels = defaults.object(forKey: AppPreferences.copilotModelsKey)
+        let previousDefaultModel = defaults.object(forKey: AppPreferences.copilotDefaultModelIDKey)
+        defer {
+            if let previousModels {
+                defaults.set(previousModels, forKey: AppPreferences.copilotModelsKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.copilotModelsKey)
+            }
+            if let previousDefaultModel {
+                defaults.set(previousDefaultModel, forKey: AppPreferences.copilotDefaultModelIDKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.copilotDefaultModelIDKey)
+            }
+        }
+
+        AppPreferences.setCopilotModelOptions([
+            CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
+            CopilotModelOption(id: "claude-sonnet-4.6", displayName: "Claude Sonnet 4.6", isAuto: false),
+        ])
+        AppPreferences.setDefaultCopilotModelID(CopilotModelOption.auto.id)
+
+        let appModel = AppModel(services: AppServices(notificationService: NoopNotificationService()))
         appModel.availableAgents = [.githubCopilot]
 
         let repository = makeRepository(name: "Copilot")
@@ -79,8 +88,8 @@ struct CopilotExecutionFlowTests {
         #expect(draft.selectedCopilotModelID == CopilotModelOption.auto.id)
         #expect(draft.availableCopilotModels == [
             .auto,
-            CopilotModelOption(id: "gpt-5.4-mini", displayName: "gpt-5.4-mini", isAuto: false),
-            CopilotModelOption(id: "claude-sonnet-4.5", displayName: "claude-sonnet-4.5", isAuto: false),
+            CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
+            CopilotModelOption(id: "claude-sonnet-4.6", displayName: "Claude Sonnet 4.6", isAuto: false),
         ])
         #expect(draft.modelDiscoveryErrorMessage == nil)
         #expect(!draft.isLoadingCopilotModels)
@@ -88,21 +97,34 @@ struct CopilotExecutionFlowTests {
 
     @MainActor
     @Test
-    func prepareCopilotExecutionWithPlanKeepsDraftAndSurfacesDiscoveryError() async {
-        let discovery = CopilotModelDiscoveryService(
-            runCommand: { _, _, _, _ in
-                throw StackriotError.commandFailed("copilot auth status is not successful")
-            },
-            environmentProvider: { [:] }
-        )
-        let appModel = AppModel(services: AppServices(
-            copilotModelDiscovery: discovery,
-            notificationService: NoopNotificationService()
-        ))
+    func prepareCopilotExecutionWithPlanUsesConfiguredDefaultModel() async {
+        let defaults = UserDefaults.standard
+        let previousModels = defaults.object(forKey: AppPreferences.copilotModelsKey)
+        let previousDefaultModel = defaults.object(forKey: AppPreferences.copilotDefaultModelIDKey)
+        defer {
+            if let previousModels {
+                defaults.set(previousModels, forKey: AppPreferences.copilotModelsKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.copilotModelsKey)
+            }
+            if let previousDefaultModel {
+                defaults.set(previousDefaultModel, forKey: AppPreferences.copilotDefaultModelIDKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.copilotDefaultModelIDKey)
+            }
+        }
+
+        AppPreferences.setCopilotModelOptions([
+            CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
+            CopilotModelOption(id: "claude-opus-4.6", displayName: "Claude Opus 4.6", isAuto: false),
+        ])
+        AppPreferences.setDefaultCopilotModelID("claude-opus-4.6")
+
+        let appModel = AppModel(services: AppServices(notificationService: NoopNotificationService()))
         appModel.availableAgents = [.githubCopilot]
 
-        let repository = makeRepository(name: "CopilotError")
-        let worktree = WorktreeRecord(branchName: "feature/copilot-error", path: "/tmp/copilot-error", repository: repository)
+        let repository = makeRepository(name: "CopilotConfiguredDefault")
+        let worktree = WorktreeRecord(branchName: "feature/copilot-default", path: "/tmp/copilot-default", repository: repository)
         repository.worktrees = [worktree]
         appModel.saveIntent("Investigate auth handling", for: worktree.id)
 
@@ -111,29 +133,20 @@ struct CopilotExecutionFlowTests {
         let draft = appModel.pendingCopilotExecutionDraft
         #expect(draft != nil)
         #expect(draft?.activatesTerminalTab == true)
-        #expect(draft?.selectedCopilotModelID == CopilotModelOption.auto.id)
-        #expect(draft?.availableCopilotModels == [.auto])
-        #expect(draft?.modelDiscoveryErrorMessage == "GitHub Copilot models could not be loaded: copilot auth status is not successful")
+        #expect(draft?.selectedCopilotModelID == "claude-opus-4.6")
+        #expect(draft?.availableCopilotModels == [
+            .auto,
+            CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
+            CopilotModelOption(id: "claude-opus-4.6", displayName: "Claude Opus 4.6", isAuto: false),
+        ])
+        #expect(draft?.modelDiscoveryErrorMessage == nil)
         #expect(draft?.isLoadingCopilotModels == false)
     }
 
     @MainActor
     @Test
     func prepareCopilotExecutionWithPlanKeepsBackgroundLaunchPreference() async throws {
-        let discovery = CopilotModelDiscoveryService(
-            runCommand: { _, _, _, _ in
-                CommandResult(
-                    stdout: "",
-                    stderr: #"Error: Invalid value for option "--model" (choices: "gpt-5.4-mini")"#,
-                    exitCode: 1
-                )
-            },
-            environmentProvider: { [:] }
-        )
-        let appModel = AppModel(services: AppServices(
-            copilotModelDiscovery: discovery,
-            notificationService: NoopNotificationService()
-        ))
+        let appModel = AppModel(services: AppServices(notificationService: NoopNotificationService()))
         appModel.availableAgents = [.githubCopilot]
 
         let repository = makeRepository(name: "CopilotBackground")
@@ -155,20 +168,29 @@ struct CopilotExecutionFlowTests {
     @MainActor
     @Test
     func prepareCopilotPlanningWithIntentBuildsDraftAndDefaultsToAuto() async throws {
-        let discovery = CopilotModelDiscoveryService(
-            runCommand: { _, _, _, _ in
-                CommandResult(
-                    stdout: "",
-                    stderr: #"Error: Invalid value for option "--model" (choices: "gpt-5.4-mini", "claude-sonnet-4.5")"#,
-                    exitCode: 1
-                )
-            },
-            environmentProvider: { [:] }
-        )
-        let appModel = AppModel(services: AppServices(
-            copilotModelDiscovery: discovery,
-            notificationService: NoopNotificationService()
-        ))
+        let defaults = UserDefaults.standard
+        let previousModels = defaults.object(forKey: AppPreferences.copilotModelsKey)
+        let previousDefaultModel = defaults.object(forKey: AppPreferences.copilotDefaultModelIDKey)
+        defer {
+            if let previousModels {
+                defaults.set(previousModels, forKey: AppPreferences.copilotModelsKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.copilotModelsKey)
+            }
+            if let previousDefaultModel {
+                defaults.set(previousDefaultModel, forKey: AppPreferences.copilotDefaultModelIDKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.copilotDefaultModelIDKey)
+            }
+        }
+
+        AppPreferences.setCopilotModelOptions([
+            CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
+            CopilotModelOption(id: "gemini-3.1-pro", displayName: "Google Gemini 3.1 Pro", isAuto: false),
+        ])
+        AppPreferences.setDefaultCopilotModelID(CopilotModelOption.auto.id)
+
+        let appModel = AppModel(services: AppServices(notificationService: NoopNotificationService()))
         appModel.availableAgents = [.githubCopilot]
 
         let repository = makeRepository(name: "CopilotPlanning")
@@ -193,8 +215,8 @@ struct CopilotExecutionFlowTests {
         #expect(draft.selectedCopilotModelID == CopilotModelOption.auto.id)
         #expect(draft.availableCopilotModels == [
             .auto,
-            CopilotModelOption(id: "gpt-5.4-mini", displayName: "gpt-5.4-mini", isAuto: false),
-            CopilotModelOption(id: "claude-sonnet-4.5", displayName: "claude-sonnet-4.5", isAuto: false),
+            CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
+            CopilotModelOption(id: "gemini-3.1-pro", displayName: "Google Gemini 3.1 Pro", isAuto: false),
         ])
         #expect(draft.modelDiscoveryErrorMessage == nil)
         #expect(!draft.isLoadingCopilotModels)

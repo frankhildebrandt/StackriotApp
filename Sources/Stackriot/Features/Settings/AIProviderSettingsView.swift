@@ -6,10 +6,20 @@ struct AIProviderSettingsView: View {
     @AppStorage(AppPreferences.aiAPIKeyKey) private var aiAPIKey = ""
     @AppStorage(AppPreferences.aiBaseURLKey) private var aiBaseURL = ""
     @AppStorage(AppPreferences.aiModelKey) private var aiModel = ""
+    @State private var copilotModels: [EditableCopilotModel]
+    @State private var defaultCopilotModelID: String
 
     @State private var isVerifyingConfiguration = false
     @State private var configurationVerifySuccess: String?
     @State private var configurationVerifyError: String?
+
+    init() {
+        _copilotModels = State(initialValue: AppPreferences.copilotModelOptions
+            .filter { !$0.isAuto }
+            .map(EditableCopilotModel.init)
+        )
+        _defaultCopilotModelID = State(initialValue: AppPreferences.defaultCopilotModelID)
+    }
 
     var body: some View {
         SettingsFormPage(category: .aiProvider) {
@@ -45,6 +55,53 @@ struct AIProviderSettingsView: View {
                 Text("Credentials and overrides")
             } footer: {
                 Text("Leave the model or base URL empty to keep the provider default. Local providers usually only need a reachable endpoint.")
+            }
+
+            Section {
+                Picker("Default model", selection: $defaultCopilotModelID) {
+                    ForEach(configuredCopilotModels) { option in
+                        Text(option.displayName).tag(option.id)
+                    }
+                }
+
+                ForEach($copilotModels) { $model in
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Display name", text: $model.displayName)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Copilot CLI model ID", text: $model.modelID)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+
+                        HStack {
+                            Spacer()
+                            Button(role: .destructive) {
+                                removeCopilotModel(model.id)
+                            } label: {
+                                Label("Remove", systemImage: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                HStack {
+                    Button {
+                        copilotModels.append(EditableCopilotModel())
+                    } label: {
+                        Label("Add model", systemImage: "plus")
+                    }
+
+                    Button("Reset defaults") {
+                        copilotModels = CopilotModelOption.defaultManualOptions.map(EditableCopilotModel.init)
+                        defaultCopilotModelID = CopilotModelOption.auto.id
+                        persistCopilotModelSettings()
+                    }
+                }
+            } header: {
+                Text("GitHub Copilot")
+            } footer: {
+                Text("`Auto` is always available. Add the Copilot model IDs you want to offer in Stackriot and choose which one should be preselected for new runs.")
             }
 
             Section {
@@ -86,6 +143,12 @@ struct AIProviderSettingsView: View {
             } footer: {
                 Text("Sendet eine minimale Chat-Anfrage mit dem gewaehlten Provider, Modell und der Basis-URL.")
             }
+        }
+        .onChange(of: copilotModels) { _, _ in
+            persistCopilotModelSettings()
+        }
+        .onChange(of: defaultCopilotModelID) { _, _ in
+            persistCopilotModelSettings()
         }
     }
 
@@ -152,5 +215,52 @@ struct AIProviderSettingsView: View {
                 }
             }
         }
+    }
+
+    private var configuredCopilotModels: [CopilotModelOption] {
+        AppPreferences.normalizedCopilotModelOptions(
+            from: copilotModels.map {
+                CopilotModelOption(
+                    id: $0.modelID,
+                    displayName: $0.displayName,
+                    isAuto: false
+                )
+            }
+        )
+    }
+
+    private func persistCopilotModelSettings() {
+        let normalizedModels = configuredCopilotModels
+        let validatedDefault = AppPreferences.validatedCopilotModelID(
+            defaultCopilotModelID,
+            availableModels: normalizedModels
+        )
+
+        AppPreferences.setCopilotModelOptions(normalizedModels)
+        AppPreferences.setDefaultCopilotModelID(validatedDefault)
+
+        if defaultCopilotModelID != validatedDefault {
+            defaultCopilotModelID = validatedDefault
+        }
+    }
+
+    private func removeCopilotModel(_ rowID: UUID) {
+        copilotModels.removeAll { $0.id == rowID }
+    }
+}
+
+private struct EditableCopilotModel: Identifiable, Equatable {
+    let id: UUID
+    var displayName: String
+    var modelID: String
+
+    init(id: UUID = UUID(), displayName: String = "", modelID: String = "") {
+        self.id = id
+        self.displayName = displayName
+        self.modelID = modelID
+    }
+
+    init(_ option: CopilotModelOption) {
+        self.init(displayName: option.displayName, modelID: option.id)
     }
 }

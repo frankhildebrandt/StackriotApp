@@ -42,7 +42,7 @@ struct PendingCopilotExecutionSheet: View {
                     }
                     .pickerStyle(.menu)
 
-                    Text("`Auto` keeps Copilot's default routing. Selecting a concrete model adds `--model` to the run.")
+                    Text("`Auto` keeps Copilot's default routing. Selecting a concrete model adds `--model` to the run. Manage the available models in Settings > AI & Providers.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
