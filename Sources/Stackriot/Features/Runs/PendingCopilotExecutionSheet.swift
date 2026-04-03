@@ -67,6 +67,9 @@ struct PendingCopilotExecutionSheet: View {
                     }
                     .keyboardShortcut(.defaultAction)
                     .disabled(draft.isLoadingCopilotModels || draft.modelDiscoveryErrorMessage != nil)
+                    .commandEnterAction(disabled: draft.isLoadingCopilotModels || draft.modelDiscoveryErrorMessage != nil) {
+                        appModel.executePendingCopilotExecution(in: modelContext)
+                    }
                 }
             } else {
                 ContentUnavailableView("No Copilot Run", systemImage: "chevron.left.forwardslash.chevron.right")

@@ -66,6 +66,22 @@ struct RemoteEditorSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .commandEnterAction(disabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                    Task {
+                        let key = sshKeys.first(where: { $0.id == selectedSSHKeyID })
+                        await appModel.saveRemote(
+                            name: name,
+                            url: url,
+                            fetchEnabled: fetchEnabled,
+                            isDefaultRemote: isDefaultRemote,
+                            sshKey: key,
+                            for: repository,
+                            editing: remote,
+                            in: modelContext
+                        )
+                        dismiss()
+                    }
+                }
             }
         }
         .padding(24)

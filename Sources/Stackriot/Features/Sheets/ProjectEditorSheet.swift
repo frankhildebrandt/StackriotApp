@@ -44,6 +44,11 @@ struct ProjectEditorSheet: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || namespace == nil)
+                .commandEnterAction(disabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || namespace == nil) {
+                    guard let namespace else { return }
+                    let project = draft.projectID.flatMap(appModel.projectRecord(with:))
+                    appModel.saveProject(name: name, in: namespace, editing: project, modelContext: modelContext)
+                }
             }
         }
         .padding(24)

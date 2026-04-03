@@ -32,6 +32,10 @@ struct NamespaceEditorSheet: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .commandEnterAction(disabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                    let namespace = draft.namespaceID.flatMap(appModel.namespaceRecord(with:))
+                    appModel.saveNamespace(name: name, editing: namespace, in: modelContext)
+                }
             }
         }
         .padding(24)

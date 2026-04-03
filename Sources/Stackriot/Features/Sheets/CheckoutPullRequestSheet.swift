@@ -130,6 +130,16 @@ struct CheckoutPullRequestSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canCheckout)
+                .commandEnterAction(disabled: !canCheckout) {
+                    isCheckingOut = true
+                    Task {
+                        await appModel.checkoutSelectedPullRequest(for: repository, in: modelContext)
+                        isCheckingOut = false
+                        if appModel.pendingErrorMessage == nil {
+                            dismiss()
+                        }
+                    }
+                }
             }
         }
         .padding(24)

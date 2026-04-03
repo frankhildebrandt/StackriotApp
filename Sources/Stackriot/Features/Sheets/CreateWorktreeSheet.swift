@@ -350,6 +350,7 @@ struct CreateWorktreeSheet: View {
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.defaultAction)
             .disabled(!canCreate)
+            .commandEnterAction(disabled: !canCreate) { createWorktree() }
         }
     }
 
