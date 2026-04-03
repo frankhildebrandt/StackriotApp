@@ -134,6 +134,7 @@
 		D00000000000000000000001 /* AppCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommands.swift; sourceTree = "<group>"; };
 		D00000000000000000000002 /* StackriotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackriotApp.swift; sourceTree = "<group>"; };
 		D00000000000000000000003 /* ModelContainer+Stackriot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ModelContainer+Stackriot.swift"; sourceTree = "<group>"; };
+		D00000000000000000000081 /* View+CommandEnter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "View+CommandEnter.swift"; sourceTree = "<group>"; };
 		D00000000000000000000004 /* AppModel+AgentsNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+AgentsNode.swift"; sourceTree = "<group>"; };
 		D00000000000000000000074 /* AppModel+DevContainers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+DevContainers.swift"; sourceTree = "<group>"; };
 		D00000000000000000000005 /* AppModel+Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Persistence.swift"; sourceTree = "<group>"; };
@@ -300,6 +301,7 @@
 				D00000000000000000000001 /* AppCommands.swift */,
 				D00000000000000000000002 /* StackriotApp.swift */,
 				D00000000000000000000003 /* ModelContainer+Stackriot.swift */,
+				D00000000000000000000081 /* View+CommandEnter.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -611,6 +613,7 @@
 				E00000000000000000000001 /* AppCommands.swift in Sources */,
 				E00000000000000000000002 /* StackriotApp.swift in Sources */,
 				E00000000000000000000003 /* ModelContainer+Stackriot.swift in Sources */,
+				E00000000000000000000081 /* View+CommandEnter.swift in Sources */,
 				E00000000000000000000004 /* AppModel+AgentsNode.swift in Sources */,
 				E00000000000000000000074 /* AppModel+DevContainers.swift in Sources */,
 				E00000000000000000000038 /* AppModel+Namespaces.swift in Sources */,
