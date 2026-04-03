@@ -16,6 +16,7 @@ final class RunRecord {
     var aiSummaryText: String?
     var statusRawValue: String
     var worktreeID: UUID?
+    var repositoryID: UUID?
     var runConfigurationID: String?
     var repository: ManagedRepository?
     var worktree: WorktreeRecord?
@@ -35,6 +36,7 @@ final class RunRecord {
         aiSummaryText: String? = nil,
         status: RunStatusKind = .pending,
         worktreeID: UUID? = nil,
+        repositoryID: UUID? = nil,
         runConfigurationID: String? = nil,
         repository: ManagedRepository? = nil,
         worktree: WorktreeRecord? = nil
@@ -52,6 +54,7 @@ final class RunRecord {
         self.aiSummaryText = aiSummaryText
         self.statusRawValue = status.rawValue
         self.worktreeID = worktreeID ?? worktree?.id
+        self.repositoryID = repositoryID ?? repository?.id
         self.runConfigurationID = runConfigurationID
         self.repository = repository
         self.worktree = worktree

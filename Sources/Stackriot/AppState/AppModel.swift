@@ -318,9 +318,9 @@ final class AppModel: @unchecked Sendable {
     }
 
     func selectTab(_ run: RunRecord) {
-        guard let worktreeID = run.worktree?.id else { return }
+        guard let worktreeID = run.worktreeID else { return }
         cancelAutoHide(for: run.id)
-        if let repositoryID = run.repository?.id {
+        if let repositoryID = run.repositoryID {
             selectedWorktreeIDsByRepository[repositoryID] = worktreeID
         }
         terminalTabs.deselectPlanTab(for: worktreeID)
@@ -348,8 +348,8 @@ final class AppModel: @unchecked Sendable {
     }
 
     func reopenTab(_ run: RunRecord) {
-        guard let worktreeID = run.worktree?.id else { return }
-        if let repositoryID = run.repository?.id {
+        guard let worktreeID = run.worktreeID else { return }
+        if let repositoryID = run.repositoryID {
             selectedWorktreeIDsByRepository[repositoryID] = worktreeID
         }
         terminalTabs.activate(runID: run.id, worktreeID: worktreeID)
