@@ -260,6 +260,13 @@ extension AppModel {
             pendingErrorMessage = "\(prompt.sourceTitle) is empty."
             return
         }
+        let repoAgents: [CopilotRepoAgent]
+        do {
+            repoAgents = try availableCopilotRepoAgents(for: worktree)
+        } catch {
+            pendingErrorMessage = "Failed to read Copilot repo agents: \(error.localizedDescription)"
+            return
+        }
 
         pendingCopilotExecutionDraft = PendingAgentExecutionDraft(
             purpose: .execution,
@@ -271,11 +278,9 @@ extension AppModel {
             activatesTerminalTab: options.activatesTerminalTab,
             availableCopilotModels: AppPreferences.copilotModelOptions,
             selectedCopilotModelID: AppPreferences.defaultCopilotModelID,
-            isLoadingCopilotModels: false,
-            modelDiscoveryErrorMessage: nil
+            availableCopilotRepoAgents: repoAgents,
+            selectedCopilotRepoAgentID: nil
         )
-
-        await reloadPendingCopilotExecutionModels()
     }
 
     func prepareCopilotPlanningWithIntent(
@@ -290,6 +295,13 @@ extension AppModel {
         }
         guard !worktree.isDefaultBranchWorkspace else { return }
         guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil else { return }
+        let repoAgents: [CopilotRepoAgent]
+        do {
+            repoAgents = try availableCopilotRepoAgents(for: worktree)
+        } catch {
+            pendingErrorMessage = "Failed to read Copilot repo agents: \(error.localizedDescription)"
+            return
+        }
 
         let trimmedIntent = currentIntentText.trimmingCharacters(in: .whitespacesAndNewlines)
         pendingCopilotExecutionDraft = PendingAgentExecutionDraft(
@@ -302,25 +314,9 @@ extension AppModel {
             activatesTerminalTab: true,
             availableCopilotModels: AppPreferences.copilotModelOptions,
             selectedCopilotModelID: AppPreferences.defaultCopilotModelID,
-            isLoadingCopilotModels: false,
-            modelDiscoveryErrorMessage: nil
+            availableCopilotRepoAgents: repoAgents,
+            selectedCopilotRepoAgentID: nil
         )
-
-        await reloadPendingCopilotExecutionModels()
-    }
-
-    func reloadPendingCopilotExecutionModels() async {
-        guard let draft = pendingCopilotExecutionDraft else { return }
-        let configuredModels = AppPreferences.copilotModelOptions
-        let selectedModelID = AppPreferences.validatedCopilotModelID(
-            draft.selectedCopilotModelID,
-            availableModels: configuredModels
-        )
-
-        pendingCopilotExecutionDraft?.modelDiscoveryErrorMessage = nil
-        pendingCopilotExecutionDraft?.availableCopilotModels = configuredModels
-        pendingCopilotExecutionDraft?.selectedCopilotModelID = selectedModelID
-        pendingCopilotExecutionDraft?.isLoadingCopilotModels = false
     }
 
     func dismissPendingCopilotExecutionDraft() {
@@ -336,8 +332,12 @@ extension AppModel {
         }
 
         let selectedModel = draft.availableCopilotModels.first(where: { $0.id == draft.selectedCopilotModelID })
+        let selectedRepoAgentID = draft.selectedCopilotRepoAgentID.flatMap { selectedID in
+            draft.availableCopilotRepoAgents.contains(where: { $0.id == selectedID }) ? selectedID : nil
+        }
         let options = AgentLaunchOptions(
             copilotModelOverride: selectedModel?.isAuto == false ? selectedModel?.id : nil,
+            copilotAgentOverride: selectedRepoAgentID,
             activatesTerminalTab: draft.activatesTerminalTab
         )
 
@@ -367,6 +367,11 @@ extension AppModel {
                 )
             }
         }
+    }
+
+    private func availableCopilotRepoAgents(for worktree: WorktreeRecord) throws -> [CopilotRepoAgent] {
+        guard let worktreeURL = worktree.materializedURL else { return [] }
+        return try CopilotRepoAgent.discover(in: worktreeURL)
     }
 
     func availablePlanningAgents() -> [AIAgentTool] {

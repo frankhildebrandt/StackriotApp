@@ -197,6 +197,14 @@ struct StackriotTests {
         #expect(copilotExplicitModel.contains("--model"))
         #expect(copilotExplicitModel.contains("'gpt-5.4'"))
 
+        let copilotRepoAgent = AIAgentTool.githubCopilot.launchCommandWithPrompt(
+            prompt,
+            in: path,
+            options: AgentLaunchOptions(copilotAgentOverride: "code-review")
+        )
+        #expect(copilotRepoAgent.contains("--agent"))
+        #expect(copilotRepoAgent.contains("'code-review'"))
+
         let cursor = AIAgentTool.cursorCLI.launchCommandWithPrompt(prompt, in: path)
         #expect(cursor.contains("cursor-agent --print --output-format stream-json --stream-partial-output --trust --force"))
         #expect(cursor.contains(prompt.shellEscaped))
@@ -1265,7 +1273,7 @@ struct StackriotTests {
         #expect(AppPreferences.copilotModelOptions == [
             .auto,
             CopilotModelOption(id: "claude-sonnet-4.6", displayName: "Claude Sonnet 4.6", isAuto: false),
-            CopilotModelOption(id: "gemini-3.1-pro", displayName: "Google Gemini 3.1 Pro", isAuto: false),
+            CopilotModelOption(id: "gemini-3.1-pro", displayName: "Google Gemini Pro 3.1", isAuto: false),
         ])
         #expect(AppPreferences.defaultCopilotModelID == CopilotModelOption.auto.id)
 
@@ -3422,14 +3430,7 @@ struct StackriotTests {
         modelContext.insert(repository)
         try modelContext.save()
 
-        let discovery = CopilotModelDiscoveryService(
-            runCommand: { _, _, _, _ in
-                CommandResult(stdout: "", stderr: #"Error: Invalid value for option "--model" (choices: "gpt-5.4-mini")"#, exitCode: 1)
-            },
-            environmentProvider: { [:] }
-        )
         let appModel = AppModel(services: AppServices(
-            copilotModelDiscovery: discovery,
             notificationService: RecordingNotificationService()
         ))
         appModel.storedModelContext = modelContext

@@ -15,37 +15,36 @@ struct PendingCopilotExecutionSheet: View {
                 Text(executionDescription(for: draft))
                     .foregroundStyle(.secondary)
 
-                if draft.isLoadingCopilotModels {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                        Text("Loading available Copilot models...")
-                            .foregroundStyle(.secondary)
+                Picker("Model", selection: Binding(
+                    get: { appModel.pendingCopilotExecutionDraft?.selectedCopilotModelID ?? CopilotModelOption.auto.id },
+                    set: { newValue in
+                        appModel.pendingCopilotExecutionDraft?.selectedCopilotModelID = newValue
                     }
-                } else if let errorMessage = draft.modelDiscoveryErrorMessage {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Model discovery failed", systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.orange)
-                        Text(errorMessage)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+                )) {
+                    ForEach(draft.availableCopilotModels) { option in
+                        Text(option.displayName).tag(option.id)
                     }
-                } else {
-                    Picker("Model", selection: Binding(
-                        get: { appModel.pendingCopilotExecutionDraft?.selectedCopilotModelID ?? CopilotModelOption.auto.id },
+                }
+                .pickerStyle(.menu)
+
+                if !draft.availableCopilotRepoAgents.isEmpty {
+                    Picker("Agent", selection: Binding(
+                        get: { appModel.pendingCopilotExecutionDraft?.selectedCopilotRepoAgentID },
                         set: { newValue in
-                            appModel.pendingCopilotExecutionDraft?.selectedCopilotModelID = newValue
+                            appModel.pendingCopilotExecutionDraft?.selectedCopilotRepoAgentID = newValue
                         }
                     )) {
-                        ForEach(draft.availableCopilotModels) { option in
-                            Text(option.displayName).tag(option.id)
+                        Text("Repository default").tag(Optional<String>.none)
+                        ForEach(draft.availableCopilotRepoAgents) { agent in
+                            Text(agent.displayName).tag(Optional(agent.id))
                         }
                     }
                     .pickerStyle(.menu)
-
-                    Text("`Auto` keeps Copilot's default routing. Selecting a concrete model adds `--model` to the run. Manage the available models in Settings > AI & Providers.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
+
+                Text(configurationFootnote(for: draft))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
 
                 HStack {
                     Spacer()
@@ -54,20 +53,11 @@ struct PendingCopilotExecutionSheet: View {
                         appModel.dismissPendingCopilotExecutionDraft()
                     }
 
-                    if draft.modelDiscoveryErrorMessage != nil {
-                        Button("Retry") {
-                            Task {
-                                await appModel.reloadPendingCopilotExecutionModels()
-                            }
-                        }
-                    }
-
                     Button(primaryActionTitle(for: draft)) {
                         appModel.executePendingCopilotExecution(in: modelContext)
                     }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(draft.isLoadingCopilotModels || draft.modelDiscoveryErrorMessage != nil)
-                    .commandEnterAction(disabled: draft.isLoadingCopilotModels || draft.modelDiscoveryErrorMessage != nil) {
+                    .commandEnterAction {
                         appModel.executePendingCopilotExecution(in: modelContext)
                     }
                 }
@@ -76,7 +66,7 @@ struct PendingCopilotExecutionSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 460)
+        .frame(width: 480)
     }
 
     private func executionDescription(for draft: PendingAgentExecutionDraft) -> String {
@@ -99,5 +89,16 @@ struct PendingCopilotExecutionSheet: View {
         case .planning:
             "Create Plan"
         }
+    }
+
+    private func configurationFootnote(for draft: PendingAgentExecutionDraft) -> String {
+        var parts = [
+            "`Auto` keeps Copilot's default routing. Selecting a concrete model adds `--model` to the run."
+        ]
+        if !draft.availableCopilotRepoAgents.isEmpty {
+            parts.append("`Repository default` keeps the CLI default. Selecting a repo agent from `.github/agents` adds `--agent`.")
+        }
+        parts.append("Manage the available models in Settings > Agents & CLIs.")
+        return parts.joined(separator: " ")
     }
 }

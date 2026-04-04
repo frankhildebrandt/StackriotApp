@@ -281,8 +281,8 @@ struct PendingAgentExecutionDraft: Identifiable {
     let activatesTerminalTab: Bool
     var availableCopilotModels: [CopilotModelOption]
     var selectedCopilotModelID: String
-    var isLoadingCopilotModels = false
-    var modelDiscoveryErrorMessage: String?
+    var availableCopilotRepoAgents: [CopilotRepoAgent]
+    var selectedCopilotRepoAgentID: String?
 
     var id: UUID { worktreeID }
 }
