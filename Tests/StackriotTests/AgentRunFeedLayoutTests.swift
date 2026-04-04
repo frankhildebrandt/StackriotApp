@@ -51,10 +51,14 @@ struct AgentRunFeedLayoutTests {
             Issue.record("Expected second row to group changed files")
         }
 
-        if case .segment(let last) = rows[2] {
-            #expect(last.kind == .commandExecution)
+        if case .activitySummary(_, let sourceAgent, let status, let title, _, let summary, _, let segments) = rows[2] {
+            #expect(sourceAgent == .codex)
+            #expect(status == .completed)
+            #expect(title == "swift test")
+            #expect(summary == "1 Tool-Aufruf · 1 Logzeile")
+            #expect(segments.map(\.id) == ["tool-1"])
         } else {
-            Issue.record("Expected final row to remain a timeline segment")
+            Issue.record("Expected final row to compact tool activity")
         }
     }
 
@@ -164,6 +168,87 @@ struct AgentRunFeedLayoutTests {
             #expect(segments.count == 5)
         } else {
             Issue.record("Expected grouped turn row with assistant title and summarized tool calls")
+        }
+    }
+
+    @Test
+    func compactsReasoningLogsAndToolCallsIntoSingleSummaryRow() {
+        let rows = AgentRunFeedLayout.rows(from: [
+            AgentRunSegment(
+                id: "reason-1",
+                sourceAgent: .claudeCode,
+                kind: .reasoning,
+                title: "Thinking",
+                bodyText: "Inspecting parser"
+            ),
+            AgentRunSegment(
+                id: "log-1",
+                sourceAgent: .claudeCode,
+                kind: .fallbackText,
+                title: "Log",
+                bodyText: "line 1\nline 2"
+            ),
+            AgentRunSegment(
+                id: "tool-1",
+                sourceAgent: .claudeCode,
+                kind: .commandExecution,
+                title: "swift test",
+                subtitle: "Run focused tests",
+                status: .completed,
+                aggregatedOutput: "All tests passed"
+            ),
+        ])
+
+        #expect(rows.count == 1)
+        if case .activitySummary(_, let sourceAgent, let status, let title, let subtitle, let summary, let preview, let segments) = rows[0] {
+            #expect(sourceAgent == .claudeCode)
+            #expect(status == .completed)
+            #expect(title == "swift test")
+            #expect(subtitle == "Run focused tests")
+            #expect(summary == "1 Tool-Aufruf · 4 Logzeilen")
+            #expect(preview == "All tests passed")
+            #expect(segments.map(\.id) == ["reason-1", "log-1", "tool-1"])
+        } else {
+            Issue.record("Expected reasoning, fallback logs, and tool calls to collapse into one compact summary row")
+        }
+    }
+
+    @Test
+    func compactsTurnContentsWhenTurnGroupingIsDisabled() {
+        let rows = AgentRunFeedLayout.rows(
+            from: [
+                AgentRunSegment(
+                    id: "reason-2",
+                    sourceAgent: .githubCopilot,
+                    kind: .reasoning,
+                    title: "Reasoning",
+                    bodyText: "Inspecting files",
+                    groupID: "turn-9"
+                ),
+                AgentRunSegment(
+                    id: "tool-2",
+                    sourceAgent: .githubCopilot,
+                    kind: .toolCall,
+                    title: "glob",
+                    subtitle: "Inspect matching files",
+                    status: .completed,
+                    groupID: "turn-9"
+                ),
+            ],
+            allowsTurnGroups: false,
+            mergeFileChanges: false
+        )
+
+        #expect(rows.count == 1)
+        if case .activitySummary(_, let sourceAgent, let status, let title, let subtitle, let summary, _, let segments) = rows[0] {
+            #expect(sourceAgent == .githubCopilot)
+            #expect(status == .completed)
+            #expect(title == "glob")
+            #expect(subtitle == "Inspect matching files")
+            #expect(summary == "1 Tool-Aufruf · 2 Logzeilen")
+            #expect(segments.map(\.id) == ["reason-2", "tool-2"])
+        } else {
+            Issue.record("Expected compact activity summaries to work inside grouped turn details")
         }
     }
 }

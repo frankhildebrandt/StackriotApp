@@ -337,6 +337,16 @@ struct AgentRunFeedView: View {
 
 enum AgentRunFeedRow: Identifiable, Equatable, Sendable {
     case segment(AgentRunSegment)
+    case activitySummary(
+        id: String,
+        sourceAgent: AIAgentTool,
+        status: AgentRunSegment.Status?,
+        title: String,
+        subtitle: String?,
+        summary: String,
+        preview: String?,
+        segments: [AgentRunSegment]
+    )
     case turnGroup(
         id: String,
         sourceAgent: AIAgentTool,
@@ -353,6 +363,8 @@ enum AgentRunFeedRow: Identifiable, Equatable, Sendable {
         switch self {
         case .segment(let segment):
             segment.id
+        case .activitySummary(let id, _, _, _, _, _, _, _):
+            id
         case .turnGroup(let id, _, _, _, _, _, _, _):
             id
         case .changedFiles(let id, _, _, _, _):
@@ -362,13 +374,17 @@ enum AgentRunFeedRow: Identifiable, Equatable, Sendable {
 }
 
 enum AgentRunFeedLayout {
-    static func rows(from segments: [AgentRunSegment]) -> [AgentRunFeedRow] {
+    static func rows(
+        from segments: [AgentRunSegment],
+        allowsTurnGroups: Bool = true,
+        mergeFileChanges: Bool = true
+    ) -> [AgentRunFeedRow] {
         var rows: [AgentRunFeedRow] = []
         var index = 0
 
         while index < segments.count {
             let segment = segments[index]
-            if let groupID = groupableTurnGroupID(for: segment) {
+            if allowsTurnGroups, let groupID = groupableTurnGroupID(for: segment) {
                 let sourceAgent = segment.sourceAgent
                 var groupedSegments = [segment]
                 index += 1
@@ -401,7 +417,7 @@ enum AgentRunFeedLayout {
                 continue
             }
 
-            if segment.kind == .fileChange {
+            if mergeFileChanges, segment.kind == .fileChange {
                 var files = segment.fileChanges
                 var details = [segment.detailText].compactMap(\.self)
                 var status = segment.status
@@ -426,6 +442,35 @@ enum AgentRunFeedLayout {
                         status: status,
                         files: deduplicatedFiles,
                         details: details
+                    )
+                )
+                continue
+            }
+
+            if segment.isCompactActivity {
+                let startIndex = index
+                var groupedSegments = [segment]
+                index += 1
+
+                while index < segments.count {
+                    let candidate = segments[index]
+                    guard candidate.sourceAgent == segment.sourceAgent, candidate.isCompactActivity else {
+                        break
+                    }
+                    groupedSegments.append(candidate)
+                    index += 1
+                }
+
+                rows.append(
+                    .activitySummary(
+                        id: "activity-\(segments[startIndex].id)",
+                        sourceAgent: segment.sourceAgent,
+                        status: activitySummaryStatus(from: groupedSegments),
+                        title: activitySummaryTitle(from: groupedSegments),
+                        subtitle: activitySummarySubtitle(from: groupedSegments),
+                        summary: activitySummaryText(from: groupedSegments),
+                        preview: activitySummaryPreview(from: groupedSegments),
+                        segments: groupedSegments
                     )
                 )
                 continue
@@ -520,6 +565,49 @@ enum AgentRunFeedLayout {
         }
         return "\(summary) · \(summarizedCompletedToolCount) completed"
     }
+
+    private static func activitySummaryTitle(from segments: [AgentRunSegment]) -> String {
+        if let latestTool = segments.reversed().first(where: \.isUserVisibleToolSegment) {
+            return latestTool.title
+        }
+        return segments.last?.compactSummaryTitle ?? "Aktivität"
+    }
+
+    private static func activitySummarySubtitle(from segments: [AgentRunSegment]) -> String? {
+        if let latestTool = segments.reversed().first(where: \.isUserVisibleToolSegment) {
+            return latestTool.preferredTurnSubtitle
+        }
+        return segments.reversed().compactMap(\.compactPreviewText).first
+    }
+
+    private static func activitySummaryPreview(from segments: [AgentRunSegment]) -> String? {
+        segments.reversed().compactMap(\.compactPreviewText).first
+    }
+
+    private static func activitySummaryStatus(from segments: [AgentRunSegment]) -> AgentRunSegment.Status? {
+        if segments.contains(where: { $0.status == .failed }) {
+            return .failed
+        }
+        if segments.contains(where: { $0.status == .running }) {
+            return .running
+        }
+        if segments.contains(where: { $0.status == .pending }) {
+            return .pending
+        }
+        return segments.reversed().compactMap(\.status).first
+    }
+
+    private static func activitySummaryText(from segments: [AgentRunSegment]) -> String {
+        let toolCallCount = segments.filter(\.isUserVisibleToolSegment).count
+        let logLineCount = segments.reduce(into: 0) { partialResult, segment in
+            partialResult += segment.compactLineCount
+        }
+
+        if toolCallCount > 0 {
+            return "\(toolCallCount) \(toolCallCount == 1 ? "Tool-Aufruf" : "Tool-Aufrufe") · \(logLineCount) \(logLineCount == 1 ? "Logzeile" : "Logzeilen")"
+        }
+        return "\(logLineCount) \(logLineCount == 1 ? "Logzeile" : "Logzeilen")"
+    }
 }
 
 private struct AgentRunFeedRowView: View {
@@ -529,6 +617,16 @@ private struct AgentRunFeedRowView: View {
         switch row {
         case .segment(let segment):
             AgentRunSegmentRow(segment: segment)
+        case .activitySummary(_, let sourceAgent, let status, let title, let subtitle, let summary, let preview, let segments):
+            AgentCompactActivityRow(
+                sourceAgent: sourceAgent,
+                status: status,
+                title: title,
+                subtitle: subtitle,
+                summary: summary,
+                preview: preview,
+                segments: segments
+            )
         case .turnGroup(_, let sourceAgent, let header, let title, let subtitle, let status, let summary, let segments):
             AgentTurnGroupRow(
                 sourceAgent: sourceAgent,
@@ -615,12 +713,8 @@ private struct AgentTurnGroupRow: View {
         max(0, toolSegments.count - 1)
     }
 
-    private var expandedSegments: [AgentRunSegment] {
-        visibleSegments.filter { !$0.isSummarizableCompletedTool }
-    }
-
-    private var summarizedCompletedTools: [AgentRunSegment] {
-        visibleSegments.filter(\.isSummarizableCompletedTool)
+    private var visibleRows: [AgentRunFeedRow] {
+        AgentRunFeedLayout.rows(from: visibleSegments, allowsTurnGroups: false, mergeFileChanges: false)
     }
 
     var body: some View {
@@ -676,12 +770,8 @@ private struct AgentTurnGroupRow: View {
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 10) {
-                    if !summarizedCompletedTools.isEmpty {
-                        AgentCompletedToolSummaryRow(segments: summarizedCompletedTools)
-                    }
-
-                    ForEach(expandedSegments) { segment in
-                        AgentRunSegmentRow(segment: segment)
+                    ForEach(visibleRows) { row in
+                        AgentRunFeedRowView(row: row)
                     }
                 }
             } else if let currentToolSegment {
@@ -712,6 +802,113 @@ private struct AgentTurnGroupRow: View {
         default:
             false
         }
+    }
+
+    private func statusColor(_ status: AgentRunSegment.Status) -> Color {
+        switch status {
+        case .pending:
+            .gray
+        case .running:
+            .blue
+        case .completed:
+            .green
+        case .failed:
+            .red
+        case .cancelled:
+            .orange
+        case .unknown:
+            .secondary
+        }
+    }
+}
+
+private struct AgentCompactActivityRow: View {
+    let sourceAgent: AIAgentTool
+    let status: AgentRunSegment.Status?
+    let title: String
+    let subtitle: String?
+    let summary: String
+    let preview: String?
+    let segments: [AgentRunSegment]
+
+    @State private var isExpanded = false
+
+    private var hasExpandableDetails: Bool {
+        segments.count > 1 || segments.contains { segment in
+            segment.bodyText != nil || segment.aggregatedOutput != nil || segment.detailText != nil
+        }
+    }
+
+    private var secondaryPreview: String? {
+        guard let preview else { return nil }
+        if preview == title || preview == subtitle {
+            return nil
+        }
+        return preview
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    HStack(spacing: 8) {
+                        Text(sourceAgent.displayName)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 12)
+
+                if let status {
+                    AgentStatusChip(text: status.displayText, color: statusColor(status))
+                }
+
+                if hasExpandableDetails {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            isExpanded.toggle()
+                        }
+                    } label: {
+                        Label(isExpanded ? "Reduzieren" : "Erweitern", systemImage: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(segments) { segment in
+                        AgentRunSegmentRow(segment: segment)
+                    }
+                }
+            } else if let secondaryPreview {
+                Text(secondaryPreview)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func statusColor(_ status: AgentRunSegment.Status) -> Color {
@@ -1335,6 +1532,10 @@ private enum AgentTextBlock: Equatable {
 }
 
 private extension AgentRunSegment {
+    var isCompactActivity: Bool {
+        kind == .reasoning || kind == .fallbackText || isUserVisibleToolSegment
+    }
+
     var isIntentSegment: Bool {
         sourceAgent == .githubCopilot
             && kind == .toolCall
@@ -1367,5 +1568,63 @@ private extension AgentRunSegment {
             && status == .completed
             && aggregatedOutput == nil
             && detailText == nil
+    }
+
+    var compactSummaryTitle: String {
+        switch kind {
+        case .reasoning:
+            return title.nonEmpty ?? "Reasoning"
+        case .fallbackText:
+            return subtitle?.nonEmpty ?? title.nonEmpty ?? "Log"
+        case .commandExecution, .toolCall:
+            return title
+        case .agentMessage:
+            return title.nonEmpty ?? "Antwort"
+        case .fileChange:
+            return title.nonEmpty ?? "Dateiänderungen"
+        case .todoList:
+            return title.nonEmpty ?? "Plan"
+        case .error:
+            return title.nonEmpty ?? "Fehler"
+        }
+    }
+
+    var compactPreviewText: String? {
+        if let output = aggregatedOutput?.lastMeaningfulPreviewLine {
+            return output
+        }
+        if let body = bodyText?.lastMeaningfulPreviewLine {
+            return body
+        }
+        if let detail = detailText?.lastMeaningfulPreviewLine {
+            return detail
+        }
+        return subtitle?.nonEmpty ?? title.nonEmpty
+    }
+
+    var compactLineCount: Int {
+        let text = aggregatedOutput?.nonEmpty ?? bodyText?.nonEmpty ?? detailText?.nonEmpty
+        guard let text else { return 1 }
+        return max(1, text.nonEmptyLineCount)
+    }
+}
+
+private extension String {
+    var lastMeaningfulPreviewLine: String? {
+        let line = split(whereSeparator: \.isNewline)
+            .lazy
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .reversed()
+            .first(where: { !$0.isEmpty })
+        return line?.nonEmpty
+    }
+
+    var nonEmptyLineCount: Int {
+        let count = split(whereSeparator: \.isNewline)
+            .lazy
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .count
+        return max(1, count)
     }
 }
