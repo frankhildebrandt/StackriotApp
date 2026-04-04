@@ -5,43 +5,38 @@ import Testing
 
 struct CopilotExecutionFlowTests {
     @Test
-    func copilotModelDiscoveryParsesChoicesAndPrependsAuto() async throws {
-        let service = CopilotModelDiscoveryService(
-            runCommand: { _, _, _, _ in
-                return CommandResult(
-                    stdout: "",
-                    stderr: #"Error: Invalid value for option "--model" (choices: "gpt-5.4", "claude-sonnet-4.5", "gpt-5.4")"#,
-                    exitCode: 1
-                )
-            },
-            environmentProvider: { ["PATH": "/usr/bin:/bin"] }
+    func copilotRepoAgentDiscoveryListsRepositoryAgentFiles() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let agentsDirectoryURL = rootURL
+            .appendingPathComponent(".github", isDirectory: true)
+            .appendingPathComponent("agents", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        try FileManager.default.createDirectory(
+            at: agentsDirectoryURL,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        FileManager.default.createFile(
+            atPath: agentsDirectoryURL.appendingPathComponent("security-expert.agent.md").path,
+            contents: Data("# Security Expert".utf8)
+        )
+        FileManager.default.createFile(
+            atPath: agentsDirectoryURL.appendingPathComponent("code-review.agent.md").path,
+            contents: Data("# Code Review".utf8)
+        )
+        FileManager.default.createFile(
+            atPath: agentsDirectoryURL.appendingPathComponent("README.md").path,
+            contents: Data("# Ignore".utf8)
         )
 
-        let models = try await service.discoverModels()
+        let agents = try CopilotRepoAgent.discover(in: rootURL)
 
-        #expect(models == [
-            .auto,
-            CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
-            CopilotModelOption(id: "claude-sonnet-4.5", displayName: "claude-sonnet-4.5", isAuto: false),
+        #expect(agents == [
+            CopilotRepoAgent(id: "code-review", displayName: "Code Review"),
+            CopilotRepoAgent(id: "security-expert", displayName: "Security Expert"),
         ])
-    }
-
-    @Test
-    func copilotModelDiscoveryFallsBackToAutoWhenCliOmitsChoices() async throws {
-        let service = CopilotModelDiscoveryService(
-            runCommand: { _, _, _, _ in
-                CommandResult(
-                    stdout: "",
-                    stderr: #"Error: Model "__stackriot_model_probe__" from --model flag is not available."#,
-                    exitCode: 0
-                )
-            },
-            environmentProvider: { [:] }
-        )
-
-        let models = try await service.discoverModels()
-
-        #expect(models == [.auto])
     }
 
     @MainActor
@@ -91,8 +86,8 @@ struct CopilotExecutionFlowTests {
             CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
             CopilotModelOption(id: "claude-sonnet-4.6", displayName: "Claude Sonnet 4.6", isAuto: false),
         ])
-        #expect(draft.modelDiscoveryErrorMessage == nil)
-        #expect(!draft.isLoadingCopilotModels)
+        #expect(draft.availableCopilotRepoAgents.isEmpty)
+        #expect(draft.selectedCopilotRepoAgentID == nil)
     }
 
     @MainActor
@@ -139,8 +134,8 @@ struct CopilotExecutionFlowTests {
             CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
             CopilotModelOption(id: "claude-opus-4.6", displayName: "Claude Opus 4.6", isAuto: false),
         ])
-        #expect(draft?.modelDiscoveryErrorMessage == nil)
-        #expect(draft?.isLoadingCopilotModels == false)
+        #expect(draft?.availableCopilotRepoAgents == [])
+        #expect(draft?.selectedCopilotRepoAgentID == nil)
     }
 
     @MainActor
@@ -186,7 +181,7 @@ struct CopilotExecutionFlowTests {
 
         AppPreferences.setCopilotModelOptions([
             CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
-            CopilotModelOption(id: "gemini-3.1-pro", displayName: "Google Gemini 3.1 Pro", isAuto: false),
+            CopilotModelOption(id: "gemini-3.1-pro", displayName: "Google Gemini Pro 3.1", isAuto: false),
         ])
         AppPreferences.setDefaultCopilotModelID(CopilotModelOption.auto.id)
 
@@ -216,10 +211,10 @@ struct CopilotExecutionFlowTests {
         #expect(draft.availableCopilotModels == [
             .auto,
             CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
-            CopilotModelOption(id: "gemini-3.1-pro", displayName: "Google Gemini 3.1 Pro", isAuto: false),
+            CopilotModelOption(id: "gemini-3.1-pro", displayName: "Google Gemini Pro 3.1", isAuto: false),
         ])
-        #expect(draft.modelDiscoveryErrorMessage == nil)
-        #expect(!draft.isLoadingCopilotModels)
+        #expect(draft.availableCopilotRepoAgents.isEmpty)
+        #expect(draft.selectedCopilotRepoAgentID == nil)
     }
 
     private func makeRepository(name: String) -> ManagedRepository {

@@ -25,6 +25,8 @@ struct SettingsRootView: View {
                 DevContainerSettingsView()
             case .node:
                 NodeSettingsView()
+            case .agentCLIs:
+                AgentCLIsSettingsView()
             case .aiProvider:
                 AIProviderSettingsView()
             case .browserSessions:

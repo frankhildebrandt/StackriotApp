@@ -254,10 +254,18 @@ struct QuickIntentHotkeyConfiguration: Codable, Equatable, Sendable {
 
 struct AgentLaunchOptions: Sendable, Equatable {
     let copilotModelOverride: String?
+    let copilotAgentOverride: String?
     let activatesTerminalTab: Bool
 
-    init(copilotModelOverride: String? = nil, activatesTerminalTab: Bool = true) {
+    init(
+        copilotModelOverride: String? = nil,
+        copilotAgentOverride: String? = nil,
+        activatesTerminalTab: Bool = true
+    ) {
         let trimmedOverride = copilotModelOverride?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty
+        self.copilotAgentOverride = copilotAgentOverride?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .nonEmpty
         if let trimmedOverride, trimmedOverride.caseInsensitiveCompare("auto") != .orderedSame {
@@ -290,7 +298,7 @@ struct CopilotModelOption: Identifiable, Sendable, Equatable, Hashable, Codable 
         CopilotModelOption(id: "gpt-5.4", displayName: "gpt-5.4", isAuto: false),
         CopilotModelOption(id: "claude-sonnet-4.6", displayName: "Claude Sonnet 4.6", isAuto: false),
         CopilotModelOption(id: "claude-opus-4.6", displayName: "Claude Opus 4.6", isAuto: false),
-        CopilotModelOption(id: "gemini-3.1-pro", displayName: "Google Gemini 3.1 Pro", isAuto: false),
+        CopilotModelOption(id: "gemini-3.1-pro", displayName: "Google Gemini Pro 3.1", isAuto: false),
     ]
 
     static let defaultOptions: [CopilotModelOption] = [.auto] + defaultManualOptions
@@ -304,10 +312,63 @@ struct CopilotModelOption: Identifiable, Sendable, Equatable, Hashable, Codable 
         case "claude-opus-4.6":
             "Claude Opus 4.6"
         case "gemini-3.1-pro":
-            "Google Gemini 3.1 Pro"
+            "Google Gemini Pro 3.1"
         default:
             modelID
         }
+    }
+}
+
+struct CopilotRepoAgent: Identifiable, Sendable, Equatable, Hashable {
+    let id: String
+    let displayName: String
+
+    private static let fileSuffix = ".agent.md"
+
+    static func discover(in worktreeURL: URL, fileManager: FileManager = .default) throws -> [CopilotRepoAgent] {
+        let agentsDirectoryURL = worktreeURL
+            .appendingPathComponent(".github", isDirectory: true)
+            .appendingPathComponent("agents", isDirectory: true)
+        guard fileManager.fileExists(atPath: agentsDirectoryURL.path) else {
+            return []
+        }
+
+        let fileURLs = try fileManager.contentsOfDirectory(
+            at: agentsDirectoryURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )
+        var agents: [CopilotRepoAgent] = []
+        for fileURL in fileURLs {
+            guard fileURL.lastPathComponent.hasSuffix(fileSuffix) else { continue }
+            let resourceValues = try fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            guard resourceValues.isRegularFile != false else { continue }
+            let agentID = String(fileURL.lastPathComponent.dropLast(fileSuffix.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let agentID = agentID.nonEmpty else { continue }
+            agents.append(CopilotRepoAgent(id: agentID, displayName: defaultDisplayName(for: agentID)))
+        }
+        return agents.sorted {
+            let comparison = $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
+            if comparison == .orderedSame {
+                return $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending
+            }
+            return comparison == .orderedAscending
+        }
+    }
+
+    static func defaultDisplayName(for agentID: String) -> String {
+        let separated = agentID
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+        let words = separated.split(whereSeparator: \.isWhitespace)
+        guard words.isEmpty == false else { return agentID }
+        return words
+            .map { word in
+                let lowercased = word.lowercased()
+                return lowercased.prefix(1).uppercased() + lowercased.dropFirst()
+            }
+            .joined(separator: " ")
     }
 }
 
@@ -716,9 +777,11 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             // `--model` is only set when the user explicitly selects a concrete model.
             let modelArguments = options.copilotModelOverride.map { ["--model", $0] } ?? []
             let modelDisplaySuffix = options.copilotModelOverride.map { " --model \($0.shellEscaped)" } ?? ""
+            let agentArguments = options.copilotAgentOverride.map { ["--agent", $0] } ?? []
+            let agentDisplaySuffix = options.copilotAgentOverride.map { " --agent \($0.shellEscaped)" } ?? ""
             return AgentPromptCommandComponents(
-                arguments: ["-p", prompt] + modelArguments + ["--allow-all-tools", "--output-format", "json"],
-                displayCommandLine: "copilot -p \(prompt.shellEscaped)\(modelDisplaySuffix) --allow-all-tools --output-format json"
+                arguments: ["-p", prompt] + modelArguments + agentArguments + ["--allow-all-tools", "--output-format", "json"],
+                displayCommandLine: "copilot -p \(prompt.shellEscaped)\(modelDisplaySuffix)\(agentDisplaySuffix) --allow-all-tools --output-format json"
             )
         case .cursorCLI:
             return cursorPromptCommandComponents(for: prompt, mode: .execute)

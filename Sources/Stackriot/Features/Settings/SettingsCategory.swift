@@ -6,6 +6,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     case terminal
     case devContainers
     case node
+    case agentCLIs
     case aiProvider
     case browserSessions
     case jira
@@ -29,6 +30,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
             "Devcontainers"
         case .node:
             "Node"
+        case .agentCLIs:
+            "Agents & CLIs"
         case .aiProvider:
             "AI & Providers"
         case .browserSessions:
@@ -56,6 +59,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
             "shippingbox.fill"
         case .node:
             "cpu"
+        case .agentCLIs:
+            "chevron.left.forwardslash.chevron.right"
         case .aiProvider:
             "sparkles"
         case .browserSessions:
@@ -83,8 +88,10 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
             "CLI detection, container monitoring, and global devcontainer visibility."
         case .node:
             "Managed runtime defaults, status, and maintenance actions."
+        case .agentCLIs:
+            "Terminal-agent and CLI configuration, starting with GitHub Copilot."
         case .aiProvider:
-            "Provider selection, authentication, and effective model settings."
+            "Provider selection, authentication, and effective in-app model settings."
         case .browserSessions:
             "Persistent embedded-browser sessions for GitHub and Jira contexts."
         case .jira:
