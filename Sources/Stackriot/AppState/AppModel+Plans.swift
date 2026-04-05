@@ -703,6 +703,9 @@ extension AppModel {
     private func importAgentPlan(_ proposedPlan: String, for worktreeID: UUID, runID: UUID, tool: AIAgentTool) {
         do {
             try writeImplementationPlan(proposedPlan, for: worktreeID)
+            implementationPlanContentsByWorktreeID[worktreeID] = proposedPlan
+            implementationPlanPresenceByWorktreeID[worktreeID] =
+                proposedPlan.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             implementationPlanContentVersionsByWorktreeID[worktreeID, default: 0] += 1
             terminalTabs.selectPrimaryPane(.implementationPlan, for: worktreeID)
             agentPlanDraftsByWorktreeID[worktreeID]?.didImportPlan = true
