@@ -551,6 +551,30 @@ struct RepositoryDetailView: View {
                     }
                 }
             }
+            Button("Open in \(AppPreferences.externalTerminal.displayName)") {
+                Task {
+                    await appModel.openExternalTerminal(for: worktree, in: modelContext)
+                }
+            }
+            .disabled(worktree.isIdeaTree)
+            let runConfigurations = appModel.cachedAvailableRunConfigurations(for: worktree)
+            if !runConfigurations.isEmpty {
+                Menu("Run Targets") {
+                    ForEach(runConfigurations) { configuration in
+                        Button(configuration.name) {
+                            Task {
+                                await appModel.launchRunConfiguration(
+                                    configuration,
+                                    in: worktree,
+                                    repository: repository,
+                                    modelContext: modelContext
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Divider()
             Button("In Finder zeigen") {
                 Task {
                     await appModel.revealWorktreeInFinder(worktree)

@@ -155,6 +155,16 @@ extension AppModel {
         await openDevTool(tool, for: worktree, in: modelContext)
     }
 
+    func openExternalTerminal(for worktree: WorktreeRecord, in modelContext: ModelContext) async {
+        do {
+            guard let (_, worktreeURL) = await materializedWorktreeContext(for: worktree, in: modelContext) else { return }
+            let terminal = AppPreferences.externalTerminal
+            try await services.ideManager.openInExternalTerminal(path: worktreeURL, terminal: terminal)
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+        }
+    }
+
     func openTerminal(for worktree: WorktreeRecord, in modelContext: ModelContext) async {
         guard let (repository, worktreeURL) = await materializedWorktreeContext(for: worktree, in: modelContext) else { return }
 
