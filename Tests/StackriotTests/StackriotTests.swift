@@ -2043,6 +2043,88 @@ struct StackriotTests {
 
     @MainActor
     @Test
+    func reconcileRepositoryWorktreesImportsExternalAddsMovesAndRemovals() async throws {
+        let remote = try await createSeededRemote(named: "external-worktree-reconcile")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "External-Reconcile-\(UUID().uuidString)"
+        )
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: cloneInfo.displayName,
+            remoteURL: remote.remote.absoluteString,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath.path,
+            defaultBranch: cloneInfo.defaultBranch,
+            defaultRemoteName: "origin"
+        )
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        appModel.storedModelContext = modelContext
+
+        _ = await appModel.ensureDefaultBranchWorkspace(for: repository, in: modelContext)
+        #expect(repository.worktrees.count == 1)
+
+        let adminPaths = try await RepositoryManager().repositoryGitAdminPaths(for: cloneInfo.bareRepositoryPath)
+        #expect(adminPaths.config.path.hasSuffix("/config"))
+        #expect(adminPaths.worktrees != nil)
+
+        let externalWorktree = try await WorktreeManager().createWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            branchName: "feature/external-sync",
+            sourceBranch: cloneInfo.defaultBranch
+        )
+
+        let firstReconcile = await appModel.reconcileRepositoryWorktrees(for: repository, in: modelContext)
+        #expect(firstReconcile)
+        #expect(repository.worktrees.contains(where: { $0.branchName == "feature/external-sync" }))
+
+        guard let importedWorktree = repository.worktrees.first(where: { $0.branchName == "feature/external-sync" }) else {
+            Issue.record("Expected external worktree to be imported")
+            return
+        }
+        let importedWorktreePath = URL(fileURLWithPath: importedWorktree.materializedPath ?? "").standardizedFileURL.path
+        let externalWorktreePath = externalWorktree.path.standardizedFileURL.path
+        #expect(importedWorktreePath == externalWorktreePath)
+
+        let idempotentReconcile = await appModel.reconcileRepositoryWorktrees(for: repository, in: modelContext)
+        #expect(!idempotentReconcile)
+        #expect(repository.worktrees.filter { $0.branchName == "feature/external-sync" }.count == 1)
+
+        let movedRoot = try temporaryDirectory(named: "external-worktree-move")
+        let movedPath = try await WorktreeManager().moveWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            worktreePath: externalWorktree.path,
+            newParentDirectory: movedRoot,
+            directoryName: "feature/external-sync"
+        )
+
+        _ = await appModel.reconcileRepositoryWorktrees(for: repository, in: modelContext)
+        let reconciledMovedPath = URL(
+            fileURLWithPath: repository.worktrees.first(where: { $0.id == importedWorktree.id })?.materializedPath ?? ""
+        ).standardizedFileURL.path
+        #expect(reconciledMovedPath == movedPath.standardizedFileURL.path)
+
+        try await WorktreeManager().removeWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            worktreePath: movedPath
+        )
+
+        _ = await appModel.reconcileRepositoryWorktrees(for: repository, in: modelContext)
+        #expect(repository.worktrees.contains(where: { $0.id == importedWorktree.id }) == false)
+        #expect(repository.worktrees.contains(where: { $0.isDefaultBranchWorkspace }))
+
+        if let defaultWorktreeURL = repository.worktrees.first(where: { $0.isDefaultBranchWorkspace })?.materializedURL {
+            try? FileManager.default.removeItem(at: defaultWorktreeURL)
+        }
+        try? FileManager.default.removeItem(at: movedRoot)
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
+    @MainActor
+    @Test
     func agentRunsReceiveAISummaryInsteadOfOnlyRawOutput() async throws {
         let modelContext = try makeInMemoryModelContext()
         let repository = makeRepository(name: "AgentSummary")

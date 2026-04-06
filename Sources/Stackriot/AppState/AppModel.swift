@@ -138,6 +138,12 @@ final class AppModel: @unchecked Sendable {
     @ObservationIgnored
     var worktreeStatusRefreshGenerationByRepositoryID: [UUID: Int] = [:]
     @ObservationIgnored
+    var repositoryWorktreeMonitoringByRepositoryID: [UUID: RepositoryWorktreeMonitor] = [:]
+    @ObservationIgnored
+    var repositoryWorktreeReconcileTasksByRepositoryID: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored
+    var pendingRepositoryWorktreeReconcileRepositoryIDs: Set<UUID> = []
+    @ObservationIgnored
     var autoRebasingRepositoryIDs: Set<UUID> = []
     @ObservationIgnored
     var pendingAutoRebaseRepositoryIDs: Set<UUID> = []

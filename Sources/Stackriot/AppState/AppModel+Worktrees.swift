@@ -2,6 +2,13 @@ import Foundation
 import SwiftData
 
 extension AppModel {
+    private struct RepositoryWorktreeReconcileResult {
+        var didChange = false
+        var addedWorktreeIDs: Set<UUID> = []
+        var updatedWorktreeIDs: Set<UUID> = []
+        var removedWorktreeIDs: Set<UUID> = []
+    }
+
     struct AutoRebaseTarget: Equatable {
         let worktreeID: UUID
         let worktreePath: URL
@@ -642,6 +649,215 @@ extension AppModel {
         refreshRepositorySidebarSnapshot(for: repository)
         refreshRepositoryDetailSnapshot(for: repository)
         isWorktreeSheetPresented = false
+    }
+
+    @discardableResult
+    func reconcileRepositoryWorktrees(for repository: ManagedRepository, in modelContext: ModelContext) async -> Bool {
+        await reconcileRepositoryWorktrees(forRepositoryID: repository.id, in: modelContext)
+    }
+
+    @discardableResult
+    func reconcileRepositoryWorktrees(forRepositoryID repositoryID: UUID, in modelContext: ModelContext) async -> Bool {
+        guard let repository = repositoryRecord(with: repositoryID) else {
+            stopRepositoryWorktreeMonitoring(for: repositoryID)
+            return false
+        }
+        guard repository.status == .ready else {
+            stopRepositoryWorktreeMonitoring(for: repositoryID)
+            return false
+        }
+
+        do {
+            let bareRepositoryPath = URL(fileURLWithPath: repository.bareRepositoryPath)
+            let entries = try await services.repositoryManager.listWorktreeEntries(in: bareRepositoryPath)
+            let result = reconcileRepositoryWorktreeEntries(entries, for: repository, in: modelContext)
+            if result.didChange {
+                repository.updatedAt = .now
+                try modelContext.save()
+                refreshRepositorySidebarSnapshot(for: repository)
+                refreshRepositoryDetailSnapshot(for: repository)
+                primeWorktreeConfigurationSnapshots(for: repository)
+                for worktreeID in result.addedWorktreeIDs.union(result.updatedWorktreeIDs) {
+                    guard let worktree = repository.worktrees.first(where: { $0.id == worktreeID }),
+                          worktree.materializedURL != nil
+                    else {
+                        continue
+                    }
+                    _ = refreshAvailableDevToolsCache(for: worktree)
+                    Task {
+                        await refreshAvailableRunConfigurationsCache(for: worktree)
+                    }
+                }
+            }
+            await updateRepositoryWorktreeMonitoring(for: repository)
+            await refreshWorktreeStatuses(for: repository)
+            return result.didChange
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private func reconcileRepositoryWorktreeEntries(
+        _ entries: [GitWorktreeListEntry],
+        for repository: ManagedRepository,
+        in modelContext: ModelContext
+    ) -> RepositoryWorktreeReconcileResult {
+        let defaultBranch = repository.defaultBranch
+        var result = RepositoryWorktreeReconcileResult()
+        var matchedWorktreeIDs: Set<UUID> = []
+        var remainingWorktrees = repository.worktrees
+
+        for entry in entries where !entry.isBare {
+            let resolvedBranchName = resolvedBranchName(for: entry, defaultBranch: defaultBranch)
+            guard let match = matchedRepositoryWorktree(
+                for: entry,
+                resolvedBranchName: resolvedBranchName,
+                in: remainingWorktrees,
+                repository: repository
+            ) else {
+                let worktree = WorktreeRecord(
+                    branchName: resolvedBranchName,
+                    isDefaultBranchWorkspace: resolvedBranchName == defaultBranch,
+                    path: entry.path,
+                    materializedPath: entry.path,
+                    repository: repository
+                )
+                repository.worktrees.append(worktree)
+                modelContext.insert(worktree)
+                matchedWorktreeIDs.insert(worktree.id)
+                result.addedWorktreeIDs.insert(worktree.id)
+                result.didChange = true
+                continue
+            }
+
+            remainingWorktrees.removeAll(where: { $0.id == match.id })
+            matchedWorktreeIDs.insert(match.id)
+            if updateRepositoryWorktree(match, with: entry, resolvedBranchName: resolvedBranchName, defaultBranch: defaultBranch) {
+                result.updatedWorktreeIDs.insert(match.id)
+                result.didChange = true
+            }
+        }
+
+        let removableWorktrees = repository.worktrees.filter {
+            !matchedWorktreeIDs.contains($0.id) && $0.isMaterialized && !$0.isIdeaTree
+        }
+
+        if !removableWorktrees.isEmpty {
+            for worktree in removableWorktrees {
+                cleanupRepositoryWorktreeState(for: worktree, repository: repository, modelContext: modelContext)
+                result.removedWorktreeIDs.insert(worktree.id)
+            }
+            result.didChange = true
+        }
+
+        if result.didChange {
+            let survivingWorktrees = repository.worktrees.filter { !result.removedWorktreeIDs.contains($0.id) }
+            let remainingSelection = selectedWorktreeIDsByRepository[repository.id]
+            if let selectedID = remainingSelection, result.removedWorktreeIDs.contains(selectedID) {
+                let fallbackWorktreeID = survivingWorktrees.first(where: { $0.isDefaultBranchWorkspace })?.id
+                    ?? survivingWorktrees.first?.id
+                selectedWorktreeIDsByRepository[repository.id] = fallbackWorktreeID
+                if let fallbackWorktreeID {
+                    terminalTabs.selectPlanTab(for: fallbackWorktreeID)
+                }
+            }
+        }
+
+        return result
+    }
+
+    private func matchedRepositoryWorktree(
+        for entry: GitWorktreeListEntry,
+        resolvedBranchName: String,
+        in worktrees: [WorktreeRecord],
+        repository: ManagedRepository
+    ) -> WorktreeRecord? {
+        let entryPath = URL(fileURLWithPath: entry.path).standardizedFileURL.path
+
+        if let exactPathMatch = worktrees.first(where: { worktree in
+            normalizedWorktreePath(worktree.materializedPath) == entryPath
+                || normalizedWorktreePath(worktree.path) == entryPath
+                || normalizedWorktreePath(worktree.projectedMaterializationPath) == entryPath
+        }) {
+            return exactPathMatch
+        }
+
+        if resolvedBranchName == repository.defaultBranch,
+           let defaultBranchMatch = worktrees.first(where: { $0.isDefaultBranchWorkspace })
+        {
+            return defaultBranchMatch
+        }
+
+        if let branchMatch = worktrees.first(where: { $0.branchName == resolvedBranchName }) {
+            return branchMatch
+        }
+
+        return nil
+    }
+
+    private func updateRepositoryWorktree(
+        _ worktree: WorktreeRecord,
+        with entry: GitWorktreeListEntry,
+        resolvedBranchName: String,
+        defaultBranch: String
+    ) -> Bool {
+        var didChange = false
+        let entryPath = entry.path
+        let isDefaultBranchWorkspace = resolvedBranchName == defaultBranch
+
+        if worktree.branchName != resolvedBranchName {
+            worktree.branchName = resolvedBranchName
+            didChange = true
+        }
+
+        if worktree.isDefaultBranchWorkspace != isDefaultBranchWorkspace {
+            worktree.isDefaultBranchWorkspace = isDefaultBranchWorkspace
+            didChange = true
+        }
+
+        if worktree.materializedPath != entryPath {
+            worktree.markMaterialized(at: entryPath, kind: .regular)
+            didChange = true
+        } else if worktree.kind == .idea {
+            worktree.kind = .regular
+            worktree.materializedAt = worktree.materializedAt ?? .now
+            didChange = true
+        }
+
+        return didChange
+    }
+
+    private func cleanupRepositoryWorktreeState(
+        for worktree: WorktreeRecord,
+        repository: ManagedRepository,
+        modelContext: ModelContext
+    ) {
+        stopPRMonitoring(for: worktree.id)
+        if let worktreeURL = worktree.materializedURL {
+            services.devToolDiscovery.invalidateCache(for: worktreeURL)
+        }
+        invalidateWorktreeDiscoverySnapshot(for: worktree.id)
+        invalidateRunConfigurationCache(for: worktree.id)
+        worktreeStatuses.removeValue(forKey: worktree.id)
+        pullRequestUpstreamStatuses.removeValue(forKey: worktree.id)
+        devContainerStatesByWorktreeID.removeValue(forKey: worktree.id)
+        terminalTabs.removeWorktree(worktree.id)
+        modelContext.delete(worktree)
+        repository.updatedAt = .now
+    }
+
+    private func resolvedBranchName(for entry: GitWorktreeListEntry, defaultBranch: String) -> String {
+        if let branchShortName = entry.branchShortName {
+            return branchShortName
+        }
+        let fallbackPathComponent = URL(fileURLWithPath: entry.path).lastPathComponent
+        return fallbackPathComponent.nonEmpty ?? defaultBranch
+    }
+
+    private func normalizedWorktreePath(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        return URL(fileURLWithPath: value).standardizedFileURL.path
     }
 
     func moveWorktree(

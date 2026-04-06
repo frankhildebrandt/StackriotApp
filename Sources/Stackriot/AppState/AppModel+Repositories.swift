@@ -136,6 +136,7 @@ extension AppModel {
 
         let status = services.repositoryManager.refreshStatus(for: URL(fileURLWithPath: repository.bareRepositoryPath))
         guard status == .ready else {
+            stopRepositoryWorktreeMonitoring(for: repository.id)
             repository.status = status
             repository.updatedAt = .now
             repository.lastErrorMessage = "Repository missing or invalid."
@@ -180,6 +181,8 @@ extension AppModel {
         syncLogs[repository.id] = logLines.isEmpty ? nil : logLines.joined(separator: "\n")
 
         _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
+        await reconcileRepositoryWorktrees(for: repository, in: modelContext)
+        await updateRepositoryWorktreeMonitoring(for: repository)
         primeWorktreeConfigurationSnapshots(for: repository)
         refreshRepositorySidebarSnapshot(for: repository)
         refreshRepositoryDetailSnapshot(for: repository)
@@ -258,6 +261,7 @@ extension AppModel {
             for run in repository.runs {
                 cancelAutoHide(for: run.id)
             }
+            stopRepositoryWorktreeMonitoring(for: repository.id)
             for worktreeURL in repository.worktrees.compactMap(\.materializedURL) {
                 services.devToolDiscovery.invalidateCache(for: worktreeURL)
             }
@@ -301,6 +305,69 @@ extension AppModel {
             try await services.ideManager.revealInFinder(path: URL(fileURLWithPath: repository.bareRepositoryPath))
         } catch {
             pendingErrorMessage = error.localizedDescription
+        }
+    }
+
+    func updateRepositoryWorktreeMonitoring(for repository: ManagedRepository) async {
+        guard repository.status == .ready else {
+            stopRepositoryWorktreeMonitoring(for: repository.id)
+            return
+        }
+
+        let repositoryID = repository.id
+        let monitor = repositoryWorktreeMonitoringByRepositoryID[repositoryID] ?? {
+            let monitor = RepositoryWorktreeMonitor { [weak self] in
+                Task { @MainActor in
+                    self?.scheduleRepositoryWorktreeReconciliation(for: repositoryID)
+                }
+            }
+            repositoryWorktreeMonitoringByRepositoryID[repositoryID] = monitor
+            return monitor
+        }()
+
+        do {
+            let adminPaths = try await services.repositoryManager.repositoryGitAdminPaths(
+                for: URL(fileURLWithPath: repository.bareRepositoryPath)
+            )
+            let observedPaths = [
+                URL(fileURLWithPath: repository.bareRepositoryPath),
+                adminPaths.config,
+                adminPaths.worktrees,
+            ].compactMap { $0 }
+            guard repositoryWorktreeMonitoringByRepositoryID[repositoryID] === monitor else { return }
+            monitor.updateObservedPaths(observedPaths)
+        } catch {
+            guard repositoryWorktreeMonitoringByRepositoryID[repositoryID] === monitor else { return }
+            monitor.updateObservedPaths([URL(fileURLWithPath: repository.bareRepositoryPath)])
+        }
+    }
+
+    func stopRepositoryWorktreeMonitoring(for repositoryID: UUID) {
+        repositoryWorktreeReconcileTasksByRepositoryID[repositoryID]?.cancel()
+        repositoryWorktreeReconcileTasksByRepositoryID.removeValue(forKey: repositoryID)
+        pendingRepositoryWorktreeReconcileRepositoryIDs.remove(repositoryID)
+        repositoryWorktreeMonitoringByRepositoryID.removeValue(forKey: repositoryID)?.stop()
+    }
+
+    func scheduleRepositoryWorktreeReconciliation(for repositoryID: UUID) {
+        guard let modelContext = storedModelContext else { return }
+        if repositoryWorktreeReconcileTasksByRepositoryID[repositoryID] != nil {
+            pendingRepositoryWorktreeReconcileRepositoryIDs.insert(repositoryID)
+            return
+        }
+
+        repositoryWorktreeReconcileTasksByRepositoryID[repositoryID] = Task { @MainActor in
+            defer {
+                repositoryWorktreeReconcileTasksByRepositoryID.removeValue(forKey: repositoryID)
+            }
+
+            while true {
+                pendingRepositoryWorktreeReconcileRepositoryIDs.remove(repositoryID)
+                await reconcileRepositoryWorktrees(forRepositoryID: repositoryID, in: modelContext)
+                guard pendingRepositoryWorktreeReconcileRepositoryIDs.contains(repositoryID) else {
+                    break
+                }
+            }
         }
     }
 

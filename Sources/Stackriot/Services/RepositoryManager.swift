@@ -5,6 +5,11 @@ struct PublishBranchResult: Sendable, Equatable {
     let didPush: Bool
 }
 
+struct RepositoryGitAdminPaths: Sendable, Equatable {
+    let config: URL
+    let worktrees: URL?
+}
+
 struct RepositoryManager {
     private let sshEnvironmentBuilder = GitSSHEnvironmentBuilder()
 
@@ -163,6 +168,23 @@ struct RepositoryManager {
             defaultBranchSyncErrorMessage: syncResult.errorMessage,
             defaultBranchSyncSummary: syncResult.summary
         )
+    }
+
+    func repositoryGitAdminPaths(for bareRepositoryPath: URL) async throws -> RepositoryGitAdminPaths {
+        let configPath = try await gitPath(named: "config", in: bareRepositoryPath)
+        let worktreesPath = try await optionalGitPath(named: "worktrees", in: bareRepositoryPath)
+        return RepositoryGitAdminPaths(config: configPath, worktrees: worktreesPath)
+    }
+
+    func listWorktreeEntries(in bareRepositoryPath: URL) async throws -> [GitWorktreeListEntry] {
+        let result = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["--git-dir", bareRepositoryPath.path, "worktree", "list", "--porcelain"]
+        )
+        guard result.exitCode == 0 else {
+            throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
+        return GitWorktreeListParser.entries(fromPorcelain: result.stdout)
     }
 
     func addRemote(
@@ -377,6 +399,28 @@ struct RepositoryManager {
         )
         guard let humanList, humanList.exitCode == 0 else { return [] }
         return GitWorktreeListParser.pathsFromHumanReadableWorktreeList(humanList.stdout, defaultBranch: defaultBranch)
+    }
+
+    private func gitPath(named name: String, in bareRepositoryPath: URL) async throws -> URL {
+        let result = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["--git-dir", bareRepositoryPath.path, "rev-parse", "--git-path", name]
+        )
+        guard result.exitCode == 0 else {
+            throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
+
+        let rawPath = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        if rawPath.hasPrefix("/") {
+            return URL(fileURLWithPath: rawPath).standardizedFileURL
+        }
+
+        return URL(fileURLWithPath: rawPath, relativeTo: bareRepositoryPath).standardizedFileURL
+    }
+
+    private func optionalGitPath(named name: String, in bareRepositoryPath: URL) async throws -> URL? {
+        let path = try await gitPath(named: name, in: bareRepositoryPath)
+        return FileManager.default.fileExists(atPath: path.path) ? path : nil
     }
 
     private func syncDefaultBranch(
