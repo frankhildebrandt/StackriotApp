@@ -20,7 +20,7 @@
 - Auto-Refresh aller Repositories im Hintergrund (konfigurierbares Intervall)
 
 ### IDE-Integration
-- Öffnet Worktrees direkt in **VS Code** oder **Cursor** per Klick
+- Öffnet Worktrees direkt in **VS Code**, **Cursor** oder **Codex App** per Klick
 - Öffnet Worktrees in **Terminal.app**
 - Zeigt den Worktree-Pfad im Finder an
 

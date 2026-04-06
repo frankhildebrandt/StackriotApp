@@ -2,6 +2,13 @@ import Foundation
 import SwiftData
 
 extension AppModel {
+    struct AutoRebaseTarget: Equatable {
+        let worktreeID: UUID
+        let worktreePath: URL
+        let branchName: String
+        let ontoBranch: String
+    }
+
     private struct IntegrationTarget {
         let worktree: WorktreeRecord
         let branchName: String
@@ -774,7 +781,7 @@ extension AppModel {
         }
     }
 
-    func removeWorktree(_ worktree: WorktreeRecord, in modelContext: ModelContext) async {
+    func removeWorktree(_ worktree: WorktreeRecord, in modelContext: ModelContext, notifySuccess: Bool = true) async {
         do {
             if worktree.isDefaultBranchWorkspace {
                 throw StackriotError.commandFailed("The default workspace cannot be removed.")
@@ -838,15 +845,17 @@ extension AppModel {
             refreshRepositorySidebarSnapshot(for: repository)
             refreshRepositoryDetailSnapshot(for: repository)
             await refreshWorktreeStatuses(for: repository)
-            notifyOperationSuccess(
-                title: "Worktree removed",
-                subtitle: repository.displayName,
-                body: "\(worktree.branchName) was removed.",
-                userInfo: [
-                    "repositoryID": repository.id.uuidString,
-                    "worktreeID": worktreeID.uuidString,
-                ]
-            )
+            if notifySuccess {
+                notifyOperationSuccess(
+                    title: "Worktree removed",
+                    subtitle: repository.displayName,
+                    body: "\(worktree.branchName) was removed.",
+                    userInfo: [
+                        "repositoryID": repository.id.uuidString,
+                        "worktreeID": worktreeID.uuidString,
+                    ]
+                )
+            }
         } catch {
             pendingErrorMessage = error.localizedDescription
             notifyOperationFailure(
@@ -858,7 +867,7 @@ extension AppModel {
         }
     }
 
-    func refreshWorktreeStatuses(for repository: ManagedRepository) async {
+    func refreshWorktreeStatuses(for repository: ManagedRepository, allowAutoRebase: Bool = true) async {
         recordWorktreeStatusRefreshStart(for: repository.id)
         let repositoryID = repository.id
         if worktreeStatusRefreshTasksByRepositoryID[repositoryID] != nil {
@@ -899,6 +908,10 @@ extension AppModel {
                 break
             }
         }
+
+        if allowAutoRebase {
+            await autoRebaseEligibleWorktreesIfNeeded(for: repository)
+        }
     }
 
     func integrateIntoDefaultBranch(
@@ -907,20 +920,8 @@ extension AppModel {
         modelContext: ModelContext
     ) async {
         guard !sourceWorktree.isDefaultBranchWorkspace else { return }
-        let outcome = await performLocalMerge(sourceWorktree, repository: repository, modelContext: modelContext)
-        if case .committed = outcome {
-            let targetBranch = (try? await resolvedIntegrationTarget(for: sourceWorktree, repository: repository, modelContext: modelContext).branchName) ?? repository.defaultBranch
-            pendingErrorMessage = "Integrated \(sourceWorktree.branchName) into \(targetBranch)."
-            notifyOperationSuccess(
-                title: "Integration finished",
-                subtitle: repository.displayName,
-                body: "\(sourceWorktree.branchName) was merged into \(targetBranch).",
-                userInfo: [
-                    "repositoryID": repository.id.uuidString,
-                    "worktreeID": sourceWorktree.id.uuidString,
-                ]
-            )
-        }
+        _ = await performLocalMerge(sourceWorktree, repository: repository, modelContext: modelContext)
+        // Success is reflected by the refreshed worktree state; avoid a post-merge confirmation dialog.
         await refreshWorktreeStatuses(for: repository)
     }
 
@@ -937,26 +938,17 @@ extension AppModel {
 
         switch draft.method {
         case .localMerge:
-            let target = try? await resolvedIntegrationTarget(for: worktree, repository: repository, modelContext: modelContext)
             let outcome = await performLocalMerge(worktree, repository: repository, modelContext: modelContext)
-            await refreshWorktreeStatuses(for: repository)
             if case .committed = outcome {
-                let targetBranch = target?.branchName ?? repository.defaultBranch
-                pendingErrorMessage = "Integrated \(worktree.branchName) into \(targetBranch)."
                 worktree.lifecycleState = .merged
                 save(modelContext)
-                notifyOperationSuccess(
-                    title: "Integration finished",
-                    subtitle: repository.displayName,
-                    body: "\(worktree.branchName) was merged into \(targetBranch).",
-                    userInfo: [
-                        "repositoryID": repository.id.uuidString,
-                        "worktreeID": worktree.id.uuidString,
-                    ]
-                )
                 if deleteAfterIntegration {
-                    await removeWorktree(worktree, in: modelContext)
+                    await removeWorktree(worktree, in: modelContext, notifySuccess: false)
+                } else {
+                    await refreshWorktreeStatuses(for: repository)
                 }
+            } else if case .conflict = outcome {
+                await refreshWorktreeStatuses(for: repository)
             }
 
         case .githubPR:
@@ -1157,6 +1149,82 @@ extension AppModel {
         }
     }
 
+    func autoRebaseTargets(for repository: ManagedRepository) -> [AutoRebaseTarget] {
+        repository.worktrees.compactMap { worktree in
+            guard !worktree.isDefaultBranchWorkspace else { return nil }
+            guard worktree.resolvedPrimaryContext?.kind != .pullRequest, worktree.prNumber == nil else { return nil }
+            guard worktree.allowsSyncFromDefaultBranch else { return nil }
+            guard let worktreeURL = worktree.materializedURL else { return nil }
+            guard let status = worktreeStatuses[worktree.id] else { return nil }
+            guard status.behindCount > 0, !status.hasUncommittedChanges, !status.hasConflicts else { return nil }
+            let ontoBranch = autoRebaseTargetBranch(for: worktree, in: repository)
+            return AutoRebaseTarget(
+                worktreeID: worktree.id,
+                worktreePath: worktreeURL,
+                branchName: worktree.branchName,
+                ontoBranch: ontoBranch
+            )
+        }
+    }
+
+    private func autoRebaseTargetBranch(for worktree: WorktreeRecord, in repository: ManagedRepository) -> String {
+        if let parentID = worktree.parentWorktreeID,
+           let parent = repository.worktrees.first(where: { $0.id == parentID }),
+           parent.materializedURL != nil
+        {
+            return parent.branchName
+        }
+        return repository.defaultBranch
+    }
+
+    private func autoRebaseEligibleWorktreesIfNeeded(for repository: ManagedRepository) async {
+        let repositoryID = repository.id
+        guard !autoRebasingRepositoryIDs.contains(repositoryID) else {
+            pendingAutoRebaseRepositoryIDs.insert(repositoryID)
+            return
+        }
+
+        autoRebasingRepositoryIDs.insert(repositoryID)
+        defer {
+            autoRebasingRepositoryIDs.remove(repositoryID)
+            pendingAutoRebaseRepositoryIDs.remove(repositoryID)
+        }
+
+        while true {
+            pendingAutoRebaseRepositoryIDs.remove(repositoryID)
+            var didRebase = false
+
+            for target in autoRebaseTargets(for: repository) {
+                do {
+                    try await services.worktreeStatusService.rebase(
+                        worktreePath: target.worktreePath,
+                        onto: target.ontoBranch
+                    )
+                    didRebase = true
+                } catch {
+                    pendingErrorMessage = error.localizedDescription
+                    notifyOperationFailure(
+                        title: "Auto-rebase failed",
+                        subtitle: repository.displayName,
+                        body: "Could not rebase \(target.branchName) onto \(target.ontoBranch). Resolve it manually if you want to continue.",
+                        userInfo: [
+                            "repositoryID": repository.id.uuidString,
+                            "worktreeID": target.worktreeID.uuidString,
+                        ]
+                    )
+                }
+            }
+
+            if didRebase {
+                await refreshWorktreeStatuses(for: repository, allowAutoRebase: false)
+            }
+
+            guard pendingAutoRebaseRepositoryIDs.contains(repositoryID) else {
+                break
+            }
+        }
+    }
+
     // MARK: - PR Monitoring
 
     func startPRMonitoring(
@@ -1293,7 +1361,9 @@ extension AppModel {
 
         let statusItems = repository.worktrees.compactMap { worktree -> WorktreeStatusRefreshItem? in
             guard let worktreeURL = worktree.materializedURL else { return nil }
-            let compareBranch = worktree.isDefaultBranchWorkspace ? "\(defaultRemoteName)/\(defaultBranch)" : defaultBranch
+            let compareBranch = worktree.isDefaultBranchWorkspace
+                ? "\(defaultRemoteName)/\(defaultBranch)"
+                : autoRebaseTargetBranch(for: worktree, in: repository)
             return WorktreeStatusRefreshItem(
                 worktreeID: worktree.id,
                 worktreePath: worktreeURL.path,

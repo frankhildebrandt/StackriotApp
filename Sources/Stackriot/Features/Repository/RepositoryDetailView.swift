@@ -545,40 +545,45 @@ struct RepositoryDetailView: View {
         }
         .contextMenu {
             ForEach(appModel.cachedAvailableDevTools(for: worktree)) { tool in
-                Button("Open in \(tool.displayName)") {
+                Button {
                     Task {
                         await appModel.openDevTool(tool, for: worktree, in: modelContext)
                     }
+                } label: {
+                    Label("Open in \(tool.displayName)", systemImage: tool.systemImageName)
                 }
             }
-            Button("Open in \(AppPreferences.externalTerminal.displayName)") {
+            Button {
                 Task {
                     await appModel.openExternalTerminal(for: worktree, in: modelContext)
                 }
+            } label: {
+                Label("Open in \(AppPreferences.externalTerminal.displayName)", systemImage: "terminal")
             }
             .disabled(worktree.isIdeaTree)
+
             let runConfigurations = appModel.cachedAvailableRunConfigurations(for: worktree)
             if !runConfigurations.isEmpty {
-                Menu("Run Targets") {
-                    ForEach(runConfigurations) { configuration in
-                        Button(configuration.name) {
-                            Task {
-                                await appModel.launchRunConfiguration(
-                                    configuration,
-                                    in: worktree,
-                                    repository: repository,
-                                    modelContext: modelContext
-                                )
-                            }
-                        }
-                    }
+                Divider()
+                Menu {
+                    WorktreeRunConfigurationMenuItems(
+                        worktree: worktree,
+                        repository: repository,
+                        showsEmptyMessage: false
+                    )
+                } label: {
+                    Label("Build & Run", systemImage: "play.fill")
                 }
+                .disabled(worktree.isDefaultBranchWorkspace)
             }
+
             Divider()
-            Button("In Finder zeigen") {
+            Button {
                 Task {
                     await appModel.revealWorktreeInFinder(worktree)
                 }
+            } label: {
+                Label("In Finder zeigen", systemImage: "folder")
             }
             .disabled(worktree.isIdeaTree)
             Menu("Kartenfarbe") {
@@ -600,14 +605,21 @@ struct RepositoryDetailView: View {
             }
             if !worktree.isDefaultBranchWorkspace {
                 Divider()
-                Button(worktree.isPinned ? "Worktree entpinnen" : "Worktree anpinnen") {
+                Button {
                     togglePinned(worktree)
+                } label: {
+                    Label(
+                        worktree.isPinned ? "Worktree entpinnen" : "Worktree anpinnen",
+                        systemImage: worktree.isPinned ? "pin.slash" : "pin"
+                    )
                 }
-                Button("Worktree verschieben") {
+                Button {
                     presentMoveDialog(for: worktree)
+                } label: {
+                    Label("Worktree verschieben", systemImage: "folder.badge.gearshape")
                 }
                 .disabled(isMovingWorktree(worktree) || isRemovingWorktree(worktree))
-                Button("Mit \(repository.defaultBranch) synchronisieren") {
+                Button {
                     Task {
                         await appModel.syncWorktreeFromMain(
                             worktree,
@@ -616,21 +628,29 @@ struct RepositoryDetailView: View {
                             modelContext: modelContext
                         )
                     }
+                } label: {
+                    Label("Mit \(repository.defaultBranch) synchronisieren", systemImage: "arrow.triangle.2.circlepath")
                 }
-                Button("In \(integrationTargetBranchName(for: worktree)) integrieren") {
+                Button {
                     appModel.integrationDraft = IntegrationDraft(
                         prTitle: worktree.branchName
                     )
                     integrationTargetWorktreeID = worktree.id
                     integrationTargetBranchName = worktree.branchName
                     isIntegrationSheetPresented = true
+                } label: {
+                    Label("In \(integrationTargetBranchName(for: worktree)) integrieren", systemImage: "arrow.up.circle.fill")
                 }
-                Button("Publish Branch") {
+                Button {
                     appModel.presentPublishSheet(for: repository, worktree: worktree)
+                } label: {
+                    Label("Publish Branch", systemImage: "icloud.and.arrow.up")
                 }
                 Divider()
-                Button("Remove Worktree", role: .destructive) {
+                Button(role: .destructive) {
                     removeWorktree(worktree)
+                } label: {
+                    Label("Remove Worktree", systemImage: "trash")
                 }
                 .disabled(isRemovingWorktree(worktree))
             }
@@ -906,7 +926,6 @@ struct RepositoryDetailView: View {
                 isPushingDefaultBranch = true
                 Task {
                     await appModel.runGitPush(in: worktree, repository: repository, modelContext: modelContext)
-                    await appModel.refresh(repository, in: modelContext)
                     isPushingDefaultBranch = false
                 }
             } label: {

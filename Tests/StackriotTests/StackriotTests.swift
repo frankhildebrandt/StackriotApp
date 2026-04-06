@@ -171,6 +171,29 @@ struct StackriotTests {
     }
 
     @Test
+    func codexAppDevToolUsesSystemAppMetadata() {
+        #expect(SupportedDevTool.codexApp.displayName == "Codex App")
+        #expect(SupportedDevTool.codexApp.applicationName == "Codex")
+        #expect(SupportedDevTool.codexApp.bundleIdentifier == "com.openai.codex")
+        #expect(SupportedDevTool.codexApp.systemImageName == "laptopcomputer")
+    }
+
+    @MainActor
+    @Test
+    func devToolDiscoveryIncludesCodexAppWhenInstalled() throws {
+        let root = try temporaryDirectory(named: "codex-app-discovery")
+        let service = DevToolDiscoveryService()
+        let tools = service.availableTools(in: root)
+
+        if FileManager.default.fileExists(atPath: "/Applications/Codex.app") {
+            #expect(tools.contains(.codexApp))
+            #expect(IDEManager().installationURL(for: .codexApp)?.path == "/Applications/Codex.app")
+        } else {
+            #expect(!tools.contains(.codexApp))
+        }
+    }
+
+    @Test
     func aiAgentPromptCommandsUseDocumentedAutomationModes() {
         let path = "/tmp/example repo"
         let prompt = "Fix failing tests"
@@ -4395,6 +4418,252 @@ struct StackriotTests {
         #expect(await recorder.commandCount == 6)
     }
 
+    @MainActor
+    @Test
+    func autoRebaseTargetsOnlyCleanBehindMaterializedWorktrees() async throws {
+        let tempRoot = try temporaryDirectory(named: "auto-rebase-targets")
+        let repository = makeRepository(name: "AutoRebaseTargets")
+        let defaultWorktree = WorktreeRecord(
+            branchName: "main",
+            isDefaultBranchWorkspace: true,
+            path: tempRoot.appendingPathComponent("main").path,
+            repository: repository
+        )
+        let parentWorktree = WorktreeRecord(
+            branchName: "feature/parent",
+            path: tempRoot.appendingPathComponent("parent").path,
+            repository: repository
+        )
+        let rootWorktree = WorktreeRecord(
+            branchName: "feature/root",
+            path: tempRoot.appendingPathComponent("root").path,
+            repository: repository
+        )
+        let childWorktree = WorktreeRecord(
+            branchName: "feature/child",
+            path: tempRoot.appendingPathComponent("child").path,
+            parentWorktreeID: parentWorktree.id,
+            repository: repository
+        )
+        let dirtyWorktree = WorktreeRecord(branchName: "feature/dirty", path: tempRoot.appendingPathComponent("dirty").path, repository: repository)
+        let conflictWorktree = WorktreeRecord(branchName: "feature/conflict", path: tempRoot.appendingPathComponent("conflict").path, repository: repository)
+        let pullRequestWorktree = WorktreeRecord(
+            branchName: "feature/pr",
+            path: tempRoot.appendingPathComponent("pr").path,
+            repository: repository,
+            primaryContext: WorktreePrimaryContext(
+                kind: .pullRequest,
+                canonicalURL: "https://github.com/example/repo/pull/42",
+                title: "PR",
+                label: "PR",
+                provider: .github,
+                prNumber: 42,
+                ticketID: nil,
+                upstreamReference: nil,
+                upstreamSHA: nil
+            )
+        )
+        repository.worktrees = [
+            defaultWorktree,
+            parentWorktree,
+            rootWorktree,
+            childWorktree,
+            dirtyWorktree,
+            conflictWorktree,
+            pullRequestWorktree,
+        ]
+
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        appModel.worktreeStatuses = [
+            defaultWorktree.id: WorktreeStatus(aheadCount: 0, behindCount: 1),
+            parentWorktree.id: WorktreeStatus(aheadCount: 0, behindCount: 0),
+            rootWorktree.id: WorktreeStatus(aheadCount: 0, behindCount: 1),
+            childWorktree.id: WorktreeStatus(aheadCount: 0, behindCount: 1),
+            dirtyWorktree.id: WorktreeStatus(aheadCount: 0, behindCount: 1, hasUncommittedChanges: true),
+            conflictWorktree.id: WorktreeStatus(aheadCount: 0, behindCount: 1, hasConflicts: true),
+            pullRequestWorktree.id: WorktreeStatus(aheadCount: 0, behindCount: 1),
+        ]
+
+        let targets = appModel.autoRebaseTargets(for: repository)
+
+        #expect(targets.map(\.worktreeID) == [rootWorktree.id, childWorktree.id])
+        #expect(targets.map(\.ontoBranch) == ["main", "feature/parent"])
+    }
+
+    @MainActor
+    @Test
+    func refreshWorktreeStatusesAutoRebasesEligibleWorktrees() async throws {
+        let tempRoot = try temporaryDirectory(named: "auto-rebase-execution")
+        let repository = makeRepository(name: "AutoRebaseExecution")
+        let defaultWorktree = WorktreeRecord(
+            branchName: "main",
+            isDefaultBranchWorkspace: true,
+            path: tempRoot.appendingPathComponent("main").path,
+            repository: repository
+        )
+        let parentWorktree = WorktreeRecord(
+            branchName: "feature/parent",
+            path: tempRoot.appendingPathComponent("parent").path,
+            repository: repository
+        )
+        let rootWorktree = WorktreeRecord(
+            branchName: "feature/root",
+            path: tempRoot.appendingPathComponent("root").path,
+            repository: repository
+        )
+        let childWorktree = WorktreeRecord(
+            branchName: "feature/child",
+            path: tempRoot.appendingPathComponent("child").path,
+            parentWorktreeID: parentWorktree.id,
+            repository: repository
+        )
+        let dirtyWorktree = WorktreeRecord(branchName: "feature/dirty", path: tempRoot.appendingPathComponent("dirty").path, repository: repository)
+        let conflictWorktree = WorktreeRecord(branchName: "feature/conflict", path: tempRoot.appendingPathComponent("conflict").path, repository: repository)
+        let pullRequestWorktree = WorktreeRecord(
+            branchName: "feature/pr",
+            path: tempRoot.appendingPathComponent("pr").path,
+            repository: repository,
+            primaryContext: WorktreePrimaryContext(
+                kind: .pullRequest,
+                canonicalURL: "https://github.com/example/repo/pull/42",
+                title: "PR",
+                label: "PR",
+                provider: .github,
+                prNumber: 42,
+                ticketID: nil,
+                upstreamReference: nil,
+                upstreamSHA: nil
+            )
+        )
+        repository.worktrees = [
+            defaultWorktree,
+            parentWorktree,
+            rootWorktree,
+            childWorktree,
+            dirtyWorktree,
+            conflictWorktree,
+            pullRequestWorktree,
+        ]
+
+        let recorder = AutoRebaseCommandRecorder()
+        let rootPath = rootWorktree.path
+        let childPath = childWorktree.path
+        let dirtyPath = dirtyWorktree.path
+        let conflictPath = conflictWorktree.path
+        let pullRequestPath = pullRequestWorktree.path
+        let statusService = WorktreeStatusService(
+            runCommand: { executable, arguments, _, _ in
+                await recorder.record(executable: executable, arguments: arguments)
+                if arguments.contains("rev-list") {
+                    let worktreePath = arguments.dropFirst().first ?? ""
+                    let behindPaths: Set<String> = [rootPath, childPath, dirtyPath, conflictPath, pullRequestPath]
+                    return CommandResult(stdout: behindPaths.contains(worktreePath) ? "1\t0\n" : "0\t0\n", stderr: "", exitCode: 0)
+                }
+                if arguments.contains("--numstat") {
+                    let worktreePath = arguments.dropFirst().first ?? ""
+                    return CommandResult(stdout: worktreePath == dirtyPath ? "1\t0\tREADME.md\n" : "", stderr: "", exitCode: 0)
+                }
+                if arguments.contains("--diff-filter=U") {
+                    let worktreePath = arguments.dropFirst().first ?? ""
+                    return CommandResult(stdout: worktreePath == conflictPath ? "README.md\n" : "", stderr: "", exitCode: 0)
+                }
+                return CommandResult(stdout: "", stderr: "", exitCode: 0)
+            }
+        )
+        let appModel = AppModel(services: AppServices(
+            worktreeStatusService: statusService,
+            notificationService: RecordingNotificationService()
+        ))
+
+        await appModel.refreshWorktreeStatuses(for: repository)
+
+        let rebaseTargets = await recorder.rebaseTargets
+        #expect(rebaseTargets == [
+            AutoRebaseCommand(path: rootWorktree.path, ontoBranch: "main"),
+            AutoRebaseCommand(path: childWorktree.path, ontoBranch: "feature/parent"),
+        ])
+        #expect(await recorder.revListCompareBranches.contains { $0.hasPrefix("feature/parent...") })
+    }
+
+    @MainActor
+    @Test
+    func gitOperationRefreshesWorktreeStatusesOnlyAfterSuccess() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let repository = makeRepository(name: "GitOperationRefresh")
+        let worktree = WorktreeRecord(branchName: "main", isDefaultBranchWorkspace: true, path: "/tmp/git-operation-refresh", repository: repository)
+        repository.worktrees = [worktree]
+        modelContext.insert(repository)
+        modelContext.insert(worktree)
+
+        let successRecorder = StatusRefreshCommandRecorder()
+        let successStatusService = WorktreeStatusService(
+            runCommand: { _, arguments, _, _ in
+                await successRecorder.beginCommand()
+                await successRecorder.endCommand()
+                if arguments.contains("rev-list") {
+                    return CommandResult(stdout: "0\t0\n", stderr: "", exitCode: 0)
+                }
+                return CommandResult(stdout: "", stderr: "", exitCode: 0)
+            }
+        )
+        let successAppModel = AppModel(services: AppServices(
+            worktreeStatusService: successStatusService,
+            notificationService: RecordingNotificationService()
+        ))
+        successAppModel.storedModelContext = modelContext
+        let successfulRun = RunRecord(
+            actionKind: .gitOperation,
+            title: "git push",
+            commandLine: "git push",
+            status: .running,
+            repository: repository,
+            worktree: worktree
+        )
+        repository.runs = [successfulRun]
+        modelContext.insert(successfulRun)
+        try modelContext.save()
+
+        await successAppModel.handleRunTermination(runID: successfulRun.id, exitCode: 0, wasCancelled: false)
+        for _ in 0..<20 {
+            if await successRecorder.commandCount > 0 {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(await successRecorder.commandCount > 0)
+
+        let failureRecorder = StatusRefreshCommandRecorder()
+        let failureStatusService = WorktreeStatusService(
+            runCommand: { _, _, _, _ in
+                await failureRecorder.beginCommand()
+                await failureRecorder.endCommand()
+                return CommandResult(stdout: "", stderr: "", exitCode: 0)
+            }
+        )
+        let failureAppModel = AppModel(services: AppServices(
+            worktreeStatusService: failureStatusService,
+            notificationService: RecordingNotificationService()
+        ))
+        failureAppModel.storedModelContext = modelContext
+        let failedRun = RunRecord(
+            actionKind: .gitOperation,
+            title: "git push",
+            commandLine: "git push",
+            status: .running,
+            repository: repository,
+            worktree: worktree
+        )
+        repository.runs.append(failedRun)
+        modelContext.insert(failedRun)
+        try modelContext.save()
+
+        await failureAppModel.handleRunTermination(runID: failedRun.id, exitCode: 1, wasCancelled: false)
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(await failureRecorder.commandCount == 0)
+    }
+
     private func createSeededRemote(named name: String) async throws -> (root: URL, remote: URL) {
         let origin = try temporaryDirectory(named: name)
         let remote = origin.appendingPathComponent("\(name).git")
@@ -4499,6 +4768,11 @@ private struct DeliveredNotificationSnapshot: Sendable, Equatable {
     let body: String
 }
 
+private struct AutoRebaseCommand: Sendable, Equatable {
+    let path: String
+    let ontoBranch: String
+}
+
 private final class TestUserNotificationCenter: UserNotificationCentering, @unchecked Sendable {
     private let lock = NSLock()
     private var currentAuthorizationStatus: UNAuthorizationStatus
@@ -4582,6 +4856,33 @@ private actor StatusRefreshCommandRecorder {
 
     var maxConcurrent: Int { maxInFlightValue }
     var commandCount: Int { commandCountValue }
+}
+
+private actor AutoRebaseCommandRecorder {
+    private var rebaseTargetsValue: [AutoRebaseCommand] = []
+    private var revListCompareBranchesValue: [String] = []
+
+    func record(executable _: String, arguments: [String]) {
+        if arguments.contains("rev-list"), let comparison = arguments.last {
+            revListCompareBranchesValue.append(comparison)
+        }
+        if let rebaseIndex = arguments.firstIndex(of: "rebase"),
+           arguments.indices.contains(rebaseIndex + 1),
+           !arguments[rebaseIndex + 1].hasPrefix("--"),
+           let pathIndex = arguments.firstIndex(of: "-C"),
+           arguments.indices.contains(pathIndex + 1)
+        {
+            rebaseTargetsValue.append(
+                AutoRebaseCommand(
+                    path: arguments[pathIndex + 1],
+                    ontoBranch: arguments[rebaseIndex + 1]
+                )
+            )
+        }
+    }
+
+    var rebaseTargets: [AutoRebaseCommand] { rebaseTargetsValue }
+    var revListCompareBranches: [String] { revListCompareBranchesValue }
 }
 
 private extension NSLock {
