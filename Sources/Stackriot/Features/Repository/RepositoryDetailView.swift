@@ -926,7 +926,6 @@ struct RepositoryDetailView: View {
                 isPushingDefaultBranch = true
                 Task {
                     await appModel.runGitPush(in: worktree, repository: repository, modelContext: modelContext)
-                    await appModel.refresh(repository, in: modelContext)
                     isPushingDefaultBranch = false
                 }
             } label: {

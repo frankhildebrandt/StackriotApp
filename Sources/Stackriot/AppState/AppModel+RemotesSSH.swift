@@ -158,24 +158,14 @@ extension AppModel {
                 return
             }
 
-            let branch = try await services.repositoryManager.publishCurrentBranch(
+            _ = try await services.repositoryManager.publishCurrentBranch(
                 worktreePath: worktreeURL,
                 remote: remoteExecutionContext(for: remote)
             )
-            pendingErrorMessage = "Published \(branch) to \(remote.name)."
             dismissPublishSheet()
             repository.updatedAt = .now
             _ = modelContext
             scheduleWorktreeStatusRefresh(for: repository)
-            notifyOperationSuccess(
-                title: "Branch published",
-                subtitle: repository.displayName,
-                body: "\(branch) was pushed to \(remote.name).",
-                userInfo: [
-                    "repositoryID": repository.id.uuidString,
-                    "worktreeID": worktree.id.uuidString,
-                ]
-            )
         } catch {
             pendingErrorMessage = error.localizedDescription
             notifyOperationFailure(

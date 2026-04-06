@@ -138,6 +138,10 @@ final class AppModel: @unchecked Sendable {
     @ObservationIgnored
     var worktreeStatusRefreshGenerationByRepositoryID: [UUID: Int] = [:]
     @ObservationIgnored
+    var autoRebasingRepositoryIDs: Set<UUID> = []
+    @ObservationIgnored
+    var pendingAutoRebaseRepositoryIDs: Set<UUID> = []
+    @ObservationIgnored
     var devContainerMonitoringTask: Task<Void, Never>?
     @ObservationIgnored
     let selectionPerformanceMonitor = SelectionPerformanceMonitor()
@@ -949,6 +953,9 @@ extension AppModel {
 
     func notifyRunCompletionIfNeeded(_ run: RunRecord, failureMessage: String? = nil) {
         guard run.status != .cancelled else { return }
+        if run.status == .succeeded, run.actionKind == .gitOperation, run.title == "git push" {
+            return
+        }
 
         let context = runNotificationContext(for: run)
         let body: String

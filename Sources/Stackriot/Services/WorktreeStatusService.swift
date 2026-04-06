@@ -67,15 +67,19 @@ struct WorktreeStatusService {
     }
 
     func rebase(worktreePath: URL, onto: String) async throws {
-        let result = try await CommandRunner.runCollected(
-            executable: "git",
-            arguments: ["-C", worktreePath.path, "rebase", onto]
+        let result = try await runCommand(
+            "git",
+            ["-C", worktreePath.path, "rebase", onto],
+            nil,
+            [:]
         )
 
         guard result.exitCode == 0 else {
-            _ = try? await CommandRunner.runCollected(
-                executable: "git",
-                arguments: ["-C", worktreePath.path, "rebase", "--abort"]
+            _ = try? await runCommand(
+                "git",
+                ["-C", worktreePath.path, "rebase", "--abort"],
+                nil,
+                [:]
             )
             throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
