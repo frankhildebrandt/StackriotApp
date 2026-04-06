@@ -1,12 +1,6 @@
 import SwiftData
 import SwiftUI
 
-struct RunConfigurationMenuSection: Identifiable {
-    let id: String
-    let title: String
-    let configurations: [RunConfiguration]
-}
-
 struct WorktreeRunConfigurationMenuItems: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.modelContext) private var modelContext
@@ -83,44 +77,7 @@ struct WorktreeRunConfigurationMenuItems: View {
     }
 
     private var runConfigurationSections: [RunConfigurationMenuSection] {
-        var sections: [RunConfigurationMenuSection] = []
-
-        let nativeConfigurations = sorted(runConfigurations.filter { $0.source == .native })
-        if !nativeConfigurations.isEmpty {
-            sections.append(
-                RunConfigurationMenuSection(
-                    id: "native",
-                    title: "Native Configs",
-                    configurations: nativeConfigurations
-                )
-            )
-        }
-
-        let grouped = Dictionary(grouping: runConfigurations.filter { $0.source != .native }) { $0.displaySourceName }
-        let sortedKeys = grouped.keys.sorted { lhs, rhs in
-            let lhsRank = grouped[lhs]?.first?.preferredDevTool?.sortPriority ?? Int.max
-            let rhsRank = grouped[rhs]?.first?.preferredDevTool?.sortPriority ?? Int.max
-            if lhsRank == rhsRank {
-                return lhs < rhs
-            }
-            return lhsRank < rhsRank
-        }
-
-        sections.append(contentsOf: sortedKeys.map { key in
-            RunConfigurationMenuSection(
-                id: key,
-                title: key,
-                configurations: sorted(grouped[key] ?? [])
-            )
-        })
-
-        return sections
-    }
-
-    private func sorted(_ configurations: [RunConfiguration]) -> [RunConfiguration] {
-        configurations.sorted {
-            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
+        RunConfigurationMenuGrouping.sections(for: runConfigurations)
     }
 
     private func iconName(for configuration: RunConfiguration) -> String {

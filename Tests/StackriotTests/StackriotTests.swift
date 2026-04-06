@@ -776,6 +776,122 @@ struct StackriotTests {
     }
 
     @Test
+    func runConfigurationMenuGroupingSplitsSourceFamilies() {
+        let configurations = [
+            makeRunConfiguration(
+                id: "native-npm-zeta",
+                name: "zeta",
+                source: .native,
+                kind: .npmScript,
+                runnerType: "npm",
+                command: "npm",
+                arguments: ["run", "zeta"]
+            ),
+            makeRunConfiguration(
+                id: "native-make-alpha",
+                name: "alpha",
+                source: .native,
+                kind: .makeTarget,
+                runnerType: "make",
+                command: "make",
+                arguments: ["alpha"]
+            ),
+            makeRunConfiguration(
+                id: "jetbrains-inspect",
+                name: "Inspect",
+                source: .jetbrains,
+                kind: .jetbrainsConfiguration,
+                runnerType: "JetBrains",
+                command: "/bin/sh",
+                arguments: ["-lc", "echo inspect"],
+                preferredDevTool: .webstorm
+            ),
+            makeRunConfiguration(
+                id: "cursor-launch",
+                name: "Launch",
+                source: .cursor,
+                kind: .shellCommand,
+                runnerType: "cursor",
+                command: "cursor",
+                arguments: ["--run"]
+            ),
+            makeRunConfiguration(
+                id: "vscode-debug",
+                name: "Debug",
+                source: .vscode,
+                kind: .nodeLaunch,
+                runnerType: "vscode",
+                command: "node",
+                arguments: ["index.js"]
+            ),
+            makeRunConfiguration(
+                id: "xcode-app",
+                name: "App",
+                source: .xcode,
+                kind: .xcodeScheme,
+                runnerType: "xcodebuild",
+                command: "xcodebuild",
+                arguments: ["-scheme", "App"]
+            )
+        ]
+
+        let sections = RunConfigurationMenuGrouping.sections(for: configurations)
+
+        #expect(sections.map(\.title) == ["Make", "NPM", "VS Code", "Cursor", "WebStorm", "Xcode"])
+        #expect(!sections.contains(where: { $0.title == "Native Configs" }))
+        #expect(sections[0].configurations.map(\.name) == ["alpha"])
+        #expect(sections[1].configurations.map(\.name) == ["zeta"])
+    }
+
+    @Test
+    func runConfigurationMenuGroupingKeepsAlphabeticalOrderWithinSections() {
+        let configurations = [
+            makeRunConfiguration(
+                id: "native-make-lint",
+                name: "lint",
+                source: .native,
+                kind: .makeTarget,
+                runnerType: "make",
+                command: "make",
+                arguments: ["lint"]
+            ),
+            makeRunConfiguration(
+                id: "native-make-build",
+                name: "build",
+                source: .native,
+                kind: .makeTarget,
+                runnerType: "make",
+                command: "make",
+                arguments: ["build"]
+            ),
+            makeRunConfiguration(
+                id: "native-npm-test",
+                name: "test",
+                source: .native,
+                kind: .npmScript,
+                runnerType: "npm",
+                command: "npm",
+                arguments: ["run", "test"]
+            ),
+            makeRunConfiguration(
+                id: "native-npm-dev",
+                name: "dev",
+                source: .native,
+                kind: .npmScript,
+                runnerType: "npm",
+                command: "npm",
+                arguments: ["run", "dev"]
+            )
+        ]
+
+        let sections = RunConfigurationMenuGrouping.sections(for: configurations)
+
+        #expect(sections.map(\.title) == ["Make", "NPM"])
+        #expect(sections[0].configurations.map(\.name) == ["build", "lint"])
+        #expect(sections[1].configurations.map(\.name) == ["dev", "test"])
+    }
+
+    @Test
     func repositoryCloneRefreshPublishAndDeleteWorkLocally() async throws {
         let remoteOne = try await createSeededRemote(named: "origin")
         let remoteTwo = try await createSeededRemote(named: "upstream")
@@ -4757,6 +4873,29 @@ struct StackriotTests {
             defaultBranch: "main",
             namespace: namespace,
             project: project
+        )
+    }
+
+    private func makeRunConfiguration(
+        id: String,
+        name: String,
+        source: RunConfigurationSource,
+        kind: RunConfigurationKind,
+        runnerType: String,
+        command: String,
+        arguments: [String],
+        preferredDevTool: SupportedDevTool? = nil
+    ) -> RunConfiguration {
+        RunConfiguration(
+            id: id,
+            name: name,
+            source: source,
+            kind: kind,
+            runnerType: runnerType,
+            command: command,
+            arguments: arguments,
+            rawSourcePath: "/tmp/\(id)",
+            preferredDevTool: preferredDevTool
         )
     }
 }
