@@ -6,6 +6,7 @@ PRODUCTION_DESTINATION := generic/platform=macOS
 BUILD_DIR := $(CURDIR)/build
 PRODUCTION_DIR := $(BUILD_DIR)/production
 LOCAL_CACHE_DIR := $(BUILD_DIR)/Cache
+PACKAGE_CACHE_DIR := $(BUILD_DIR)/PackageCache
 LOCAL_HOME_DIR := $(BUILD_DIR)/home
 LOCAL_TMP_DIR := $(BUILD_DIR)/tmp
 DERIVED_DATA_DIR := $(BUILD_DIR)/DerivedData
@@ -36,7 +37,7 @@ help:
 		"  make clean-spm         Remove $(CURDIR)/.build only (Swift Package Manager cache)"
 
 production-build:
-	@mkdir -p "$(BUILD_DIR)" "$(SOURCE_PACKAGES_DIR)" "$(LOCAL_CACHE_DIR)" "$(LOCAL_TMP_DIR)" "$(LOCAL_HOME_DIR)/Library/Caches"
+	@mkdir -p "$(BUILD_DIR)" "$(SOURCE_PACKAGES_DIR)" "$(LOCAL_CACHE_DIR)" "$(PACKAGE_CACHE_DIR)" "$(LOCAL_TMP_DIR)" "$(LOCAL_HOME_DIR)/Library/Caches"
 	CLANG_MODULE_CACHE_PATH="$(LOCAL_CACHE_DIR)/clang" \
 	SWIFT_MODULECACHE_PATH="$(LOCAL_CACHE_DIR)/swift" \
 	XDG_CACHE_HOME="$(LOCAL_CACHE_DIR)/xdg" \
@@ -49,6 +50,14 @@ production-build:
 		-destination "$(PRODUCTION_DESTINATION)" \
 		-derivedDataPath "$(DERIVED_DATA_DIR)" \
 		-clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIR)" \
+		-packageCachePath "$(PACKAGE_CACHE_DIR)" \
+		-disableAutomaticPackageResolution \
+		-onlyUsePackageVersionsFromResolvedFile \
+		CLANG_MODULE_CACHE_PATH="$(LOCAL_CACHE_DIR)/clang" \
+		SWIFT_MODULECACHE_PATH="$(LOCAL_CACHE_DIR)/swift" \
+		XDG_CACHE_HOME="$(LOCAL_CACHE_DIR)/xdg" \
+		HOME="$(LOCAL_HOME_DIR)" \
+		TMPDIR="$(LOCAL_TMP_DIR)" \
 		-skipPackagePluginValidation \
 		ONLY_ACTIVE_ARCH=NO \
 		ARCHS="arm64 x86_64" \
@@ -66,7 +75,7 @@ production: production-build
 
 # Build Debug and launch the app (Xcode scheme). All caches live under $(BUILD_DIR).
 debug-run:
-	@mkdir -p "$(BUILD_DIR)" "$(SOURCE_PACKAGES_DIR)" "$(LOCAL_CACHE_DIR)" "$(LOCAL_TMP_DIR)" "$(LOCAL_HOME_DIR)/Library/Caches"
+	@mkdir -p "$(BUILD_DIR)" "$(SOURCE_PACKAGES_DIR)" "$(LOCAL_CACHE_DIR)" "$(PACKAGE_CACHE_DIR)" "$(LOCAL_TMP_DIR)" "$(LOCAL_HOME_DIR)/Library/Caches"
 	CLANG_MODULE_CACHE_PATH="$(LOCAL_CACHE_DIR)/clang" \
 	SWIFT_MODULECACHE_PATH="$(LOCAL_CACHE_DIR)/swift" \
 	XDG_CACHE_HOME="$(LOCAL_CACHE_DIR)/xdg" \
@@ -78,6 +87,14 @@ debug-run:
 		-configuration Debug \
 		-derivedDataPath "$(DERIVED_DATA_DIR)" \
 		-clonedSourcePackagesDirPath "$(SOURCE_PACKAGES_DIR)" \
+		-packageCachePath "$(PACKAGE_CACHE_DIR)" \
+		-disableAutomaticPackageResolution \
+		-onlyUsePackageVersionsFromResolvedFile \
+		CLANG_MODULE_CACHE_PATH="$(LOCAL_CACHE_DIR)/clang" \
+		SWIFT_MODULECACHE_PATH="$(LOCAL_CACHE_DIR)/swift" \
+		XDG_CACHE_HOME="$(LOCAL_CACHE_DIR)/xdg" \
+		HOME="$(LOCAL_HOME_DIR)" \
+		TMPDIR="$(LOCAL_TMP_DIR)" \
 		-skipPackagePluginValidation \
 		build
 	@printf "Launching Debug app: %s\n" "$(DEBUG_APP_BUNDLE)"
@@ -92,7 +109,7 @@ test:
 	swift test --parallel
 
 dmg-background:
-	@mkdir -p "$(BUILD_DIR)" "$(LOCAL_CACHE_DIR)" "$(LOCAL_TMP_DIR)" "$(LOCAL_HOME_DIR)/Library/Caches"
+	@mkdir -p "$(BUILD_DIR)" "$(LOCAL_CACHE_DIR)" "$(PACKAGE_CACHE_DIR)" "$(LOCAL_TMP_DIR)" "$(LOCAL_HOME_DIR)/Library/Caches"
 	CLANG_MODULE_CACHE_PATH="$(LOCAL_CACHE_DIR)/clang" \
 	SWIFT_MODULECACHE_PATH="$(LOCAL_CACHE_DIR)/swift" \
 	XDG_CACHE_HOME="$(LOCAL_CACHE_DIR)/xdg" \
