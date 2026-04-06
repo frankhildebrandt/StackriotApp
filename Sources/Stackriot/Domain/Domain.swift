@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum RepositoryHealth: String, Codable, CaseIterable, Identifiable {
@@ -935,6 +936,42 @@ enum DependencyInstallMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum SupportedExternalTerminal: String, Codable, CaseIterable, Identifiable, Sendable {
+    case appleTerminal
+    case iterm2
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .appleTerminal:
+            "Terminal"
+        case .iterm2:
+            "iTerm2"
+        }
+    }
+
+    var applicationName: String {
+        switch self {
+        case .appleTerminal:
+            "Terminal"
+        case .iterm2:
+            "iTerm"
+        }
+    }
+
+    var bundleIdentifier: String {
+        switch self {
+        case .appleTerminal:
+            "com.apple.Terminal"
+        case .iterm2:
+            "com.googlecode.iterm2"
+        }
+    }
+
+    var systemImageName: String { "terminal" }
+}
+
 enum TerminalTabRetentionMode: String, Codable, CaseIterable, Identifiable {
     case shortRetain
     case manualClose
@@ -1657,6 +1694,7 @@ enum AppPreferences {
     static let defaultWorktreeStatusPollingInterval: Double = 120
     static let defaultQuickIntentHotkey = QuickIntentHotkeyConfiguration.default
     static let terminalTabRetentionModeKey = "terminal.tabs.retentionMode"
+    static let externalTerminalKey = "terminal.externalApp"
     static let performanceDebugModeEnabledKey = "debug.performance.enabled"
     static let nodeAutoUpdateEnabledKey = "node.autoUpdateEnabled"
     static let nodeAutoUpdateIntervalKey = "node.autoUpdateIntervalSeconds"
@@ -1754,6 +1792,16 @@ enum AppPreferences {
             return defaultTerminalTabRetentionMode
         }
         return mode
+    }
+
+    static var externalTerminal: SupportedExternalTerminal {
+        let defaults = UserDefaults.standard
+        if let stored = defaults.string(forKey: externalTerminalKey),
+           let terminal = SupportedExternalTerminal(rawValue: stored) {
+            return terminal
+        }
+        let iterm2Installed = NSWorkspace.shared.urlForApplication(withBundleIdentifier: SupportedExternalTerminal.iterm2.bundleIdentifier) != nil
+        return iterm2Installed ? .iterm2 : .appleTerminal
     }
 
     static var performanceDebugModeEnabled: Bool {

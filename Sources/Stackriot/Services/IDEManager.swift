@@ -37,6 +37,15 @@ struct IDEManager {
         }
     }
 
+    func openInExternalTerminal(path: URL, terminal: SupportedExternalTerminal) async throws {
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: terminal.bundleIdentifier) else {
+            throw StackriotError.devToolUnavailable(terminal.displayName)
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        try await NSWorkspace.shared.open([path], withApplicationAt: appURL, configuration: configuration)
+    }
+
     func openTerminal(path: URL) async throws {
         let result = try await CommandRunner.runCollected(
             executable: "open",
