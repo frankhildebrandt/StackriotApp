@@ -443,6 +443,7 @@ enum SupportedDevTool: String, Codable, CaseIterable, Identifiable, Sendable {
     case cursor
     case vscode
     case zed
+    case codexApp
     case xcode
     case intellijIdea
     case goland
@@ -459,6 +460,8 @@ enum SupportedDevTool: String, Codable, CaseIterable, Identifiable, Sendable {
             "VS Code"
         case .zed:
             "Zed"
+        case .codexApp:
+            "Codex App"
         case .xcode:
             "Xcode"
         case .intellijIdea:
@@ -480,6 +483,8 @@ enum SupportedDevTool: String, Codable, CaseIterable, Identifiable, Sendable {
             "Visual Studio Code"
         case .zed:
             "Zed"
+        case .codexApp:
+            "Codex"
         case .xcode:
             "Xcode"
         case .intellijIdea:
@@ -501,6 +506,8 @@ enum SupportedDevTool: String, Codable, CaseIterable, Identifiable, Sendable {
             "com.microsoft.VSCode"
         case .zed:
             "dev.zed.Zed"
+        case .codexApp:
+            "com.openai.codex"
         case .xcode:
             "com.apple.dt.Xcode"
         case .intellijIdea:
@@ -518,7 +525,7 @@ enum SupportedDevTool: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .xcode:
             "hammer"
-        case .cursor, .vscode, .zed:
+        case .cursor, .vscode, .zed, .codexApp:
             "laptopcomputer"
         case .intellijIdea, .goland, .phpstorm, .webstorm:
             "shippingbox"
@@ -535,14 +542,16 @@ enum SupportedDevTool: String, Codable, CaseIterable, Identifiable, Sendable {
             2
         case .xcode:
             3
-        case .goland:
+        case .codexApp:
             4
-        case .webstorm:
+        case .goland:
             5
-        case .phpstorm:
+        case .webstorm:
             6
-        case .intellijIdea:
+        case .phpstorm:
             7
+        case .intellijIdea:
+            8
         }
     }
 }

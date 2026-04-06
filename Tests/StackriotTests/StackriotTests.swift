@@ -171,6 +171,29 @@ struct StackriotTests {
     }
 
     @Test
+    func codexAppDevToolUsesSystemAppMetadata() {
+        #expect(SupportedDevTool.codexApp.displayName == "Codex App")
+        #expect(SupportedDevTool.codexApp.applicationName == "Codex")
+        #expect(SupportedDevTool.codexApp.bundleIdentifier == "com.openai.codex")
+        #expect(SupportedDevTool.codexApp.systemImageName == "laptopcomputer")
+    }
+
+    @MainActor
+    @Test
+    func devToolDiscoveryIncludesCodexAppWhenInstalled() throws {
+        let root = try temporaryDirectory(named: "codex-app-discovery")
+        let service = DevToolDiscoveryService()
+        let tools = service.availableTools(in: root)
+
+        if FileManager.default.fileExists(atPath: "/Applications/Codex.app") {
+            #expect(tools.contains(.codexApp))
+            #expect(IDEManager().installationURL(for: .codexApp)?.path == "/Applications/Codex.app")
+        } else {
+            #expect(!tools.contains(.codexApp))
+        }
+    }
+
+    @Test
     func aiAgentPromptCommandsUseDocumentedAutomationModes() {
         let path = "/tmp/example repo"
         let prompt = "Fix failing tests"

@@ -244,7 +244,7 @@ final class DevToolDiscoveryService {
         installedTools
             .filter { tool in
                 switch tool {
-                case .cursor, .vscode, .zed, .intellijIdea:
+                case .cursor, .vscode, .zed, .codexApp, .intellijIdea:
                     true
                 case .xcode:
                     indicators.hasXcodeProject
