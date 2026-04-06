@@ -1,10 +1,149 @@
 import SwiftData
 import SwiftUI
 
-private struct RunConfigurationMenuSection: Identifiable {
+struct RunConfigurationMenuSection: Identifiable {
     let id: String
     let title: String
     let configurations: [RunConfiguration]
+}
+
+struct WorktreeRunConfigurationMenuItems: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(\.modelContext) private var modelContext
+
+    let worktree: WorktreeRecord
+    let repository: ManagedRepository
+    let showsEmptyMessage: Bool
+
+    var body: some View {
+        ForEach(runConfigurationSections) { section in
+            Section(section.title) {
+                ForEach(section.configurations) { configuration in
+                    runConfigurationMenuItem(for: configuration)
+                }
+            }
+        }
+
+        if showsEmptyMessage && runConfigurationSections.isEmpty {
+            Text("Keine unterstützten Run Configurations gefunden")
+        }
+    }
+
+    @ViewBuilder
+    private func runConfigurationMenuItem(for configuration: RunConfiguration) -> some View {
+        let label = Label(runConfigurationTitle(for: configuration), systemImage: iconName(for: configuration))
+
+        if configuration.isDirectlyRunnable {
+            Button {
+                Task {
+                    await appModel.launchRunConfiguration(
+                        configuration,
+                        in: worktree,
+                        repository: repository,
+                        modelContext: modelContext
+                    )
+                }
+            } label: {
+                label
+            }
+        } else if let preferredDevTool = configuration.preferredDevTool, availableDevTools.contains(preferredDevTool) {
+            Button {
+                Task {
+                    await appModel.launchRunConfiguration(
+                        configuration,
+                        in: worktree,
+                        repository: repository,
+                        modelContext: modelContext
+                    )
+                }
+            } label: {
+                Label(
+                    "\(configuration.name) · Open in \(preferredDevTool.displayName)",
+                    systemImage: preferredDevTool.systemImageName
+                )
+            }
+        } else if let preferredDevTool = configuration.preferredDevTool {
+            Label(
+                "\(configuration.name) · Requires \(preferredDevTool.displayName)",
+                systemImage: "exclamationmark.triangle"
+            )
+            .foregroundStyle(.secondary)
+        } else {
+            Label(configuration.name, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var availableDevTools: [SupportedDevTool] {
+        appModel.cachedAvailableDevTools(for: worktree)
+    }
+
+    private var runConfigurations: [RunConfiguration] {
+        appModel.cachedAvailableRunConfigurations(for: worktree)
+    }
+
+    private var runConfigurationSections: [RunConfigurationMenuSection] {
+        var sections: [RunConfigurationMenuSection] = []
+
+        let nativeConfigurations = sorted(runConfigurations.filter { $0.source == .native })
+        if !nativeConfigurations.isEmpty {
+            sections.append(
+                RunConfigurationMenuSection(
+                    id: "native",
+                    title: "Native Configs",
+                    configurations: nativeConfigurations
+                )
+            )
+        }
+
+        let grouped = Dictionary(grouping: runConfigurations.filter { $0.source != .native }) { $0.displaySourceName }
+        let sortedKeys = grouped.keys.sorted { lhs, rhs in
+            let lhsRank = grouped[lhs]?.first?.preferredDevTool?.sortPriority ?? Int.max
+            let rhsRank = grouped[rhs]?.first?.preferredDevTool?.sortPriority ?? Int.max
+            if lhsRank == rhsRank {
+                return lhs < rhs
+            }
+            return lhsRank < rhsRank
+        }
+
+        sections.append(contentsOf: sortedKeys.map { key in
+            RunConfigurationMenuSection(
+                id: key,
+                title: key,
+                configurations: sorted(grouped[key] ?? [])
+            )
+        })
+
+        return sections
+    }
+
+    private func sorted(_ configurations: [RunConfiguration]) -> [RunConfiguration] {
+        configurations.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private func iconName(for configuration: RunConfiguration) -> String {
+        switch configuration.executionBehavior {
+        case .direct:
+            return configuration.isDebugCapable ? "play.circle" : "play"
+        case .buildOnly:
+            return "hammer"
+        case .openInDevTool:
+            return configuration.preferredDevTool?.systemImageName ?? "laptopcomputer"
+        }
+    }
+
+    private func runConfigurationTitle(for configuration: RunConfiguration) -> String {
+        switch configuration.source {
+        case .native:
+            return "\(configuration.name) · \(configuration.kind.displayName)"
+        case .xcode:
+            return "\(configuration.name) · Build"
+        default:
+            return "\(configuration.name) · \(configuration.runnerType)"
+        }
+    }
 }
 
 struct WorktreeActionBar: View {
@@ -231,23 +370,17 @@ struct WorktreeActionBar: View {
 
     private var runConfigButton: some View {
         Menu {
-            ForEach(runConfigurationSections) { section in
-                Section(section.title) {
-                    ForEach(section.configurations) { configuration in
-                        runConfigurationMenuItem(for: configuration)
-                    }
-                }
-            }
-
-            if runConfigurationSections.isEmpty {
-                Text("Keine unterstützten Run Configurations gefunden")
-            }
+            WorktreeRunConfigurationMenuItems(
+                worktree: worktree,
+                repository: repository,
+                showsEmptyMessage: true
+            )
         } label: {
             Image(systemName: "play.fill")
         }
         .menuStyle(.button)
         .buttonStyle(.bordered)
-        .disabled(runConfigurationSections.isEmpty || worktree.isDefaultBranchWorkspace)
+        .disabled(runConfigurations.isEmpty || worktree.isDefaultBranchWorkspace)
         .help("Run Configuration ausführen")
     }
 
@@ -265,51 +398,6 @@ struct WorktreeActionBar: View {
         .buttonStyle(.bordered)
         .disabled(!hasDependencyActions)
         .help("Dependencies installieren oder aktualisieren")
-    }
-
-    @ViewBuilder
-    private func runConfigurationMenuItem(for configuration: RunConfiguration) -> some View {
-        let label = Label(runConfigurationTitle(for: configuration), systemImage: iconName(for: configuration))
-
-        if configuration.isDirectlyRunnable {
-            Button {
-                Task {
-                    await appModel.launchRunConfiguration(
-                        configuration,
-                        in: worktree,
-                        repository: repository,
-                        modelContext: modelContext
-                    )
-                }
-            } label: {
-                label
-            }
-        } else if let preferredDevTool = configuration.preferredDevTool, availableDevTools.contains(preferredDevTool) {
-            Button {
-                Task {
-                    await appModel.launchRunConfiguration(
-                        configuration,
-                        in: worktree,
-                        repository: repository,
-                        modelContext: modelContext
-                    )
-                }
-            } label: {
-                Label(
-                    "\(configuration.name) · Open in \(preferredDevTool.displayName)",
-                    systemImage: preferredDevTool.systemImageName
-                )
-            }
-        } else if let preferredDevTool = configuration.preferredDevTool {
-            Label(
-                "\(configuration.name) · Requires \(preferredDevTool.displayName)",
-                systemImage: "exclamationmark.triangle"
-            )
-            .foregroundStyle(.secondary)
-        } else {
-            Label(configuration.name, systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.secondary)
-        }
     }
 
     private var gitMenuButton: some View {
@@ -363,66 +451,6 @@ struct WorktreeActionBar: View {
 
     private var hasDependencyActions: Bool {
         appModel.hasCachedDependencyActions(for: worktree)
-    }
-
-    private var runConfigurationSections: [RunConfigurationMenuSection] {
-        var sections: [RunConfigurationMenuSection] = []
-
-        let nativeConfigurations = runConfigurations.filter { $0.source == .native }
-        if !nativeConfigurations.isEmpty {
-            sections.append(
-                RunConfigurationMenuSection(
-                    id: "native",
-                    title: "Native Configs",
-                    configurations: nativeConfigurations
-                )
-            )
-        }
-
-        let grouped = Dictionary(grouping: runConfigurations.filter { $0.source != .native }) { $0.displaySourceName }
-        let sortedKeys = grouped.keys.sorted { lhs, rhs in
-            let lhsRank = grouped[lhs]?.first?.preferredDevTool?.sortPriority ?? Int.max
-            let rhsRank = grouped[rhs]?.first?.preferredDevTool?.sortPriority ?? Int.max
-            if lhsRank == rhsRank {
-                return lhs < rhs
-            }
-            return lhsRank < rhsRank
-        }
-
-        sections.append(contentsOf: sortedKeys.map { key in
-            RunConfigurationMenuSection(
-                id: key,
-                title: key,
-                configurations: grouped[key]?.sorted {
-                    $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-                } ?? []
-            )
-        })
-
-        return sections
-    }
-
-
-    private func iconName(for configuration: RunConfiguration) -> String {
-        switch configuration.executionBehavior {
-        case .direct:
-            return configuration.isDebugCapable ? "play.circle" : "play"
-        case .buildOnly:
-            return "hammer"
-        case .openInDevTool:
-            return configuration.preferredDevTool?.systemImageName ?? "laptopcomputer"
-        }
-    }
-
-    private func runConfigurationTitle(for configuration: RunConfiguration) -> String {
-        switch configuration.source {
-        case .native:
-            return "\(configuration.name) · \(configuration.kind.displayName)"
-        case .xcode:
-            return "\(configuration.name) · Build"
-        default:
-            return "\(configuration.name) · \(configuration.runnerType)"
-        }
     }
 
     private func executeDependencyAction(_ mode: DependencyInstallMode) {
