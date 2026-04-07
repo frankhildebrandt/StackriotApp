@@ -242,7 +242,7 @@ struct SidebarView: View {
             Button {
                 onAddRepository()
             } label: {
-                Label("Clone Bare Repo", systemImage: "plus")
+                Label("Create Repository", systemImage: "plus")
             }
             .buttonStyle(.borderedProminent)
 

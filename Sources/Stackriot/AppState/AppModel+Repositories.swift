@@ -61,65 +61,105 @@ extension AppModel {
         }
     }
 
-    func cloneRepository(in modelContext: ModelContext) async {
+    func createRepository(in modelContext: ModelContext) async {
         do {
-            let rawRemote = cloneDraft.remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard
-                let canonicalURL = RepositoryManager.canonicalRemoteURL(from: rawRemote),
-                let remoteURL = URL(string: rawRemote)
-            else {
-                throw StackriotError.invalidRemoteURL
+            let mode = repositoryCreationDraft.mode
+            let createdRepository: ManagedRepository
+
+            switch mode {
+            case .cloneRemote:
+                let rawRemote = repositoryCreationDraft.remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard
+                    let canonicalURL = RepositoryManager.canonicalRemoteURL(from: rawRemote),
+                    let remoteURL = URL(string: rawRemote)
+                else {
+                    throw StackriotError.invalidRemoteURL
+                }
+
+                if let duplicate = repository(withCanonicalRemoteURL: canonicalURL, in: modelContext) {
+                    selectedRepositoryID = duplicate.id
+                    throw StackriotError.duplicateRepository(rawRemote)
+                }
+
+                let info = try await services.repositoryManager.cloneBareRepository(
+                    remoteURL: remoteURL,
+                    preferredName: repositoryCreationDraft.displayName
+                )
+                createdRepository = try persistRepository(
+                    displayName: info.displayName,
+                    remoteURL: rawRemote,
+                    bareRepositoryPath: info.bareRepositoryPath.path,
+                    defaultBranch: info.defaultBranch,
+                    defaultRemoteName: info.initialRemoteName,
+                    remoteDescriptor: (name: info.initialRemoteName, url: rawRemote, canonicalURL: canonicalURL),
+                    in: modelContext
+                )
+            case .npxTemplate:
+                let info = try await services.repositoryManager.createBareRepository(
+                    displayName: requiredRepositoryName(),
+                    seed: .npx(command: requiredNPXCommand())
+                )
+                createdRepository = try persistRepository(
+                    displayName: info.displayName,
+                    remoteURL: nil,
+                    bareRepositoryPath: info.bareRepositoryPath.path,
+                    defaultBranch: info.defaultBranch,
+                    defaultRemoteName: nil,
+                    remoteDescriptor: nil,
+                    in: modelContext
+                )
+            case .aiReadme:
+                let repositoryName = try requiredRepositoryName()
+                let readmeContents = try await services.aiProviderService.generateRepositoryReadme(
+                    repositoryName: repositoryName,
+                    prompt: requiredReadmePrompt()
+                )
+                let info = try await services.repositoryManager.createBareRepository(
+                    displayName: repositoryName,
+                    seed: .readme(contents: readmeContents)
+                )
+                createdRepository = try persistRepository(
+                    displayName: info.displayName,
+                    remoteURL: nil,
+                    bareRepositoryPath: info.bareRepositoryPath.path,
+                    defaultBranch: info.defaultBranch,
+                    defaultRemoteName: nil,
+                    remoteDescriptor: nil,
+                    in: modelContext
+                )
+            case .archiveImport:
+                let info = try await services.repositoryManager.createBareRepository(
+                    displayName: requiredRepositoryName(),
+                    seed: .archive(fileURL: requiredArchiveFileURL())
+                )
+                createdRepository = try persistRepository(
+                    displayName: info.displayName,
+                    remoteURL: nil,
+                    bareRepositoryPath: info.bareRepositoryPath.path,
+                    defaultBranch: info.defaultBranch,
+                    defaultRemoteName: nil,
+                    remoteDescriptor: nil,
+                    in: modelContext
+                )
             }
 
-            if let duplicate = repository(withCanonicalRemoteURL: canonicalURL, in: modelContext) {
-                selectedRepositoryID = duplicate.id
-                throw StackriotError.duplicateRepository(rawRemote)
-            }
+            _ = await ensureDefaultBranchWorkspace(for: createdRepository, in: modelContext)
 
-            let info = try await services.repositoryManager.cloneBareRepository(
-                remoteURL: remoteURL,
-                preferredName: cloneDraft.displayName
-            )
-
-            let repository = ManagedRepository(
-                displayName: info.displayName,
-                remoteURL: rawRemote,
-                bareRepositoryPath: info.bareRepositoryPath.path,
-                defaultBranch: info.defaultBranch,
-                defaultRemoteName: info.initialRemoteName,
-                namespace: selectedNamespace(in: modelContext) ?? defaultNamespace(in: modelContext)
-            )
-
-            let remote = RepositoryRemote(
-                name: info.initialRemoteName,
-                url: rawRemote,
-                canonicalURL: canonicalURL,
-                repository: repository
-            )
-
-            repository.remotes.append(remote)
-            repository.actionTemplates = defaultTemplates(for: repository)
-            modelContext.insert(repository)
-            modelContext.insert(remote)
-            try modelContext.save()
-
-            _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
-
-            selectedNamespaceID = repository.namespace?.id
-            selectedRepositoryID = repository.id
-            isCloneSheetPresented = false
-            await refresh(repository, in: modelContext)
+            selectedNamespaceID = createdRepository.namespace?.id
+            selectedRepositoryID = createdRepository.id
+            isRepositoryCreationSheetPresented = false
+            await refresh(createdRepository, in: modelContext)
             notifyOperationSuccess(
-                title: "Repository cloned",
-                subtitle: repository.displayName,
-                body: "Finished cloning \(rawRemote).",
-                userInfo: ["repositoryID": repository.id.uuidString]
+                title: mode == .cloneRemote ? "Repository cloned" : "Repository created",
+                subtitle: createdRepository.displayName,
+                body: successBody(for: mode, repository: createdRepository),
+                userInfo: ["repositoryID": createdRepository.id.uuidString]
             )
         } catch {
             pendingErrorMessage = error.localizedDescription
             notifyOperationFailure(
-                title: "Repository clone failed",
-                subtitle: cloneDraft.displayName.nonEmpty,
+                title: repositoryCreationDraft.mode == .cloneRemote ? "Repository clone failed" : "Repository creation failed",
+                subtitle: repositoryCreationDraft.displayName.nonEmpty,
                 body: error.localizedDescription
             )
         }
@@ -403,5 +443,81 @@ extension AppModel {
             return namespace
         }
         return fetchDefaultNamespace(in: modelContext)
+    }
+
+    private func requiredRepositoryName() throws -> String {
+        guard let value = repositoryCreationDraft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty else {
+            throw StackriotError.repositoryNameRequired
+        }
+        return value
+    }
+
+    private func requiredNPXCommand() throws -> String {
+        guard let value = repositoryCreationDraft.npxCommand.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty else {
+            throw StackriotError.commandFailed("An NPX command is required.")
+        }
+        return value
+    }
+
+    private func requiredReadmePrompt() throws -> String {
+        guard let value = repositoryCreationDraft.readmePrompt.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty else {
+            throw StackriotError.commandFailed("A README prompt is required.")
+        }
+        return value
+    }
+
+    private func requiredArchiveFileURL() throws -> URL {
+        guard let archiveURL = repositoryCreationDraft.archiveFileURL else {
+            throw StackriotError.commandFailed("Choose a ZIP or tar archive to import.")
+        }
+        return archiveURL
+    }
+
+    private func persistRepository(
+        displayName: String,
+        remoteURL: String?,
+        bareRepositoryPath: String,
+        defaultBranch: String,
+        defaultRemoteName: String?,
+        remoteDescriptor: (name: String, url: String, canonicalURL: String)?,
+        in modelContext: ModelContext
+    ) throws -> ManagedRepository {
+        let repository = ManagedRepository(
+            displayName: displayName,
+            remoteURL: remoteURL,
+            bareRepositoryPath: bareRepositoryPath,
+            defaultBranch: defaultBranch,
+            defaultRemoteName: defaultRemoteName,
+            namespace: selectedNamespace(in: modelContext) ?? defaultNamespace(in: modelContext)
+        )
+
+        if let remoteDescriptor {
+            let remote = RepositoryRemote(
+                name: remoteDescriptor.name,
+                url: remoteDescriptor.url,
+                canonicalURL: remoteDescriptor.canonicalURL,
+                repository: repository
+            )
+            repository.remotes.append(remote)
+            modelContext.insert(remote)
+        }
+
+        repository.actionTemplates = defaultTemplates(for: repository)
+        modelContext.insert(repository)
+        try modelContext.save()
+        return repository
+    }
+
+    private func successBody(for mode: RepositoryCreationMode, repository: ManagedRepository) -> String {
+        switch mode {
+        case .cloneRemote:
+            return "Finished cloning \(repository.remoteURL ?? repository.displayName)."
+        case .npxTemplate:
+            return "Created \(repository.displayName) from the provided NPX template command."
+        case .aiReadme:
+            return "Created \(repository.displayName) with an AI-generated README."
+        case .archiveImport:
+            return "Imported the archive contents into \(repository.displayName)."
+        }
     }
 }

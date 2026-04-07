@@ -1,8 +1,69 @@
 import Foundation
 
-struct CloneRepositoryDraft {
+enum RepositoryCreationMode: String, CaseIterable, Identifiable {
+    case cloneRemote
+    case npxTemplate
+    case aiReadme
+    case archiveImport
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .cloneRemote:
+            "Clone"
+        case .npxTemplate:
+            "NPX"
+        case .aiReadme:
+            "README"
+        case .archiveImport:
+            "Archive"
+        }
+    }
+
+    var formDescription: String {
+        switch self {
+        case .cloneRemote:
+            "Kloniert ein bestehendes Remote als Bare-Repository und legt direkt den Default-Worktree an."
+        case .npxTemplate:
+            "Führt ein NPX-Kommando gegen ein leeres Projektverzeichnis aus und commitet das Ergebnis als neues Bare-Repository."
+        case .aiReadme:
+            "Erzeugt ein neues Repository mit einer README.md, die aus deinem Prompt per AI generiert wird."
+        case .archiveImport:
+            "Importiert den Inhalt eines ZIP- oder Tar-Archivs in ein neues Bare-Repository."
+        }
+    }
+
+    var primaryActionTitle: String {
+        switch self {
+        case .cloneRemote:
+            "Clone"
+        case .npxTemplate, .aiReadme, .archiveImport:
+            "Create"
+        }
+    }
+
+    var progressTitle: String {
+        switch self {
+        case .cloneRemote:
+            "Repository wird geklont und vorbereitet…"
+        case .npxTemplate:
+            "Repository wird aus dem NPX-Template erzeugt…"
+        case .aiReadme:
+            "README wird erzeugt und Repository wird vorbereitet…"
+        case .archiveImport:
+            "Archiv wird importiert und Repository wird vorbereitet…"
+        }
+    }
+}
+
+struct RepositoryCreationDraft {
+    var mode: RepositoryCreationMode = .cloneRemote
     var remoteURLString = ""
     var displayName = ""
+    var npxCommand = ""
+    var readmePrompt = ""
+    var archiveFileURL: URL?
 }
 
 enum WorktreeCreationMode: String, CaseIterable, Identifiable {

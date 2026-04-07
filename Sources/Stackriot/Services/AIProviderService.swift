@@ -4,22 +4,26 @@ struct AIProviderService {
     typealias WorktreeNameGenerator = @Sendable (_ ticket: TicketDetails, _ configuration: AIProviderConfiguration) async throws -> AIWorktreeNameSuggestion
     typealias RunSummaryGenerator = @Sendable (_ title: String, _ commandLine: String, _ output: String, _ exitCode: Int?, _ configuration: AIProviderConfiguration) async throws -> AIRunSummary
     typealias IntentSummaryGenerator = @Sendable (_ text: String, _ configuration: AIProviderConfiguration) async throws -> AIIntentSummary
+    typealias RepositoryReadmeGenerator = @Sendable (_ repositoryName: String, _ prompt: String, _ configuration: AIProviderConfiguration) async throws -> String
 
     private let configurationProvider: @Sendable () -> AIProviderConfiguration
     private let worktreeNameGenerator: WorktreeNameGenerator
     private let runSummaryGenerator: RunSummaryGenerator
     private let intentSummaryGenerator: IntentSummaryGenerator
+    private let repositoryReadmeGenerator: RepositoryReadmeGenerator
 
     init(
         configurationProvider: @escaping @Sendable () -> AIProviderConfiguration = { AppPreferences.aiConfiguration },
         worktreeNameGenerator: @escaping WorktreeNameGenerator = AIProviderService.liveWorktreeNameSuggestion,
         runSummaryGenerator: @escaping RunSummaryGenerator = AIProviderService.liveRunSummary,
-        intentSummaryGenerator: @escaping IntentSummaryGenerator = AIProviderService.liveIntentSummary
+        intentSummaryGenerator: @escaping IntentSummaryGenerator = AIProviderService.liveIntentSummary,
+        repositoryReadmeGenerator: @escaping RepositoryReadmeGenerator = AIProviderService.liveRepositoryReadme
     ) {
         self.configurationProvider = configurationProvider
         self.worktreeNameGenerator = worktreeNameGenerator
         self.runSummaryGenerator = runSummaryGenerator
         self.intentSummaryGenerator = intentSummaryGenerator
+        self.repositoryReadmeGenerator = repositoryReadmeGenerator
     }
 
     func suggestWorktreeName(for ticket: TicketDetails) async throws -> AIWorktreeNameSuggestion {
@@ -49,6 +53,14 @@ struct AIProviderService {
             return fallbackIntentSummary(for: text)
         }
         return try await intentSummaryGenerator(text, configuration)
+    }
+
+    func generateRepositoryReadme(repositoryName: String, prompt: String) async throws -> String {
+        let configuration = configurationProvider()
+        guard configuration.isConfigured else {
+            return fallbackRepositoryReadme(repositoryName: repositoryName, prompt: prompt)
+        }
+        return try await repositoryReadmeGenerator(repositoryName, prompt, configuration)
     }
 
     func generateCommitMessage(diff: String) async throws -> AIRunSummary {
@@ -88,6 +100,10 @@ struct AIProviderService {
 
     func fallbackIntentSummary(for text: String) -> AIIntentSummary {
         Self.fallbackIntentSummary(for: text)
+    }
+
+    func fallbackRepositoryReadme(repositoryName: String, prompt: String) -> String {
+        Self.fallbackRepositoryReadme(repositoryName: repositoryName, prompt: prompt)
     }
 
     private static func liveCommitMessageSummary(
@@ -285,6 +301,36 @@ struct AIProviderService {
         return AIIntentSummary(title: title, summary: summary)
     }
 
+    private static func liveRepositoryReadme(
+        repositoryName: String,
+        prompt: String,
+        configuration: AIProviderConfiguration
+    ) async throws -> String {
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let response = try await generateText(
+            configuration: configuration,
+            systemPrompt: "Du erzeugst belastbare, gut strukturierte README-Dateien in Markdown fuer neue Software-Repositories.",
+            userPrompt: """
+            Erzeuge eine README.md fuer ein neues Repository. Antworte nur mit Markdown, ohne Code-Fences.
+
+            Regeln:
+            - Beginne mit einer H1-Ueberschrift fuer den Projektnamen.
+            - Liefere eine kurze Einordnung, Kernfunktionen oder Ziele, erste Setup-/Nutzungshinweise und naechste sinnvolle Schritte.
+            - Wenn Informationen fehlen, formuliere vorsichtig und markiere Annahmen knapp.
+            - Die README soll sofort commitbar sein.
+
+            Repository-Name: \(repositoryName)
+
+            Prompt:
+            \(trimmedPrompt)
+            """
+        )
+        guard let markdown = response.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty else {
+            throw StackriotError.commandFailed("AI response for the repository README was empty.")
+        }
+        return stripCodeFences(from: markdown)
+    }
+
     private static func generateText(
         configuration: AIProviderConfiguration,
         systemPrompt: String,
@@ -326,6 +372,24 @@ struct AIProviderService {
             .nonEmpty ?? "Quick Intent"
         let summary = String(normalized.prefix(800)).nonEmpty ?? "Kein Inhalt vorhanden."
         return AIIntentSummary(title: title, summary: summary)
+    }
+
+    static func fallbackRepositoryReadme(repositoryName: String, prompt: String) -> String {
+        let trimmedName = repositoryName.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? "New Repository"
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? "Projektbeschreibung folgt."
+        return """
+        # \(trimmedName)
+
+        ## Overview
+
+        \(trimmedPrompt)
+
+        ## Getting Started
+
+        1. Review the initial project structure.
+        2. Add implementation details and setup instructions.
+        3. Extend this README as the repository evolves.
+        """
     }
 
     private static func generateOpenAICompatibleText(
@@ -576,6 +640,15 @@ struct AIProviderService {
             }
         }
         return nil
+    }
+
+    private static func stripCodeFences(from response: String) -> String {
+        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("```") else { return trimmed }
+        let lines = trimmed.components(separatedBy: .newlines)
+        guard lines.count >= 3 else { return trimmed }
+        let body = lines.dropFirst().dropLast()
+        return body.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

@@ -19,8 +19,8 @@ struct StackriotAppCommands: Commands {
 
             Divider()
 
-            Button("Clone Bare Repository") {
-                appModel.presentCloneSheet()
+            Button("Create Repository") {
+                appModel.presentRepositoryCreationSheet()
             }
             .keyboardShortcut("n")
 
@@ -45,8 +45,8 @@ struct StackriotAppCommands: Commands {
 
             Divider()
 
-            Button("Clone Bare Repository") {
-                appModel.presentCloneSheet()
+            Button("Create Repository") {
+                appModel.presentRepositoryCreationSheet()
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
 

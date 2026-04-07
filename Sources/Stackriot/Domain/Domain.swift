@@ -1192,6 +1192,12 @@ struct ClonedRepositoryInfo: Sendable {
     let initialRemoteName: String
 }
 
+struct CreatedRepositoryInfo: Sendable {
+    let displayName: String
+    let bareRepositoryPath: URL
+    let defaultBranch: String
+}
+
 struct CreatedWorktreeInfo: Sendable {
     let branchName: String
     let path: URL

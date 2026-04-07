@@ -55,7 +55,9 @@ struct RootView: View {
                 onAssignRepository: { repository, namespace, project in
                     appModel.assignRepository(repository, to: namespace, project: project, in: modelContext)
                 },
-                onAddRepository: appModel.presentCloneSheet,
+                onAddRepository: {
+                    appModel.presentRepositoryCreationSheet()
+                },
                 onRefreshRepository: { repository in
                     Task {
                         await appModel.refresh(repository, in: modelContext)
@@ -78,7 +80,7 @@ struct RootView: View {
             if let repository = selectedRepository {
                 RepositoryDetailView(repository: repository)
             } else {
-                ContentUnavailableView("No Repositories", systemImage: "shippingbox", description: Text("Clone a bare repository to start creating worktrees and actions."))
+                ContentUnavailableView("No Repositories", systemImage: "shippingbox", description: Text("Create or clone a repository to start creating worktrees and actions."))
             }
         } detail: {
             if let repository = selectedRepository {
@@ -119,7 +121,7 @@ struct RootView: View {
                     .inspectorColumnWidth(min: 320, ideal: 420, max: 720)
             }
         }
-        .sheet(isPresented: $appModel.isCloneSheetPresented) {
+        .sheet(isPresented: $appModel.isRepositoryCreationSheetPresented) {
             CloneRepositorySheet()
         }
         .sheet(item: $appModel.namespaceEditorDraft) { draft in
