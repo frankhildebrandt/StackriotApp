@@ -693,7 +693,7 @@ private struct AgentTurnGroupRow: View {
         self.status = status
         self.summary = summary
         self.segments = segments
-        _isExpanded = State(initialValue: !Self.isCollapsedByDefault(for: status))
+        _isExpanded = State(initialValue: false)
     }
 
     private var visibleSegments: [AgentRunSegment] {
@@ -705,12 +705,13 @@ private struct AgentTurnGroupRow: View {
         visibleSegments.filter { $0.kind == .commandExecution || $0.kind == .toolCall }
     }
 
-    private var currentToolSegment: AgentRunSegment? {
-        toolSegments.last
+    private var previewSegment: AgentRunSegment? {
+        visibleSegments.last
     }
 
     private var previousToolCallCount: Int {
-        max(0, toolSegments.count - 1)
+        let isPreviewAToolSegment = previewSegment?.isUserVisibleToolSegment == true
+        return isPreviewAToolSegment ? max(0, toolSegments.count - 1) : toolSegments.count
     }
 
     private var visibleRows: [AgentRunFeedRow] {
@@ -742,7 +743,7 @@ private struct AgentTurnGroupRow: View {
                         Text(sourceAgent.displayName)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        if !isExpanded, currentToolSegment == nil, let summary {
+                        if !isExpanded, previewSegment == nil, let summary {
                             Text(summary)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -774,12 +775,16 @@ private struct AgentTurnGroupRow: View {
                         AgentRunFeedRowView(row: row)
                     }
                 }
-            } else if let currentToolSegment {
-                AgentToolCallPreviewCard(
-                    segment: currentToolSegment,
-                    previousToolCallCount: previousToolCallCount,
-                    summary: summary
-                )
+            } else if let previewSegment {
+                if previewSegment.isUserVisibleToolSegment {
+                    AgentToolCallPreviewCard(
+                        segment: previewSegment,
+                        previousToolCallCount: previousToolCallCount,
+                        summary: summary
+                    )
+                } else {
+                    AgentTurnStepPreviewCard(segment: previewSegment, summary: summary)
+                }
             }
         }
         .padding(14)
@@ -1037,6 +1042,63 @@ private struct AgentToolCallPreviewCard: View {
             .orange
         case .unknown:
             .secondary
+        }
+    }
+}
+
+private struct AgentTurnStepPreviewCard: View {
+    let segment: AgentRunSegment
+    let summary: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(segment.title)
+                        .font(.subheadline.weight(.semibold))
+                    if let subtitle = segment.subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: 12)
+
+                if let status = segment.status {
+                    AgentStatusChip(text: status.displayText, color: stepStatusColor(status))
+                }
+            }
+
+            if let text = segment.bodyText?.nonEmpty ?? segment.aggregatedOutput?.nonEmpty {
+                Text(text)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
+
+            if let summary {
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func stepStatusColor(_ status: AgentRunSegment.Status) -> Color {
+        switch status {
+        case .pending: .gray
+        case .running: .blue
+        case .completed: .green
+        case .failed: .red
+        case .cancelled: .orange
+        case .unknown: .secondary
         }
     }
 }
