@@ -1,5 +1,11 @@
 import Foundation
 
+enum RepositorySeedSource: Sendable {
+    case npx(command: String)
+    case readme(contents: String)
+    case archive(fileURL: URL)
+}
+
 struct PublishBranchResult: Sendable, Equatable {
     let branch: String
     let didPush: Bool
@@ -89,6 +95,66 @@ struct RepositoryManager {
             bareRepositoryPath: destination,
             defaultBranch: resolvedBranch,
             initialRemoteName: initialRemoteName
+        )
+    }
+
+    func createBareRepository(
+        displayName: String,
+        seed: RepositorySeedSource,
+        defaultBranch: String = "main"
+    ) async throws -> CreatedRepositoryInfo {
+        try AppPaths.ensureBaseDirectories()
+
+        let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDisplayName.isEmpty else {
+            throw StackriotError.repositoryNameRequired
+        }
+
+        let fileManager = FileManager.default
+        let seedRoot = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let stageURL = seedRoot.appendingPathComponent("stage", isDirectory: true)
+        let workspaceURL = seedRoot.appendingPathComponent("workspace", isDirectory: true)
+        let destination = AppPaths.uniqueDirectory(in: AppPaths.bareRepositoriesRoot, preferredName: trimmedDisplayName)
+
+        try fileManager.createDirectory(at: stageURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+
+        defer { try? fileManager.removeItem(at: seedRoot) }
+
+        switch seed {
+        case let .npx(command):
+            try await materializeNPXTemplate(command: command, into: stageURL)
+        case let .readme(contents):
+            let readmeURL = stageURL.appendingPathComponent("README.md")
+            try contents.write(to: readmeURL, atomically: true, encoding: .utf8)
+        case let .archive(fileURL):
+            try await extractArchive(fileURL, into: stageURL)
+        }
+
+        let resolvedSource = try resolvedSeedSourceDirectory(from: stageURL)
+        try copyRepositorySeedContents(from: resolvedSource, to: workspaceURL)
+        try await initializeSeedRepository(at: workspaceURL, defaultBranch: defaultBranch)
+
+        let cloneResult = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["clone", "--bare", workspaceURL.path, destination.path]
+        )
+        guard cloneResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(cloneResult.stderr.isEmpty ? cloneResult.stdout : cloneResult.stderr)
+        }
+
+        let headResult = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["--git-dir", destination.path, "symbolic-ref", "HEAD", "refs/heads/\(defaultBranch)"]
+        )
+        guard headResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(headResult.stderr.isEmpty ? headResult.stdout : headResult.stderr)
+        }
+
+        return CreatedRepositoryInfo(
+            displayName: trimmedDisplayName,
+            bareRepositoryPath: destination,
+            defaultBranch: defaultBranch
         )
     }
 
@@ -421,6 +487,178 @@ struct RepositoryManager {
     private func optionalGitPath(named name: String, in bareRepositoryPath: URL) async throws -> URL? {
         let path = try await gitPath(named: name, in: bareRepositoryPath)
         return FileManager.default.fileExists(atPath: path.path) ? path : nil
+    }
+
+    private func materializeNPXTemplate(command: String, into stageURL: URL) async throws {
+        let arguments = Self.shellSplit(command)
+        guard !arguments.isEmpty else {
+            throw StackriotError.commandFailed("An NPX command is required.")
+        }
+        guard arguments.first == "npx" else {
+            throw StackriotError.commandFailed("The template command must start with `npx`.")
+        }
+
+        let result = try await CommandRunner.runCollected(
+            executable: arguments[0],
+            arguments: Array(arguments.dropFirst()),
+            currentDirectoryURL: stageURL
+        )
+        guard result.exitCode == 0 else {
+            throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
+    }
+
+    private func extractArchive(_ fileURL: URL, into destinationURL: URL) async throws {
+        let accessingSecurityScopedResource = fileURL.startAccessingSecurityScopedResource()
+        defer {
+            if accessingSecurityScopedResource {
+                fileURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let lowercasedName = fileURL.lastPathComponent.lowercased()
+        let executable: String
+        let arguments: [String]
+        if lowercasedName.hasSuffix(".zip") {
+            executable = "/usr/bin/ditto"
+            arguments = ["-x", "-k", fileURL.path, destinationURL.path]
+        } else if Self.supportedTarExtensions.contains(where: { lowercasedName.hasSuffix($0) }) {
+            executable = "/usr/bin/tar"
+            arguments = ["-xf", fileURL.path, "-C", destinationURL.path]
+        } else {
+            throw StackriotError.commandFailed("Only ZIP and tar archives are supported.")
+        }
+
+        let result = try await CommandRunner.runCollected(
+            executable: executable,
+            arguments: arguments
+        )
+        guard result.exitCode == 0 else {
+            throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
+    }
+
+    private func resolvedSeedSourceDirectory(from stageURL: URL) throws -> URL {
+        let children = try FileManager.default.contentsOfDirectory(
+            at: stageURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: []
+        ).filter { child in
+            !Self.excludedSeedEntryNames.contains(child.lastPathComponent)
+        }
+
+        guard !children.isEmpty else {
+            throw StackriotError.commandFailed("The selected repository source did not produce any files.")
+        }
+
+        let files = try children.filter { try !isDirectory($0) }
+        let directories = try children.filter(isDirectory)
+        if files.isEmpty, directories.count == 1, let onlyDirectory = directories.first {
+            return onlyDirectory
+        }
+        return stageURL
+    }
+
+    private func copyRepositorySeedContents(from sourceURL: URL, to destinationURL: URL) throws {
+        let children = try FileManager.default.contentsOfDirectory(at: sourceURL, includingPropertiesForKeys: [.isDirectoryKey], options: [])
+        for child in children {
+            guard !Self.excludedSeedEntryNames.contains(child.lastPathComponent) else { continue }
+            try copySeedItem(
+                from: child,
+                to: destinationURL.appendingPathComponent(child.lastPathComponent, isDirectory: try isDirectory(child))
+            )
+        }
+    }
+
+    private func copySeedItem(from sourceURL: URL, to destinationURL: URL) throws {
+        guard !Self.excludedSeedEntryNames.contains(sourceURL.lastPathComponent) else { return }
+
+        var itemIsDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &itemIsDirectory) else { return }
+
+        if itemIsDirectory.boolValue {
+            try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+            let children = try FileManager.default.contentsOfDirectory(at: sourceURL, includingPropertiesForKeys: nil, options: [])
+            for child in children {
+                try copySeedItem(
+                    from: child,
+                    to: destinationURL.appendingPathComponent(child.lastPathComponent, isDirectory: try isDirectory(child))
+                )
+            }
+            return
+        }
+
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+    }
+
+    private func initializeSeedRepository(at workspaceURL: URL, defaultBranch: String) async throws {
+        let initResult = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["init", "-b", defaultBranch, workspaceURL.path]
+        )
+        guard initResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(initResult.stderr.isEmpty ? initResult.stdout : initResult.stderr)
+        }
+
+        for arguments in [
+            ["-C", workspaceURL.path, "config", "user.email", "stackriot@local.invalid"],
+            ["-C", workspaceURL.path, "config", "user.name", "Stackriot"],
+            ["-C", workspaceURL.path, "config", "commit.gpgsign", "false"],
+            ["-C", workspaceURL.path, "add", "."],
+            ["-C", workspaceURL.path, "commit", "-m", "Initial commit"],
+        ] {
+            let result = try await CommandRunner.runCollected(executable: "git", arguments: arguments)
+            guard result.exitCode == 0 else {
+                throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+            }
+        }
+    }
+
+    private static let excludedSeedEntryNames: Set<String> = [".git", "__MACOSX"]
+    private static let supportedTarExtensions = [".tar", ".tgz", ".tar.gz", ".tbz", ".tbz2", ".tar.bz2", ".txz", ".tar.xz"]
+
+    private static func shellSplit(_ command: String) -> [String] {
+        var results: [String] = []
+        var current = ""
+        var activeQuote: Character?
+
+        for character in command {
+            if let quotedCharacter = activeQuote {
+                if character == quotedCharacter {
+                    selfAppend(&results, current: &current)
+                    activeQuote = nil
+                } else {
+                    current.append(character)
+                }
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                activeQuote = character
+            case " ", "\t", "\n":
+                selfAppend(&results, current: &current)
+            default:
+                current.append(character)
+            }
+        }
+
+        selfAppend(&results, current: &current)
+        return results
+    }
+
+    private static func selfAppend(_ results: inout [String], current: inout String) {
+        if let value = current.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty {
+            results.append(value)
+            current = ""
+        }
+    }
+
+    private func isDirectory(_ url: URL) throws -> Bool {
+        try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory ?? false
     }
 
     private func syncDefaultBranch(

@@ -13,6 +13,7 @@ enum StackriotError: LocalizedError {
     case keyMaterialInvalid
     case devToolUnavailable(String)
     case runConfigurationUnavailable(String)
+    case repositoryNameRequired
 
     var errorDescription: String? {
         switch self {
@@ -38,6 +39,8 @@ enum StackriotError: LocalizedError {
             "\(name) is not installed or is not relevant for this repository."
         case let .runConfigurationUnavailable(name):
             "The run configuration \(name) cannot be executed directly here."
+        case .repositoryNameRequired:
+            "A repository name is required."
         case let .commandFailed(message):
             message
         }

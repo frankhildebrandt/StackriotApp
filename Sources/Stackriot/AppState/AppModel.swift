@@ -26,7 +26,7 @@ final class AppModel: @unchecked Sendable {
         }
     }
     var selectedWorktreeIDsByRepository: [UUID: UUID] = [:]
-    var cloneDraft = CloneRepositoryDraft()
+    var repositoryCreationDraft = RepositoryCreationDraft()
     var worktreeDraft = WorktreeDraft()
     var pullRequestCheckoutDraft = PullRequestCheckoutDraft()
     var namespaceEditorDraft: NamespaceEditorDraft?
@@ -37,7 +37,7 @@ final class AppModel: @unchecked Sendable {
     var syncLogs: [UUID: String] = [:]
     var activeRunIDs: Set<UUID> = []
     var refreshingRepositoryIDs: Set<UUID> = []
-    var isCloneSheetPresented = false
+    var isRepositoryCreationSheetPresented = false
     var isWorktreeSheetPresented = false
     var isPullRequestCheckoutSheetPresented = false
     var isDiffInspectorPresented = false
@@ -483,9 +483,9 @@ final class AppModel: @unchecked Sendable {
         }
     }
 
-    func presentCloneSheet() {
-        cloneDraft = CloneRepositoryDraft()
-        isCloneSheetPresented = true
+    func presentRepositoryCreationSheet(initialMode: RepositoryCreationMode = .cloneRemote) {
+        repositoryCreationDraft = RepositoryCreationDraft(mode: initialMode)
+        isRepositoryCreationSheetPresented = true
     }
 
     func performanceDebugArtifactURL() -> URL {

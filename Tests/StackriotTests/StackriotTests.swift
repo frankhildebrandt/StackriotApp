@@ -989,6 +989,56 @@ struct StackriotTests {
     }
 
     @Test
+    func repositoryManagerCanCreateBareRepositoryFromGeneratedReadme() async throws {
+        let info = try await RepositoryManager().createBareRepository(
+            displayName: "Generated-README-\(UUID().uuidString)",
+            seed: .readme(contents: "# Generated\n\nHello Stackriot.\n")
+        )
+
+        let workspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: info.bareRepositoryPath,
+            repositoryName: info.displayName,
+            defaultBranch: info.defaultBranch
+        )
+
+        let readme = try String(contentsOf: workspace.path.appendingPathComponent("README.md"), encoding: .utf8)
+        #expect(readme.contains("Hello Stackriot."))
+        #expect(FileManager.default.fileExists(atPath: info.bareRepositoryPath.path))
+    }
+
+    @Test
+    func repositoryManagerCanCreateBareRepositoryFromArchive() async throws {
+        let root = try temporaryDirectory(named: "archive-import")
+        let source = root.appendingPathComponent("source", isDirectory: true)
+        let project = source.appendingPathComponent("template", isDirectory: true)
+        let archive = root.appendingPathComponent("template.zip")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try "# Archive Repo\n".write(to: project.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try "console.log('hi')\n".write(to: project.appendingPathComponent("index.js"), atomically: true, encoding: .utf8)
+
+        let zipResult = try await CommandRunner.runCollected(
+            executable: "/usr/bin/ditto",
+            arguments: ["-c", "-k", "--sequesterRsrc", "--keepParent", project.path, archive.path],
+            currentDirectoryURL: root
+        )
+        #expect(zipResult.exitCode == 0)
+
+        let info = try await RepositoryManager().createBareRepository(
+            displayName: "Archive-Repo-\(UUID().uuidString)",
+            seed: .archive(fileURL: archive)
+        )
+
+        let workspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: info.bareRepositoryPath,
+            repositoryName: info.displayName,
+            defaultBranch: info.defaultBranch
+        )
+
+        #expect(FileManager.default.fileExists(atPath: workspace.path.appendingPathComponent("README.md").path))
+        #expect(FileManager.default.fileExists(atPath: workspace.path.appendingPathComponent("index.js").path))
+    }
+
+    @Test
     func publishCurrentBranchIfNeededSkipsPushWhenUpstreamExists() async throws {
         let remoteOne = try await createSeededRemote(named: "publish-if-needed")
         let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remoteOne.remote, preferredName: "Sample")
@@ -1879,6 +1929,69 @@ struct StackriotTests {
         #expect(suggestion.kind == .bug)
         #expect(suggestion.branchName == "bug/abc-123-jira-import-kaputt")
         #expect(suggestion.ticketIdentifier == "ABC-123")
+    }
+
+    @Test
+    func aiRepositoryReadmeFallsBackWithoutProviderConfiguration() async throws {
+        let service = AIProviderService(
+            configurationProvider: {
+                AIProviderConfiguration(
+                    provider: .openAI,
+                    apiKey: nil,
+                    model: "gpt-5.4-mini",
+                    baseURL: "https://api.openai.com/v1"
+                )
+            }
+        )
+
+        let readme = try await service.generateRepositoryReadme(
+            repositoryName: "ReadmeFallback",
+            prompt: "Beschreibe ein kleines Demo-Projekt fuer Dateiimporte."
+        )
+
+        #expect(readme.contains("# ReadmeFallback"))
+        #expect(readme.contains("Dateiimporte"))
+    }
+
+    @MainActor
+    @Test
+    func appModelCanCreateRepositoryFromAIReadmeMode() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let appModel = AppModel(
+            services: AppServices(
+                aiProviderService: AIProviderService(
+                    configurationProvider: {
+                        AIProviderConfiguration(
+                            provider: .openAI,
+                            apiKey: "test-key",
+                            model: "gpt-5.4-mini",
+                            baseURL: "https://api.openai.com/v1"
+                        )
+                    },
+                    repositoryReadmeGenerator: { repositoryName, prompt, _ in
+                        "# \(repositoryName)\n\n\(prompt)\n"
+                    }
+                ),
+                notificationService: RecordingNotificationService()
+            )
+        )
+        appModel.storedModelContext = modelContext
+        appModel.repositoryCreationDraft = RepositoryCreationDraft(
+            mode: .aiReadme,
+            remoteURLString: "",
+            displayName: "AIReadmeRepo",
+            npxCommand: "",
+            readmePrompt: "README aus Test erzeugen",
+            archiveFileURL: nil
+        )
+
+        await appModel.createRepository(in: modelContext)
+
+        let repositories = try modelContext.fetch(FetchDescriptor<ManagedRepository>())
+        #expect(repositories.count == 1)
+        #expect(repositories[0].displayName == "AIReadmeRepo")
+        #expect(appModel.pendingErrorMessage == nil)
+        #expect(!repositories[0].worktrees.isEmpty)
     }
 
     @MainActor
