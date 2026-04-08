@@ -348,6 +348,37 @@ extension AppModel {
         }
     }
 
+    func preferredOpenWorktree(for repository: ManagedRepository) -> WorktreeRecord? {
+        selectedWorktree(for: repository) ?? defaultBranchWorkspace(for: repository) ?? worktrees(for: repository).first
+    }
+
+    func availableDevTools(for repository: ManagedRepository) -> [SupportedDevTool] {
+        guard let worktree = preferredOpenWorktree(for: repository) else {
+            return []
+        }
+        return availableDevTools(for: worktree)
+    }
+
+    func openDevTool(_ tool: SupportedDevTool, for repository: ManagedRepository, in modelContext: ModelContext) async {
+        guard let worktree = preferredOpenWorktree(for: repository) else {
+            pendingErrorMessage = StackriotError.worktreeUnavailable.localizedDescription
+            return
+        }
+        await openDevTool(tool, for: worktree, in: modelContext)
+    }
+
+    func openExternalTerminal(
+        _ terminal: SupportedExternalTerminal,
+        for repository: ManagedRepository,
+        in modelContext: ModelContext
+    ) async {
+        guard let worktree = preferredOpenWorktree(for: repository) else {
+            pendingErrorMessage = StackriotError.worktreeUnavailable.localizedDescription
+            return
+        }
+        await openExternalTerminal(terminal, for: worktree, in: modelContext)
+    }
+
     func updateRepositoryWorktreeMonitoring(for repository: ManagedRepository) async {
         guard repository.status == .ready else {
             stopRepositoryWorktreeMonitoring(for: repository.id)

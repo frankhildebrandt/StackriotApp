@@ -178,6 +178,37 @@ struct StackriotTests {
         #expect(SupportedDevTool.codexApp.systemImageName == "laptopcomputer")
     }
 
+    @Test
+    func ghosttyExternalTerminalUsesExpectedMetadata() {
+        #expect(SupportedExternalTerminal.ghostty.displayName == "Ghostty")
+        #expect(SupportedExternalTerminal.ghostty.applicationName == "Ghostty")
+        #expect(SupportedExternalTerminal.ghostty.bundleIdentifier == "com.mitchellh.ghostty")
+        #expect(SupportedExternalTerminal.ghostty.systemImageName == "terminal")
+    }
+
+    @Test
+    func preferredExternalTerminalDefaultsPreferGhosttyThenITerm2() {
+        #expect(SupportedExternalTerminal.preferredDefault(installedBundleIdentifiers: []) == .appleTerminal)
+        #expect(
+            SupportedExternalTerminal.preferredDefault(
+                installedBundleIdentifiers: [SupportedExternalTerminal.iterm2.bundleIdentifier]
+            ) == .iterm2
+        )
+        #expect(
+            SupportedExternalTerminal.preferredDefault(
+                installedBundleIdentifiers: [SupportedExternalTerminal.ghostty.bundleIdentifier]
+            ) == .ghostty
+        )
+        #expect(
+            SupportedExternalTerminal.preferredDefault(
+                installedBundleIdentifiers: [
+                    SupportedExternalTerminal.ghostty.bundleIdentifier,
+                    SupportedExternalTerminal.iterm2.bundleIdentifier,
+                ]
+            ) == .ghostty
+        )
+    }
+
     @MainActor
     @Test
     func devToolDiscoveryIncludesCodexAppWhenInstalled() throws {

@@ -6,9 +6,7 @@ struct TerminalSettingsView: View {
     @AppStorage(AppPreferences.externalTerminalKey) private var externalTerminalRawValue = ""
 
     private var availableTerminals: [SupportedExternalTerminal] {
-        SupportedExternalTerminal.allCases.filter { terminal in
-            NSWorkspace.shared.urlForApplication(withBundleIdentifier: terminal.bundleIdentifier) != nil
-        }
+        SupportedExternalTerminal.installedCases
     }
 
     private var selectedTerminal: SupportedExternalTerminal {
@@ -33,7 +31,7 @@ struct TerminalSettingsView: View {
             } header: {
                 Text("External Terminal")
             } footer: {
-                Text("Used when opening a worktree folder in an external terminal from the context menu.")
+                Text("Used as the default external terminal when opening repositories or worktrees from Open In context menus.")
             }
 
             Section {
