@@ -947,6 +947,7 @@ enum DependencyInstallMode: String, Codable, CaseIterable, Identifiable {
 
 enum SupportedExternalTerminal: String, Codable, CaseIterable, Identifiable, Sendable {
     case appleTerminal
+    case ghostty
     case iterm2
 
     var id: String { rawValue }
@@ -955,6 +956,8 @@ enum SupportedExternalTerminal: String, Codable, CaseIterable, Identifiable, Sen
         switch self {
         case .appleTerminal:
             "Terminal"
+        case .ghostty:
+            "Ghostty"
         case .iterm2:
             "iTerm2"
         }
@@ -964,6 +967,8 @@ enum SupportedExternalTerminal: String, Codable, CaseIterable, Identifiable, Sen
         switch self {
         case .appleTerminal:
             "Terminal"
+        case .ghostty:
+            "Ghostty"
         case .iterm2:
             "iTerm"
         }
@@ -973,12 +978,50 @@ enum SupportedExternalTerminal: String, Codable, CaseIterable, Identifiable, Sen
         switch self {
         case .appleTerminal:
             "com.apple.Terminal"
+        case .ghostty:
+            "com.mitchellh.ghostty"
         case .iterm2:
             "com.googlecode.iterm2"
         }
     }
 
+    var sortPriority: Int {
+        switch self {
+        case .ghostty:
+            0
+        case .iterm2:
+            1
+        case .appleTerminal:
+            2
+        }
+    }
+
     var systemImageName: String { "terminal" }
+
+    var isInstalled: Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) != nil
+    }
+
+    static var installedCases: [SupportedExternalTerminal] {
+        allCases
+            .filter(\.isInstalled)
+            .sorted { lhs, rhs in
+                if lhs.sortPriority == rhs.sortPriority {
+                    return lhs.displayName < rhs.displayName
+                }
+                return lhs.sortPriority < rhs.sortPriority
+            }
+    }
+
+    static func preferredDefault(installedBundleIdentifiers: Set<String>) -> SupportedExternalTerminal {
+        if installedBundleIdentifiers.contains(SupportedExternalTerminal.ghostty.bundleIdentifier) {
+            return .ghostty
+        }
+        if installedBundleIdentifiers.contains(SupportedExternalTerminal.iterm2.bundleIdentifier) {
+            return .iterm2
+        }
+        return .appleTerminal
+    }
 }
 
 enum TerminalTabRetentionMode: String, Codable, CaseIterable, Identifiable {
@@ -1812,11 +1855,16 @@ enum AppPreferences {
     static var externalTerminal: SupportedExternalTerminal {
         let defaults = UserDefaults.standard
         if let stored = defaults.string(forKey: externalTerminalKey),
-           let terminal = SupportedExternalTerminal(rawValue: stored) {
+           let terminal = SupportedExternalTerminal(rawValue: stored),
+           terminal == .appleTerminal || terminal.isInstalled {
             return terminal
         }
-        let iterm2Installed = NSWorkspace.shared.urlForApplication(withBundleIdentifier: SupportedExternalTerminal.iterm2.bundleIdentifier) != nil
-        return iterm2Installed ? .iterm2 : .appleTerminal
+        let installedBundleIdentifiers = Set(
+            SupportedExternalTerminal.allCases.compactMap { terminal in
+                terminal.isInstalled ? terminal.bundleIdentifier : nil
+            }
+        )
+        return SupportedExternalTerminal.preferredDefault(installedBundleIdentifiers: installedBundleIdentifiers)
     }
 
     static var performanceDebugModeEnabled: Bool {

@@ -544,21 +544,33 @@ struct RepositoryDetailView: View {
             hoveredWorktreeID = isHovering ? worktree.id : nil
         }
         .contextMenu {
-            ForEach(appModel.cachedAvailableDevTools(for: worktree)) { tool in
-                Button {
-                    Task {
-                        await appModel.openDevTool(tool, for: worktree, in: modelContext)
+            let availableDevTools = appModel.cachedAvailableDevTools(for: worktree)
+            let availableExternalTerminals = SupportedExternalTerminal.installedCases
+
+            if !availableDevTools.isEmpty || !availableExternalTerminals.isEmpty {
+                Menu("Open In") {
+                    ForEach(availableDevTools) { tool in
+                        Button {
+                            Task {
+                                await appModel.openDevTool(tool, for: worktree, in: modelContext)
+                            }
+                        } label: {
+                            Label("Open in \(tool.displayName)", systemImage: tool.systemImageName)
+                        }
                     }
-                } label: {
-                    Label("Open in \(tool.displayName)", systemImage: tool.systemImageName)
+                    if !availableDevTools.isEmpty && !availableExternalTerminals.isEmpty {
+                        Divider()
+                    }
+                    ForEach(availableExternalTerminals) { terminal in
+                        Button {
+                            Task {
+                                await appModel.openExternalTerminal(terminal, for: worktree, in: modelContext)
+                            }
+                        } label: {
+                            Label("Open in \(terminal.displayName)", systemImage: terminal.systemImageName)
+                        }
+                    }
                 }
-            }
-            Button {
-                Task {
-                    await appModel.openExternalTerminal(for: worktree, in: modelContext)
-                }
-            } label: {
-                Label("Open in \(AppPreferences.externalTerminal.displayName)", systemImage: "terminal")
             }
 
             let runConfigurations = appModel.cachedAvailableRunConfigurations(for: worktree)

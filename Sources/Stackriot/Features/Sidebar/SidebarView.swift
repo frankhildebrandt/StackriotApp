@@ -72,6 +72,10 @@ struct SidebarView: View {
     let onAddRepository: () -> Void
     let onRefreshRepository: (ManagedRepository) -> Void
     let onRevealRepository: (ManagedRepository) -> Void
+    let availableDevTools: (ManagedRepository) -> [SupportedDevTool]
+    let availableExternalTerminals: [SupportedExternalTerminal]
+    let onOpenRepositoryInDevTool: (ManagedRepository, SupportedDevTool) -> Void
+    let onOpenRepositoryInTerminal: (ManagedRepository, SupportedExternalTerminal) -> Void
     let onManageRemotes: (ManagedRepository) -> Void
     let onDeleteRepository: (ManagedRepository) -> Void
 
@@ -263,6 +267,27 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func repositoryContextMenu(_ repository: ManagedRepository) -> some View {
+        let repositoryDevTools = availableDevTools(repository)
+        if !repositoryDevTools.isEmpty || !availableExternalTerminals.isEmpty {
+            Menu("Open In") {
+                ForEach(repositoryDevTools) { tool in
+                    Button("Open in \(tool.displayName)") {
+                        onOpenRepositoryInDevTool(repository, tool)
+                    }
+                }
+                if !repositoryDevTools.isEmpty && !availableExternalTerminals.isEmpty {
+                    Divider()
+                }
+                ForEach(availableExternalTerminals) { terminal in
+                    Button("Open in \(terminal.displayName)") {
+                        onOpenRepositoryInTerminal(repository, terminal)
+                    }
+                }
+            }
+
+            Divider()
+        }
+
         Button("Show in Finder") {
             onRevealRepository(repository)
         }

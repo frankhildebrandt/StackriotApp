@@ -68,6 +68,18 @@ struct RootView: View {
                         await appModel.revealRepositoryInFinder(repository)
                     }
                 },
+                availableDevTools: appModel.availableDevTools(for:),
+                availableExternalTerminals: SupportedExternalTerminal.installedCases,
+                onOpenRepositoryInDevTool: { repository, tool in
+                    Task {
+                        await appModel.openDevTool(tool, for: repository, in: modelContext)
+                    }
+                },
+                onOpenRepositoryInTerminal: { repository, terminal in
+                    Task {
+                        await appModel.openExternalTerminal(terminal, for: repository, in: modelContext)
+                    }
+                },
                 onManageRemotes: appModel.presentRemoteManagement,
                 onDeleteRepository: { repository in
                     Task {
