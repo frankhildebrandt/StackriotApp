@@ -23,6 +23,8 @@ enum StructuredAgentOutputParserFactory {
             CursorAgentPrintJSONParser()
         case .openCodePromptJSONL:
             OpenCodePromptJSONLParser()
+        case .acpEventJSONL:
+            ACPEventJSONLParser()
         }
     }
 }

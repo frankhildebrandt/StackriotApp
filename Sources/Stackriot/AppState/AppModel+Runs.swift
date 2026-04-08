@@ -102,6 +102,10 @@ extension AppModel {
             cancelAgentPlanDraft(for: worktreeID)
             return
         }
+        if let session = acpRunSessionsByRunID[run.id] {
+            session.cancel()
+            return
+        }
         if let session = terminalSessions[run.id] {
             session.terminate()
             return
@@ -317,6 +321,8 @@ extension AppModel {
         activeRunIDs.remove(runID)
         delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
+        acpRunSessionsByRunID.removeValue(forKey: runID)
+        pendingACPPermissionRequestsByRunID.removeValue(forKey: runID)
         structuredOutputParsersByRunID.removeValue(forKey: runID)
         refreshRunningAgentWorktrees()
 
@@ -371,6 +377,8 @@ extension AppModel {
         activeRunIDs.remove(runID)
         delegatedAgentRunIDs.remove(runID)
         runningProcesses.removeValue(forKey: runID)
+        acpRunSessionsByRunID.removeValue(forKey: runID)
+        pendingACPPermissionRequestsByRunID.removeValue(forKey: runID)
         structuredOutputParsersByRunID.removeValue(forKey: runID)
         refreshRunningAgentWorktrees()
 
@@ -495,6 +503,34 @@ extension AppModel {
             nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
             let environment = await ShellEnvironment.resolvedEnvironment(overrides: prepared.environment)
 
+            if let acpExecution = descriptor.acpExecution {
+                let session = services.acpRunService.makeSession(
+                    runID: runID,
+                    descriptor: acpExecution,
+                    environment: environment,
+                    onOutput: { [weak self] chunk in
+                        guard let self else { return }
+                        Task {
+                            await self.incomingRunOutputThrottle.enqueue(chunk, for: runID, deliver: deliverBufferedOutput)
+                        }
+                    },
+                    onPermissionRequest: { [weak self] request in
+                        guard let self else { return }
+                        self.registerACPPermissionRequest(request)
+                    },
+                    onTermination: { [weak self] exitCode, wasCancelled in
+                        Task { @MainActor in
+                            guard let self else { return }
+                            await self.incomingRunOutputThrottle.flush(runID: runID, deliver: deliverBufferedOutput)
+                            await self.handleRunTermination(runID: runID, exitCode: exitCode, wasCancelled: wasCancelled)
+                        }
+                    }
+                )
+                acpRunSessionsByRunID[runID] = session
+                session.start()
+                return
+            }
+
             let handle = try CommandRunner.start(
                 executable: prepared.executable,
                 arguments: prepared.arguments,
@@ -520,6 +556,33 @@ extension AppModel {
             nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
             await handleRunFailure(runID: runID, message: error.localizedDescription)
         }
+    }
+
+    func acpPermissionRequest(for runID: UUID) -> ACPPermissionRequestState? {
+        pendingACPPermissionRequestsByRunID[runID]
+    }
+
+    func respondToACPPermissionRequest(runID: UUID, optionID: String) {
+        guard let request = pendingACPPermissionRequestsByRunID.removeValue(forKey: runID) else { return }
+        acpRunSessionsByRunID[runID]?.respondToPermissionRequest(
+            requestID: request.requestID,
+            optionID: optionID
+        )
+    }
+
+    func registerACPPermissionRequest(_ request: ACPPermissionRequestState) {
+        pendingACPPermissionRequestsByRunID[request.runID] = request
+        let summary = request.message?.nonEmpty ?? "Open the run to answer the permission request."
+        notifyOperationFailure(
+            title: "\(request.tool.displayName) needs approval",
+            subtitle: runRecord(with: request.runID)?.worktree?.branchName,
+            body: summary,
+            userInfo: [
+                "runID": request.runID.uuidString,
+                "agentTool": request.tool.rawValue,
+                "sessionID": request.sessionID,
+            ]
+        )
     }
 
     func refreshRunningAgentWorktrees() {

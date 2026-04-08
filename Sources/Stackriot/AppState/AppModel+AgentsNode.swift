@@ -406,7 +406,37 @@ extension AppModel {
             let promptText = initialPrompt?.nonEmpty
             if let promptText {
                 let descriptor: CommandExecutionDescriptor?
-                if let components = tool.promptCommandComponents(for: promptText, options: options),
+                if shouldUseACPExecution(for: tool),
+                   let acpExecutable = tool.acpExecutableName
+                {
+                    descriptor = CommandExecutionDescriptor(
+                        title: tool.displayName,
+                        actionKind: .aiAgent,
+                        showsAgentIndicator: true,
+                        activatesTerminalTab: options.activatesTerminalTab,
+                        executable: acpExecutable,
+                        arguments: tool.acpLaunchArguments ?? [],
+                        displayCommandLine: "\(acpExecutable) \(tool.acpLaunchArguments?.joined(separator: " ") ?? "")".trimmingCharacters(in: .whitespaces),
+                        currentDirectoryURL: worktreeURL,
+                        repositoryID: repository.id,
+                        worktreeID: worktree.id,
+                        runtimeRequirement: nil,
+                        stdinText: nil,
+                        environment: [:],
+                        usesTerminalSession: false,
+                        outputInterpreter: .acpEventJSONL,
+                        agentTool: tool,
+                        initialPrompt: promptText,
+                        acpExecution: ACPExecutionDescriptor(
+                            tool: tool,
+                            workingDirectoryURL: worktreeURL,
+                            prompt: promptText,
+                            modeID: options.acpModeOverride,
+                            configOverrides: options.acpConfigOverrides,
+                            initialPrompt: promptText
+                        )
+                    )
+                } else if let components = tool.promptCommandComponents(for: promptText, options: options),
                    let executable = tool.executableName
                 {
                     descriptor = CommandExecutionDescriptor(
@@ -480,6 +510,10 @@ extension AppModel {
             pendingErrorMessage = error.localizedDescription
             return nil
         }
+    }
+
+    func shouldUseACPExecution(for tool: AIAgentTool) -> Bool {
+        tool.supportsACPExecution && acpAgentSnapshotsByTool[tool] != nil
     }
 
     func launchConflictResolutionAgent(

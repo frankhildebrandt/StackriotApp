@@ -682,7 +682,8 @@ extension AppModel {
             currentIntentText: currentIntentText,
             existingImplementationPlan: existingImplementation,
             artifactURLs: artifactURLs,
-            options: options
+            options: options,
+            useACP: shouldUseACPExecution(for: tool)
         ) else {
             pendingErrorMessage = "\(tool.displayName) planning is not configured."
             return
@@ -719,7 +720,7 @@ extension AppModel {
             pendingErrorMessage = "The planning session is no longer available."
             return
         }
-        guard draft.tool.supportsPlanResume else {
+        guard canResumeAgentPlanDraft(draft) else {
             pendingErrorMessage = "\(draft.tool.displayName) follow-up planning is not enabled in this Stackriot version."
             return
         }
@@ -742,7 +743,8 @@ extension AppModel {
             worktree: worktree,
             responseFilePath: draft.responseFilePath,
             sessionID: sessionID,
-            reply: trimmedReply
+            reply: trimmedReply,
+            useACP: shouldUseACPExecution(for: draft.tool)
         ) else {
             pendingErrorMessage = "\(draft.tool.displayName) could not prepare the follow-up planning command."
             return
@@ -797,7 +799,7 @@ extension AppModel {
                 agentPlanDraftsByWorktreeID[worktreeID]?.latestQuestions = response.questions?
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .compactMap(\.nonEmpty) ?? []
-                let needsInputMessage = draft.tool.supportsPlanResume
+                let needsInputMessage = canResumeAgentPlanDraft(draft)
                     ? nil
                     : "\(draft.tool.displayName) requested follow-up input, but Stackriot cannot resume this planning session yet."
                 agentPlanDraftsByWorktreeID[worktreeID]?.importErrorMessage = needsInputMessage
@@ -824,7 +826,9 @@ extension AppModel {
         guard let parser = structuredOutputParsersByRunID[runID] else { return }
 
         let sessionID: String?
-        switch draft.tool {
+        if let parser = parser as? ACPEventJSONLParser {
+            sessionID = parser.currentSessionID?.nonEmpty
+        } else { switch draft.tool {
         case .codex:
             sessionID = (parser as? CodexExecJSONLParser)?.currentThreadID?.nonEmpty
         case .claudeCode:
@@ -837,7 +841,7 @@ extension AppModel {
             sessionID = (parser as? OpenCodePromptJSONLParser)?.currentSessionID?.nonEmpty
         default:
             sessionID = nil
-        }
+        } }
 
         if let sessionID {
             agentPlanDraftsByWorktreeID[worktreeID]?.sessionID = sessionID
@@ -848,7 +852,9 @@ extension AppModel {
         }
 
         let responseText: String?
-        switch draft.tool {
+        if let parser = parser as? ACPEventJSONLParser {
+            responseText = parser.latestAssistantMessageText?.nonEmpty
+        } else { switch draft.tool {
         case .cursorCLI:
             responseText = (parser as? CursorAgentPrintJSONParser)?.latestResultText?.nonEmpty
         case .claudeCode:
@@ -859,7 +865,7 @@ extension AppModel {
             responseText = (parser as? OpenCodePromptJSONLParser)?.latestAssistantMessageText?.nonEmpty
         default:
             responseText = nil
-        }
+        } }
 
         guard let responseText else { return }
 
@@ -901,6 +907,9 @@ extension AppModel {
 
     private func structuredAgentPlanResponse(forRunID runID: UUID, tool: AIAgentTool) -> AgentPlanResponse? {
         guard let parser = structuredOutputParsersByRunID[runID] else { return nil }
+        if let parser = parser as? ACPEventJSONLParser {
+            return parser.latestAssistantMessageText.flatMap(Self.parseAgentPlanResponse(from:))
+        }
         switch tool {
         case .claudeCode:
             return (parser as? ClaudePrintStreamJSONParser)?.latestAssistantMessageText.flatMap(Self.parseAgentPlanResponse(from:))
@@ -962,7 +971,7 @@ extension AppModel {
         let summary = response.summary?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
             ?? "The planning run stopped for additional input."
         let body: String
-        if draft.tool.supportsPlanResume {
+        if canResumeAgentPlanDraft(draft) {
             body = "\(summary) Reopen the planning run from the worktree context to answer the follow-up questions."
         } else {
             body = "\(summary) Reopen the planning run to review the requested input, then start a fresh planning run after updating the intent."
@@ -1013,7 +1022,8 @@ extension AppModel {
         currentIntentText: String,
         existingImplementationPlan: String?,
         artifactURLs: (schema: URL, response: URL),
-        options: AgentLaunchOptions
+        options: AgentLaunchOptions,
+        useACP: Bool
     ) -> CommandExecutionDescriptor? {
         let prompt = agentPlanPrompt(
             for: tool,
@@ -1021,15 +1031,32 @@ extension AppModel {
             currentIntentText: currentIntentText,
             existingImplementationPlan: existingImplementationPlan
         )
+        if useACP, let acpExecutable = tool.acpExecutableName {
+            return makeAgentPlanDescriptor(
+                title: "\(tool.displayName) Plan",
+                tool: tool,
+                executable: acpExecutable,
+                components: nil,
+                worktree: worktree,
+                repositoryID: repositoryID,
+                initialPrompt: prompt,
+                acpExecution: ACPExecutionDescriptor(
+                    tool: tool,
+                    workingDirectoryURL: URL(fileURLWithPath: worktree.path),
+                    prompt: prompt,
+                    modeID: options.acpModeOverride,
+                    configOverrides: options.acpConfigOverrides,
+                    initialPrompt: prompt
+                )
+            )
+        }
         guard let executable = tool.executableName,
               let components = tool.planDraftCommandComponents(
-                  for: prompt,
-                  artifactURLs: artifactURLs,
-                  options: options
+                for: prompt,
+                artifactURLs: artifactURLs,
+                options: options
               )
-        else {
-            return nil
-        }
+        else { return nil }
         return makeAgentPlanDescriptor(
             title: "\(tool.displayName) Plan",
             tool: tool,
@@ -1037,8 +1064,19 @@ extension AppModel {
             components: components,
             worktree: worktree,
             repositoryID: repositoryID,
-            initialPrompt: prompt
+            initialPrompt: prompt,
+            acpExecution: nil
         )
+    }
+
+    func canResumeAgentPlanDraft(_ draft: AgentPlanDraft) -> Bool {
+        if draft.tool.supportsPlanResume {
+            return true
+        }
+        guard draft.run.outputInterpreter == .acpEventJSONL else {
+            return false
+        }
+        return acpAgentSnapshotsByTool[draft.tool]?.loadSession == true
     }
 
     private nonisolated static func makePlanReplyDescriptor(
@@ -1047,18 +1085,35 @@ extension AppModel {
         worktree: WorktreeRecord,
         responseFilePath: String?,
         sessionID: String,
-        reply: String
+        reply: String,
+        useACP: Bool
     ) -> CommandExecutionDescriptor? {
         let prompt = agentPlanFollowUpPrompt(for: tool, reply: reply)
+        if useACP, let acpExecutable = tool.acpExecutableName {
+            return makeAgentPlanDescriptor(
+                title: "\(tool.displayName) Plan",
+                tool: tool,
+                executable: acpExecutable,
+                components: nil,
+                worktree: worktree,
+                repositoryID: repositoryID,
+                initialPrompt: prompt,
+                acpExecution: ACPExecutionDescriptor(
+                    tool: tool,
+                    workingDirectoryURL: URL(fileURLWithPath: worktree.path),
+                    prompt: prompt,
+                    existingSessionID: sessionID,
+                    initialPrompt: prompt
+                )
+            )
+        }
         guard let executable = tool.executableName,
               let components = tool.planReplyCommandComponents(
-                  for: prompt,
-                  sessionID: sessionID,
-                  responseFilePath: responseFilePath
+                for: prompt,
+                sessionID: sessionID,
+                responseFilePath: responseFilePath
               )
-        else {
-            return nil
-        }
+        else { return nil }
         return makeAgentPlanDescriptor(
             title: "\(tool.displayName) Plan",
             tool: tool,
@@ -1066,7 +1121,8 @@ extension AppModel {
             components: components,
             worktree: worktree,
             repositoryID: repositoryID,
-            initialPrompt: prompt
+            initialPrompt: prompt,
+            acpExecution: nil
         )
     }
 
@@ -1074,18 +1130,19 @@ extension AppModel {
         title: String,
         tool: AIAgentTool,
         executable: String,
-        components: AgentPromptCommandComponents,
+        components: AgentPromptCommandComponents?,
         worktree: WorktreeRecord,
         repositoryID: UUID,
-        initialPrompt: String
+        initialPrompt: String,
+        acpExecution: ACPExecutionDescriptor?
     ) -> CommandExecutionDescriptor {
         CommandExecutionDescriptor(
             title: title,
             actionKind: .aiAgent,
             showsAgentIndicator: false,
             executable: executable,
-            arguments: components.arguments,
-            displayCommandLine: components.displayCommandLine,
+            arguments: components?.arguments ?? (tool.acpLaunchArguments ?? []),
+            displayCommandLine: components?.displayCommandLine ?? ([executable] + (tool.acpLaunchArguments ?? [])).joined(separator: " "),
             currentDirectoryURL: URL(fileURLWithPath: worktree.path),
             repositoryID: repositoryID,
             worktreeID: worktree.id,
@@ -1093,9 +1150,10 @@ extension AppModel {
             stdinText: nil,
             environment: [:],
             usesTerminalSession: false,
-            outputInterpreter: tool.promptOutputInterpreter,
+            outputInterpreter: acpExecution == nil ? tool.promptOutputInterpreter : .acpEventJSONL,
             agentTool: tool,
-            initialPrompt: initialPrompt
+            initialPrompt: initialPrompt,
+            acpExecution: acpExecution
         )
     }
 

@@ -131,7 +131,7 @@ struct AgentPlanDraftSheet: View {
     }
 
     private func canSendReply(for draft: AgentPlanDraft) -> Bool {
-        draft.tool.supportsPlanResume
+        appModel.canResumeAgentPlanDraft(draft)
             && !appModel.activeRunIDs.contains(draft.runID)
             && draft.sessionID?.isEmpty == false
             && !draft.latestQuestions.isEmpty
@@ -152,7 +152,7 @@ struct AgentPlanDraftSheet: View {
         if canSendReply(for: draft) {
             return "Answer the follow-up questions here. After your reply, Stackriot resumes the same \(draft.tool.displayName) session and replaces the worktree plan as soon as the final plan returns."
         }
-        if !draft.tool.supportsPlanResume && !draft.latestQuestions.isEmpty {
+        if !appModel.canResumeAgentPlanDraft(draft) && !draft.latestQuestions.isEmpty {
             return "\(draft.tool.displayName) needs additional input, but this planning flow cannot resume automatically yet. Review the questions below and start a fresh planning run after updating the intent."
         }
         return "No final plan was imported. You can close this draft and start a new planning run."
@@ -177,7 +177,7 @@ struct AgentPlanDraftSheet: View {
             title = "Imported"
             symbol = "checkmark.circle"
         } else if !draft.latestQuestions.isEmpty {
-            title = draft.tool.supportsPlanResume ? "Needs Reply" : "Needs Input"
+            title = appModel.canResumeAgentPlanDraft(draft) ? "Needs Reply" : "Needs Input"
             symbol = "questionmark.circle"
         } else {
             title = "Stopped"

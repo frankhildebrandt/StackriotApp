@@ -223,6 +223,7 @@ einzubinden, ohne Terminal-Emulation zu benötigen.
   `copilot -p "<plan>" --allow-all-tools` — Copilot führt den Plan aus und beendet sich danach
 - **Availability-Check**: `which copilot` in `AIAgentManager.checkAvailability()`
 - **Session-Tracking**: PID-basiertes Polling über `refresh­Running­Agent­Worktrees()`
+- **ACP Discovery**: Stackriot liest ACP-Metadaten von Copilot, Claude, Codex, Cursor und OpenCode aus, sofern der jeweilige ACP-Entrypoint verfügbar ist
 
 ### Routing-Logik (`AppModel+AgentsNode.swift`)
 
@@ -242,7 +243,6 @@ initialPrompt nicht vorhanden?
 - **Custom Instructions**: `.github/copilot-instructions.md` beim Erstellen von Worktrees automatisch
   aus einem Template anlegen
 - **MCP-Server-Konfiguration**: UI für `~/.copilot/mcp-config.json` in den App-Einstellungen
-- **ACP-Integration**: Copilot als programmatischen Sub-Agenten ohne Terminal-Emulation ansprechen
 - **Auth-Validierung**: `gh auth status` / Token-Check vor dem Launch, um sofortiges Scheitern
   mit verständlicher Fehlermeldung abzufangen
 - **`--allow-tool`-Granulare Perms**: Statt `--allow-all-tools` nur git/write erlauben

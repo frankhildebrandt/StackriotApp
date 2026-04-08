@@ -244,7 +244,7 @@ actor ACPAgentDiscoveryService {
     }
 
     func snapshot(for tool: AIAgentTool, workingDirectoryURL: URL) async -> ACPAgentSnapshot? {
-        guard let executable = tool.executableName,
+        guard let executable = tool.acpExecutableName,
               let acpArguments = tool.acpLaunchArguments else {
             return nil
         }
