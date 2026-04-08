@@ -76,6 +76,7 @@ struct ClaudeCLISettingsView: View {
             lastRefreshAt: appModel.lastACPMetadataRefreshAt,
             emptyStateText: "No ACP metadata available yet for Claude Code.",
             refreshAction: { appModel.refreshACPMetadata() },
+            cancelAction: { appModel.cancelACPMetadataRefresh() },
             openConsoleAction: { appModel.isACPMetadataConsolePresented = true }
         ) {}
     }
@@ -94,6 +95,7 @@ struct CodexCLISettingsView: View {
             lastRefreshAt: appModel.lastACPMetadataRefreshAt,
             emptyStateText: "No ACP metadata available yet for Codex.",
             refreshAction: { appModel.refreshACPMetadata() },
+            cancelAction: { appModel.cancelACPMetadataRefresh() },
             openConsoleAction: { appModel.isACPMetadataConsolePresented = true }
         ) {}
     }
@@ -112,6 +114,7 @@ struct CursorCLISettingsView: View {
             lastRefreshAt: appModel.lastACPMetadataRefreshAt,
             emptyStateText: "No ACP metadata available yet for Cursor.",
             refreshAction: { appModel.refreshACPMetadata() },
+            cancelAction: { appModel.cancelACPMetadataRefresh() },
             openConsoleAction: { appModel.isACPMetadataConsolePresented = true }
         ) {}
     }
@@ -130,6 +133,7 @@ struct OpenCodeCLISettingsView: View {
             lastRefreshAt: appModel.lastACPMetadataRefreshAt,
             emptyStateText: "OpenCode did not publish ACP metadata yet.",
             refreshAction: { appModel.refreshACPMetadata() },
+            cancelAction: { appModel.cancelACPMetadataRefresh() },
             openConsoleAction: { appModel.isACPMetadataConsolePresented = true },
             footer: "Stackriot reads OpenCode's ACP handshake to show the live model catalog, auth hint, and advertised session modes."
         ) {
@@ -181,6 +185,7 @@ private struct AgentACPMetadataSection<Content: View>: View {
     let footer: String?
     let content: Content
     let refreshAction: () -> Void
+    let cancelAction: () -> Void
     let openConsoleAction: () -> Void
 
     init(
@@ -192,6 +197,7 @@ private struct AgentACPMetadataSection<Content: View>: View {
         lastRefreshAt: Date?,
         emptyStateText: String,
         refreshAction: @escaping () -> Void,
+        cancelAction: @escaping () -> Void,
         openConsoleAction: @escaping () -> Void,
         footer: String? = nil,
         @ViewBuilder content: () -> Content
@@ -206,6 +212,7 @@ private struct AgentACPMetadataSection<Content: View>: View {
         self.footer = footer
         self.content = content()
         self.refreshAction = refreshAction
+        self.cancelAction = cancelAction
         self.openConsoleAction = openConsoleAction
     }
 
@@ -227,10 +234,16 @@ private struct AgentACPMetadataSection<Content: View>: View {
             )
 
             HStack(spacing: 12) {
-                Button(isRefreshing ? "Refreshing ACP metadata..." : "Refresh ACP metadata") {
+                Button("Refresh ACP metadata") {
                     refreshAction()
                 }
                 .disabled(isRefreshing)
+
+                if isRefreshing {
+                    Button("Cancel ACP refresh") {
+                        cancelAction()
+                    }
+                }
 
                 Button("Open discovery console") {
                     openConsoleAction()
@@ -301,6 +314,8 @@ struct ACPMetadataDiscoveryStatusView: View {
             "exclamationmark.triangle.fill"
         case .failed:
             "xmark.octagon.fill"
+        case .cancelled:
+            "stop.circle.fill"
         }
     }
 
@@ -314,6 +329,8 @@ struct ACPMetadataDiscoveryStatusView: View {
             .orange
         case .failed:
             .red
+        case .cancelled:
+            .secondary
         }
     }
 }
@@ -380,6 +397,18 @@ private struct ACPMetadataDiscoveryConsoleSheet: View {
             }
             .navigationTitle("ACP Discovery Console")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    if appModel.isRefreshingACPMetadata {
+                        Button("Cancel Refresh") {
+                            appModel.cancelACPMetadataRefresh()
+                        }
+                    } else {
+                        Button("Refresh") {
+                            appModel.refreshACPMetadata()
+                        }
+                    }
+                }
+
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") {
                         dismiss()
@@ -400,6 +429,8 @@ private struct ACPMetadataDiscoveryConsoleSheet: View {
             "exclamationmark.triangle.fill"
         case .failed:
             "xmark.octagon.fill"
+        case .cancelled:
+            "stop.circle.fill"
         }
     }
 
@@ -413,6 +444,8 @@ private struct ACPMetadataDiscoveryConsoleSheet: View {
             .orange
         case .failed:
             .red
+        case .cancelled:
+            .secondary
         }
     }
 }

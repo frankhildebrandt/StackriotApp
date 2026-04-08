@@ -55,10 +55,16 @@ struct CopilotCLISettingsView: View {
             )
 
             HStack(spacing: 12) {
-                Button(appModel.isRefreshingACPMetadata ? "Refreshing ACP metadata..." : "Refresh ACP metadata") {
+                Button("Refresh ACP metadata") {
                     appModel.refreshACPMetadata()
                 }
                 .disabled(appModel.isRefreshingACPMetadata)
+
+                if appModel.isRefreshingACPMetadata {
+                    Button("Cancel ACP refresh") {
+                        appModel.cancelACPMetadataRefresh()
+                    }
+                }
 
                 Button("Open discovery console") {
                     appModel.isACPMetadataConsolePresented = true
