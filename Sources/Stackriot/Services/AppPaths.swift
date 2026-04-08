@@ -1,5 +1,7 @@
 import Foundation
 enum AppPaths {
+    private static let userVisibleRootFolderName = "Stackriot"
+
     static var applicationSupportDirectory: URL {
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return url.appendingPathComponent("Stackriot", isDirectory: true)
@@ -85,12 +87,26 @@ enum AppPaths {
         localToolsRoot.appendingPathComponent("shims", isDirectory: true)
     }
 
+    static var repositoriesBaseDirectory: URL {
+        baseDirectory(
+            location: AppPreferences.repositoriesRootLocation,
+            customPath: AppPreferences.repositoriesRootCustomPath
+        )
+    }
+
+    static var worktreesBaseDirectory: URL {
+        baseDirectory(
+            location: AppPreferences.worktreesRootLocation,
+            customPath: AppPreferences.worktreesRootCustomPath
+        )
+    }
+
     static var bareRepositoriesRoot: URL {
-        applicationSupportDirectory.appendingPathComponent("Repositories", isDirectory: true)
+        repositoriesRoot(in: repositoriesBaseDirectory)
     }
 
     static var worktreesRoot: URL {
-        applicationSupportDirectory.appendingPathComponent("Worktrees", isDirectory: true)
+        worktreesRoot(in: worktreesBaseDirectory)
     }
 
     static var plansDirectory: URL {
@@ -207,5 +223,46 @@ enum AppPaths {
             index += 1
         }
         return candidate
+    }
+
+    static func repositoriesRoot(in baseDirectory: URL) -> URL {
+        baseDirectory.appendingPathComponent("Repositories", isDirectory: true)
+    }
+
+    static func worktreesRoot(in baseDirectory: URL) -> URL {
+        baseDirectory.appendingPathComponent("Worktrees", isDirectory: true)
+    }
+
+    static func defaultWorktreeRoot(
+        forRepositoryName repositoryName: String,
+        worktreesRoot baseWorktreesRoot: URL = AppPaths.worktreesRoot
+    ) -> URL {
+        baseWorktreesRoot.appendingPathComponent(sanitizedPathComponent(repositoryName), isDirectory: true)
+    }
+
+    static func baseDirectory(
+        location: AppPathLocation,
+        customPath: String?,
+        fileManager: FileManager = .default
+    ) -> URL {
+        switch location {
+        case .applicationSupport:
+            return applicationSupportDirectory
+        case .homeDirectory:
+            return fileManager.homeDirectoryForCurrentUser
+                .appendingPathComponent(userVisibleRootFolderName, isDirectory: true)
+        case .documentsDirectory:
+            return documentsDirectory(fileManager: fileManager)
+                .appendingPathComponent(userVisibleRootFolderName, isDirectory: true)
+        case .custom:
+            guard let customPath else { return applicationSupportDirectory }
+            let expandedPath = (customPath as NSString).expandingTildeInPath
+            return URL(fileURLWithPath: expandedPath, isDirectory: true)
+        }
+    }
+
+    private static func documentsDirectory(fileManager: FileManager) -> URL {
+        fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Documents", isDirectory: true)
     }
 }

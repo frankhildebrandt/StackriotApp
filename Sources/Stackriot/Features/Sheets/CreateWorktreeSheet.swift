@@ -23,15 +23,19 @@ struct CreateWorktreeSheet: View {
         return sourceBranch.isEmpty ? repository.defaultBranch : sourceBranch
     }
 
+    private var resolvedDestinationRoot: URL {
+        appModel.worktreeDraft.destinationRootURL
+            ?? AppPaths.defaultWorktreeRoot(forRepositoryName: repository.displayName)
+    }
+
     private var destinationRootDescription: String {
-        appModel.worktreeDraft.destinationRootPath?.nilIfBlank ?? "Standardpfad"
+        resolvedDestinationRoot.path
     }
 
     private var projectedDestinationPath: String? {
         let normalizedBranchName = appModel.worktreeDraft.normalizedBranchName
         guard !normalizedBranchName.isEmpty else { return nil }
-        guard let destinationRoot = appModel.worktreeDraft.destinationRootURL else { return nil }
-        return destinationRoot.appendingPathComponent(normalizedBranchName, isDirectory: true).path
+        return resolvedDestinationRoot.appendingPathComponent(normalizedBranchName, isDirectory: true).path
     }
 
     private var projectedPathLabel: String {
@@ -46,9 +50,9 @@ struct CreateWorktreeSheet: View {
     private var destinationHelpText: String {
         switch appModel.worktreeDraft.creationMode {
         case .ideaTree:
-            "Stackriot merkt sich diesen Ort fuer die spaetere Materialisierung des IdeaTrees."
+            "Ohne individuellen Zielordner nutzt Stackriot den in den Einstellungen konfigurierten Standard fuer Worktrees und merkt sich ihn fuer die spaetere Materialisierung."
         case .fullWorktree:
-            "Stackriot legt den Git-Worktree sofort unter diesem Zielordner an."
+            "Ohne individuellen Zielordner nutzt Stackriot den in den Einstellungen konfigurierten Standard fuer Worktrees und legt den Git-Worktree dort sofort an."
         }
     }
 
@@ -411,7 +415,7 @@ struct CreateWorktreeSheet: View {
 
     private func chooseDestinationRoot() {
         let initialDirectory = appModel.worktreeDraft.destinationRootURL
-            ?? AppPaths.worktreesRoot.appendingPathComponent(AppPaths.sanitizedPathComponent(repository.displayName), isDirectory: true)
+            ?? AppPaths.defaultWorktreeRoot(forRepositoryName: repository.displayName)
         guard let selectedDirectory = IDEManager.chooseDirectory(
             title: "Zielordner waehlen",
             message: "Stackriot erstellt darunter einen Unterordner fuer den neuen Worktree.",

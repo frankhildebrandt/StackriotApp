@@ -748,7 +748,7 @@ struct RepositoryDetailView: View {
     private func presentMoveDialog(for worktree: WorktreeRecord) {
         let currentDirectory = worktree.materializedURL?.deletingLastPathComponent()
             ?? worktree.destinationRootURL
-            ?? AppPaths.worktreesRoot.appendingPathComponent(repository.displayName, isDirectory: true)
+            ?? AppPaths.defaultWorktreeRoot(forRepositoryName: repository.displayName)
         guard let destinationRoot = IDEManager.chooseDirectory(
             title: "Worktree verschieben",
             message: "Stackriot erstellt darunter einen Unterordner fuer den Worktree.",

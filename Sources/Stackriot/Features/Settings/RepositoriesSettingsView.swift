@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct RepositoriesSettingsView: View {
@@ -10,6 +11,12 @@ struct RepositoriesSettingsView: View {
         AppPreferences.defaultWorktreeStatusPollingInterval
     @AppStorage(AppPreferences.performanceDebugModeEnabledKey) private var performanceDebugModeEnabled =
         AppPreferences.defaultPerformanceDebugModeEnabled
+    @AppStorage(AppPreferences.repositoriesRootLocationKey) private var repositoriesRootLocationRawValue =
+        AppPreferences.defaultPathLocation.rawValue
+    @AppStorage(AppPreferences.repositoriesRootCustomPathKey) private var repositoriesRootCustomPath = ""
+    @AppStorage(AppPreferences.worktreesRootLocationKey) private var worktreesRootLocationRawValue =
+        AppPreferences.defaultPathLocation.rawValue
+    @AppStorage(AppPreferences.worktreesRootCustomPathKey) private var worktreesRootCustomPath = ""
 
     var body: some View {
         SettingsFormPage(category: .repositories) {
@@ -51,6 +58,70 @@ struct RepositoriesSettingsView: View {
             }
 
             Section {
+                Picker("Repositories", selection: repositoriesRootLocationBinding) {
+                    ForEach(AppPathLocation.allCases) { location in
+                        Text(location.displayName).tag(location)
+                    }
+                }
+
+                LabeledContent("Effective path") {
+                    settingsPathValue(AppPaths.bareRepositoriesRoot.path)
+                }
+
+                if repositoriesRootLocation == .custom {
+                    LabeledContent("Custom folder") {
+                        settingsPathValue(repositoriesRootCustomPath.nonEmpty ?? "No folder selected")
+                    }
+
+                    HStack {
+                        Button("Choose folder") {
+                            chooseRepositoriesRoot()
+                        }
+
+                        Button("Show in Finder") {
+                            revealInFinder(AppPaths.bareRepositoriesRoot)
+                        }
+                    }
+                }
+            } header: {
+                Text("Default repository path")
+            } footer: {
+                Text("New bare repositories are created under the effective path above. Stackriot keeps them inside a `Repositories` subfolder in the selected base folder.")
+            }
+
+            Section {
+                Picker("Worktrees", selection: worktreesRootLocationBinding) {
+                    ForEach(AppPathLocation.allCases) { location in
+                        Text(location.displayName).tag(location)
+                    }
+                }
+
+                LabeledContent("Effective path") {
+                    settingsPathValue(AppPaths.worktreesRoot.path)
+                }
+
+                if worktreesRootLocation == .custom {
+                    LabeledContent("Custom folder") {
+                        settingsPathValue(worktreesRootCustomPath.nonEmpty ?? "No folder selected")
+                    }
+
+                    HStack {
+                        Button("Choose folder") {
+                            chooseWorktreesRoot()
+                        }
+
+                        Button("Show in Finder") {
+                            revealInFinder(AppPaths.worktreesRoot)
+                        }
+                    }
+                }
+            } header: {
+                Text("Default worktree path")
+            } footer: {
+                Text("New default-branch workspaces and new worktrees use this location unless you override the destination for an individual worktree.")
+            }
+
+            Section {
                 Toggle("Enable performance debug artifact", isOn: $performanceDebugModeEnabled)
                 LabeledContent("Artifact file") {
                     Text(appModel.performanceDebugArtifactURL().path)
@@ -78,6 +149,74 @@ struct RepositoriesSettingsView: View {
             } footer: {
                 Text("Enable this, reproduce the slow repository or worktree switch, then send the JSONL artifact file for analysis.")
             }
+        }
+    }
+
+    private var repositoriesRootLocation: AppPathLocation {
+        AppPathLocation(rawValue: repositoriesRootLocationRawValue) ?? AppPreferences.defaultPathLocation
+    }
+
+    private var worktreesRootLocation: AppPathLocation {
+        AppPathLocation(rawValue: worktreesRootLocationRawValue) ?? AppPreferences.defaultPathLocation
+    }
+
+    private var repositoriesRootLocationBinding: Binding<AppPathLocation> {
+        Binding(
+            get: { repositoriesRootLocation },
+            set: { repositoriesRootLocationRawValue = $0.rawValue }
+        )
+    }
+
+    private var worktreesRootLocationBinding: Binding<AppPathLocation> {
+        Binding(
+            get: { worktreesRootLocation },
+            set: { worktreesRootLocationRawValue = $0.rawValue }
+        )
+    }
+
+    @ViewBuilder
+    private func settingsPathValue(_ value: String) -> some View {
+        Text(value)
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+    }
+
+    private func chooseRepositoriesRoot() {
+        let initialDirectory = AppPreferences.repositoriesRootCustomPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? AppPaths.repositoriesBaseDirectory
+        guard let selectedDirectory = IDEManager.chooseDirectory(
+            title: "Choose repository base folder",
+            message: "Stackriot creates the Repositories subfolder inside this location.",
+            prompt: "Choose",
+            initialDirectory: initialDirectory
+        ) else {
+            return
+        }
+        repositoriesRootLocationRawValue = AppPathLocation.custom.rawValue
+        repositoriesRootCustomPath = selectedDirectory.path
+    }
+
+    private func chooseWorktreesRoot() {
+        let initialDirectory = AppPreferences.worktreesRootCustomPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? AppPaths.worktreesBaseDirectory
+        guard let selectedDirectory = IDEManager.chooseDirectory(
+            title: "Choose worktree base folder",
+            message: "Stackriot creates the Worktrees subfolder inside this location.",
+            prompt: "Choose",
+            initialDirectory: initialDirectory
+        ) else {
+            return
+        }
+        worktreesRootLocationRawValue = AppPathLocation.custom.rawValue
+        worktreesRootCustomPath = selectedDirectory.path
+    }
+
+    private func revealInFinder(_ url: URL) {
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else {
+            NSWorkspace.shared.open(url.deletingLastPathComponent())
         }
     }
 }

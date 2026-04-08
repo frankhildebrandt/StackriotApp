@@ -154,7 +154,7 @@ final class WorktreeRecord {
         if let destinationRootURL {
             rootURL = destinationRootURL
         } else if let repository {
-            rootURL = AppPaths.worktreesRoot.appendingPathComponent(repository.displayName, isDirectory: true)
+            rootURL = AppPaths.defaultWorktreeRoot(forRepositoryName: repository.displayName)
         } else {
             return nil
         }
