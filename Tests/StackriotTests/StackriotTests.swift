@@ -193,6 +193,41 @@ struct StackriotTests {
         }
     }
 
+    @MainActor
+    @Test
+    func defaultActionTemplatesIncludeZedWhenInstalled() throws {
+        let root = try temporaryDirectory(named: "zed-default-templates")
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: "Zed Templates",
+            remoteURL: "https://example.com/zed-templates.git",
+            bareRepositoryPath: root.path,
+            defaultBranch: "main"
+        )
+        let worktree = WorktreeRecord(
+            branchName: "main",
+            isDefaultBranchWorkspace: true,
+            path: root.path,
+            materializedPath: root.path,
+            repository: repository
+        )
+        repository.worktrees = [worktree]
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        let tools = appModel.availableDevTools(for: worktree)
+        let templates = appModel.defaultTemplates(for: repository)
+
+        if tools.contains(.zed) {
+            #expect(templates.contains { $0.kind == .openIDE && $0.payload == SupportedDevTool.zed.rawValue })
+        } else {
+            #expect(!templates.contains { $0.kind == .openIDE && $0.payload == SupportedDevTool.zed.rawValue })
+        }
+
+        try? FileManager.default.removeItem(at: root)
+    }
+
     @Test
     func aiAgentPromptCommandsUseDocumentedAutomationModes() {
         let path = "/tmp/example repo"
