@@ -24,7 +24,7 @@ final class LocalToolManager {
 
     func status(for tool: AppManagedTool) async -> AppManagedToolStatus {
         let shellPath = await shellPathProvider()
-        if let shellExecutable = executablePath(named: tool.executableName, inPATH: shellPath) {
+        if let shellExecutable = resolvedExecutablePath(named: tool.executableName, inPATH: shellPath, fileManager: fileManager) {
             return AppManagedToolStatus(
                 tool: tool,
                 resolutionSource: .shell,
@@ -63,7 +63,7 @@ final class LocalToolManager {
         for tool in AIAgentTool.allCases where tool != .none {
             guard let managedTool = tool.managedTool else {
                 if let executable = tool.executableName,
-                   executablePath(named: executable, inPATH: await shellPathProvider()) != nil {
+                   resolvedExecutablePath(named: executable, inPATH: await shellPathProvider(), fileManager: fileManager) != nil {
                     tools.insert(tool)
                 }
                 continue
@@ -194,17 +194,6 @@ final class LocalToolManager {
         try fileManager.createSymbolicLink(at: destination, withDestinationURL: target)
     }
 
-    private func executablePath(named executable: String, inPATH path: String) -> String? {
-        let entries = path.split(separator: ":").map(String.init)
-        for entry in entries {
-            let candidate = URL(fileURLWithPath: entry).appendingPathComponent(executable).path
-            if fileManager.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-        return nil
-    }
-
     private func installHint(for tool: AppManagedTool) -> String? {
         switch tool {
         case .devcontainer:
@@ -225,69 +214,293 @@ final class LocalToolManager {
 
 actor ACPAgentDiscoveryService {
     func snapshots(for tools: Set<AIAgentTool>, workingDirectoryURL: URL) async -> [AIAgentTool: ACPAgentSnapshot] {
-        await withTaskGroup(of: (AIAgentTool, ACPAgentSnapshot?).self) { group in
-            for tool in tools where tool.supportsACPDiscovery {
-                group.addTask { [workingDirectoryURL] in
-                    let snapshot = await self.snapshot(for: tool, workingDirectoryURL: workingDirectoryURL)
-                    return (tool, snapshot)
+        let reports = await reports(for: tools, workingDirectoryURL: workingDirectoryURL)
+        return reports.reduce(into: [:]) { partialResult, entry in
+            if let snapshot = entry.value.snapshot {
+                partialResult[entry.key] = snapshot
+            }
+        }
+    }
+
+    typealias UpdateHandler = @MainActor @Sendable (ACPMetadataDiscoveryReport) -> Void
+
+    func reports(
+        for tools: Set<AIAgentTool>,
+        workingDirectoryURL: URL,
+        onUpdate: UpdateHandler? = nil
+    ) async -> [AIAgentTool: ACPMetadataDiscoveryReport] {
+        let environment = await ShellEnvironment.resolvedEnvironment(includeAppManagedPaths: true)
+        let path = environment["PATH"] ?? ""
+        let discoveryTools = AIAgentTool.allCases.filter { tools.contains($0) && $0.supportsACPDiscovery }
+
+        return await withTaskGroup(of: (AIAgentTool, ACPMetadataDiscoveryReport).self) { group in
+            for tool in discoveryTools {
+                let startedAt = Date()
+                if let onUpdate {
+                    await onUpdate(Self.makeRunningReport(
+                        tool: tool,
+                        workingDirectoryURL: workingDirectoryURL,
+                        path: path,
+                        startedAt: startedAt
+                    ))
+                }
+
+                group.addTask { [workingDirectoryURL, environment, path] in
+                    let report = await self.report(
+                        for: tool,
+                        workingDirectoryURL: workingDirectoryURL,
+                        environment: environment,
+                        path: path,
+                        startedAt: startedAt
+                    )
+                    return (tool, report)
                 }
             }
 
-            var snapshots: [AIAgentTool: ACPAgentSnapshot] = [:]
-            for await (tool, snapshot) in group {
-                if let snapshot {
-                    snapshots[tool] = snapshot
+            var reports: [AIAgentTool: ACPMetadataDiscoveryReport] = [:]
+            for await (tool, report) in group {
+                reports[tool] = report
+                if let onUpdate {
+                    await onUpdate(report)
                 }
             }
-            return snapshots
+            return reports
         }
     }
 
     func snapshot(for tool: AIAgentTool, workingDirectoryURL: URL) async -> ACPAgentSnapshot? {
+        let report = await report(
+            for: tool,
+            workingDirectoryURL: workingDirectoryURL,
+            environment: await ShellEnvironment.resolvedEnvironment(includeAppManagedPaths: true),
+            path: await ShellEnvironment.loginShellPath(includeAppManagedPaths: true),
+            startedAt: Date()
+        )
+        return report.snapshot
+    }
+
+    private func report(
+        for tool: AIAgentTool,
+        workingDirectoryURL: URL,
+        environment: [String: String],
+        path: String,
+        startedAt: Date
+    ) async -> ACPMetadataDiscoveryReport {
         guard let executable = tool.acpExecutableName,
               let acpArguments = tool.acpLaunchArguments else {
-            return nil
+            return ACPMetadataDiscoveryReport(
+                tool: tool,
+                status: .unavailable,
+                executablePath: nil,
+                commandLine: tool.displayName,
+                workingDirectoryPath: workingDirectoryURL.path,
+                environmentPath: path,
+                summary: "ACP discovery is not supported for this CLI.",
+                detail: Self.makeDetail(
+                    commandLine: tool.displayName,
+                    executablePath: nil,
+                    workingDirectoryPath: workingDirectoryURL.path,
+                    environmentPath: path,
+                    statusLine: "ACP discovery is not supported for this CLI."
+                ),
+                startedAt: startedAt,
+                finishedAt: Date(),
+                snapshot: nil
+            )
         }
 
-        return try? await Task.detached(priority: .utility) {
-            let transport = try ACPJSONRPCTransport(
-                executable: executable,
-                arguments: acpArguments,
-                currentDirectoryURL: workingDirectoryURL
-            )
-            defer { transport.terminate() }
-
-            let initializeResponse = try await transport.request(
-                method: "initialize",
-                params: [
-                    "protocolVersion": 1,
-                    "clientCapabilities": [
-                        "fs": [
-                            "readTextFile": false,
-                            "writeTextFile": false,
-                        ],
-                        "terminal": false,
-                    ],
-                    "clientInfo": [
-                        "name": "Stackriot",
-                        "version": "1.0.21",
-                    ],
-                ]
-            )
-            let sessionResponse = try await transport.request(
-                method: "session/new",
-                params: [
-                    "cwd": workingDirectoryURL.path,
-                    "mcpServers": [],
-                ]
-            )
-
-            return Self.parseSnapshot(
+        let commandLine = Self.commandLine(executable: executable, arguments: acpArguments)
+        guard let executablePath = resolvedExecutablePath(
+            named: executable,
+            inPATH: path,
+            fileManager: FileManager.default
+        ) else {
+            return ACPMetadataDiscoveryReport(
                 tool: tool,
-                initializeResponse: initializeResponse,
-                sessionResponse: sessionResponse
+                status: .unavailable,
+                executablePath: nil,
+                commandLine: commandLine,
+                workingDirectoryPath: workingDirectoryURL.path,
+                environmentPath: path,
+                summary: "ACP executable not found on PATH.",
+                detail: Self.makeDetail(
+                    commandLine: commandLine,
+                    executablePath: nil,
+                    workingDirectoryPath: workingDirectoryURL.path,
+                    environmentPath: path,
+                    statusLine: "Expected `\(executable)` in the login-shell PATH or Stackriot-managed CLI directories."
+                ),
+                startedAt: startedAt,
+                finishedAt: Date(),
+                snapshot: nil
             )
-        }.value
+        }
+
+        do {
+            let snapshot = try await Task.detached(priority: .utility) {
+                let transport = try ACPJSONRPCTransport(
+                    executableURL: URL(fileURLWithPath: executablePath),
+                    arguments: acpArguments,
+                    currentDirectoryURL: workingDirectoryURL,
+                    environment: environment
+                )
+                defer { transport.terminate() }
+
+                let initializeResponse = try await transport.request(
+                    method: "initialize",
+                    params: [
+                        "protocolVersion": 1,
+                        "clientCapabilities": [
+                            "fs": [
+                                "readTextFile": false,
+                                "writeTextFile": false,
+                            ],
+                            "terminal": false,
+                        ],
+                        "clientInfo": [
+                            "name": "Stackriot",
+                            "version": "1.0.21",
+                        ],
+                    ]
+                )
+                let sessionResponse = try await transport.request(
+                    method: "session/new",
+                    params: [
+                        "cwd": workingDirectoryURL.path,
+                        "mcpServers": [],
+                    ]
+                )
+
+                return Self.parseSnapshot(
+                    tool: tool,
+                    initializeResponse: initializeResponse,
+                    sessionResponse: sessionResponse
+                )
+            }.value
+
+            guard let snapshot else {
+                return ACPMetadataDiscoveryReport(
+                    tool: tool,
+                    status: .failed,
+                    executablePath: executablePath,
+                    commandLine: commandLine,
+                    workingDirectoryPath: workingDirectoryURL.path,
+                    environmentPath: path,
+                    summary: "ACP responses could not be parsed.",
+                    detail: Self.makeDetail(
+                        commandLine: commandLine,
+                        executablePath: executablePath,
+                        workingDirectoryPath: workingDirectoryURL.path,
+                        environmentPath: path,
+                        statusLine: "The CLI answered, but it did not return the expected initialize/session payloads."
+                    ),
+                    startedAt: startedAt,
+                    finishedAt: Date(),
+                    snapshot: nil
+                )
+            }
+
+            let parts = [
+                snapshot.models.isEmpty ? nil : "\(snapshot.models.count) models",
+                snapshot.modes.isEmpty ? nil : "\(snapshot.modes.count) modes",
+                snapshot.authMethods.isEmpty ? nil : "\(snapshot.authMethods.count) auth method\(snapshot.authMethods.count == 1 ? "" : "s")",
+            ].compactMap { $0 }
+
+            return ACPMetadataDiscoveryReport(
+                tool: tool,
+                status: .succeeded,
+                executablePath: executablePath,
+                commandLine: commandLine,
+                workingDirectoryPath: workingDirectoryURL.path,
+                environmentPath: path,
+                summary: parts.isEmpty ? "ACP metadata loaded." : parts.joined(separator: " · "),
+                detail: Self.makeDetail(
+                    commandLine: commandLine,
+                    executablePath: executablePath,
+                    workingDirectoryPath: workingDirectoryURL.path,
+                    environmentPath: path,
+                    statusLine: [
+                        snapshot.agentInfo?.version.map { "CLI version \($0)." },
+                        "Loaded \(snapshot.models.count) model(s), \(snapshot.modes.count) mode(s), and \(snapshot.configOptions.count) config option(s)."
+                    ].compactMap { $0 }.joined(separator: " ")
+                ),
+                startedAt: startedAt,
+                finishedAt: Date(),
+                snapshot: snapshot
+            )
+        } catch {
+            return ACPMetadataDiscoveryReport(
+                tool: tool,
+                status: .failed,
+                executablePath: executablePath,
+                commandLine: commandLine,
+                workingDirectoryPath: workingDirectoryURL.path,
+                environmentPath: path,
+                summary: "ACP discovery failed.",
+                detail: Self.makeDetail(
+                    commandLine: commandLine,
+                    executablePath: executablePath,
+                    workingDirectoryPath: workingDirectoryURL.path,
+                    environmentPath: path,
+                    statusLine: error.localizedDescription
+                ),
+                startedAt: startedAt,
+                finishedAt: Date(),
+                snapshot: nil
+            )
+        }
+    }
+
+    private static func makeRunningReport(
+        tool: AIAgentTool,
+        workingDirectoryURL: URL,
+        path: String,
+        startedAt: Date
+    ) -> ACPMetadataDiscoveryReport {
+        let executable = tool.acpExecutableName ?? tool.displayName
+        let arguments = tool.acpLaunchArguments ?? []
+        let commandLine = commandLine(executable: executable, arguments: arguments)
+        let executablePath = resolvedExecutablePath(named: executable, inPATH: path, fileManager: .default)
+        return ACPMetadataDiscoveryReport(
+            tool: tool,
+            status: .running,
+            executablePath: executablePath,
+            commandLine: commandLine,
+            workingDirectoryPath: workingDirectoryURL.path,
+            environmentPath: path,
+            summary: "Launching ACP discovery...",
+            detail: makeDetail(
+                commandLine: commandLine,
+                executablePath: executablePath,
+                workingDirectoryPath: workingDirectoryURL.path,
+                environmentPath: path,
+                statusLine: "Starting ACP initialize/session/new handshake."
+            ),
+            startedAt: startedAt,
+            finishedAt: nil,
+            snapshot: nil
+        )
+    }
+
+    private static func commandLine(executable: String, arguments: [String]) -> String {
+        ([executable] + arguments).joined(separator: " ")
+    }
+
+    private static func makeDetail(
+        commandLine: String,
+        executablePath: String?,
+        workingDirectoryPath: String,
+        environmentPath: String,
+        statusLine: String
+    ) -> String {
+        [
+            "Command: \(commandLine)",
+            executablePath.map { "Resolved executable: \($0)" } ?? "Resolved executable: unavailable",
+            "Working directory: \(workingDirectoryPath)",
+            "PATH: \(environmentPath)",
+            "",
+            statusLine
+        ].joined(separator: "\n")
     }
 
     private static func parseSnapshot(
@@ -438,15 +651,17 @@ private final class ACPJSONRPCTransport {
     private let stdinHandle: FileHandle
     private let stdoutHandle: FileHandle
     private let stderrDrainer: Task<Void, Never>
+    private let diagnostics = ACPDiscoveryDiagnostics()
     private var bytesIterator: FileHandle.AsyncBytes.Iterator
     private var bufferedData = Data()
     private var nextRequestID = 1
 
-    init(executable: String, arguments: [String], currentDirectoryURL: URL) throws {
+    init(executableURL: URL, arguments: [String], currentDirectoryURL: URL, environment: [String: String]) throws {
         process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = [executable] + arguments
+        process.executableURL = executableURL
+        process.arguments = arguments
         process.currentDirectoryURL = currentDirectoryURL
+        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
 
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
@@ -458,9 +673,23 @@ private final class ACPJSONRPCTransport {
         stdinHandle = stdinPipe.fileHandleForWriting
         stdoutHandle = stdoutPipe.fileHandleForReading
         bytesIterator = stdoutHandle.bytes.makeAsyncIterator()
+        let diagnostics = self.diagnostics
+        process.terminationHandler = { proc in
+            diagnostics.setTerminationStatus(proc.terminationStatus)
+        }
         stderrDrainer = Task.detached(priority: .background) {
             var iterator = stderrPipe.fileHandleForReading.bytes.makeAsyncIterator()
-            while (try? await iterator.next()) != nil {}
+            var buffer = Data()
+            while let nextByte = (try? await iterator.next()) ?? nil {
+                buffer.append(nextByte)
+                if nextByte == 0x0A {
+                    diagnostics.append(lineData: buffer)
+                    buffer.removeAll(keepingCapacity: true)
+                }
+            }
+            if buffer.isEmpty == false {
+                diagnostics.append(lineData: buffer)
+            }
         }
 
         try process.run()
@@ -493,7 +722,7 @@ private final class ACPJSONRPCTransport {
     }
 
     private func waitForResponse(requestID: Int) async throws -> [String: Any] {
-        let deadline = Date().addingTimeInterval(10)
+        let deadline = Date().addingTimeInterval(20)
         while Date() < deadline {
             if let message = try await nextJSONMessage() {
                 if let id = message["id"] as? Int, id == requestID {
@@ -503,7 +732,11 @@ private final class ACPJSONRPCTransport {
                 break
             }
         }
-        throw StackriotError.commandFailed("ACP discovery timed out.")
+        throw StackriotError.commandFailed(
+            diagnostics.failureMessage(fallback: process.isRunning
+                ? "ACP discovery timed out."
+                : "ACP discovery process exited before returning a response.")
+        )
     }
 
     private func nextJSONMessage() async throws -> [String: Any]? {
@@ -528,4 +761,55 @@ private final class ACPJSONRPCTransport {
     private func waitForNextByte() async throws -> UInt8? {
         try await bytesIterator.next()
     }
+}
+
+private final class ACPDiscoveryDiagnostics: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stderrLines: [String] = []
+    private var terminationStatus: Int32?
+
+    func append(lineData: Data) {
+        guard let line = String(data: lineData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty
+        else {
+            return
+        }
+        lock.lock()
+        stderrLines.append(line)
+        lock.unlock()
+    }
+
+    func setTerminationStatus(_ status: Int32) {
+        lock.lock()
+        terminationStatus = status
+        lock.unlock()
+    }
+
+    func failureMessage(fallback: String) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        if let lastLine = stderrLines.last {
+            return lastLine
+        }
+        if let terminationStatus, terminationStatus != 0 {
+            return "\(fallback) Exit code \(terminationStatus)."
+        }
+        return fallback
+    }
+}
+
+private func resolvedExecutablePath(
+    named executable: String,
+    inPATH path: String,
+    fileManager: FileManager
+) -> String? {
+    let entries = path.split(separator: ":").map(String.init)
+    for entry in entries {
+        let candidate = URL(fileURLWithPath: entry).appendingPathComponent(executable).path
+        if fileManager.isExecutableFile(atPath: candidate) {
+            return candidate
+        }
+    }
+    return nil
 }

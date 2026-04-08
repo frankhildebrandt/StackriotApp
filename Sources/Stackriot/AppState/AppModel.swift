@@ -52,6 +52,11 @@ final class AppModel: @unchecked Sendable {
     var localToolStatuses: [AppManagedToolStatus] = []
     var availableAgents: Set<AIAgentTool> = []
     var acpAgentSnapshotsByTool: [AIAgentTool: ACPAgentSnapshot] = [:]
+    var acpMetadataDiscoveryReportsByTool: [AIAgentTool: ACPMetadataDiscoveryReport] = [:]
+    var isRefreshingACPMetadata = false
+    var isACPMetadataConsolePresented = false
+    var lastACPMetadataRefreshAt: Date?
+    var acpMetadataRefreshSummary: String?
     var runningAgentWorktreeIDs: Set<UUID> = []
     var terminalTabs = TerminalTabBookkeeping()
     var summarizingRunIDs: Set<UUID> = []

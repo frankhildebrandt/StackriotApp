@@ -47,8 +47,22 @@ struct CopilotCLISettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Button("Refresh ACP metadata") {
-                appModel.refreshLocalToolStatuses()
+            ACPMetadataDiscoveryStatusView(
+                tool: .githubCopilot,
+                report: appModel.acpMetadataDiscoveryReportsByTool[.githubCopilot],
+                isRefreshing: appModel.isRefreshingACPMetadata,
+                lastRefreshAt: appModel.lastACPMetadataRefreshAt
+            )
+
+            HStack(spacing: 12) {
+                Button(appModel.isRefreshingACPMetadata ? "Refreshing ACP metadata..." : "Refresh ACP metadata") {
+                    appModel.refreshACPMetadata()
+                }
+                .disabled(appModel.isRefreshingACPMetadata)
+
+                Button("Open discovery console") {
+                    appModel.isACPMetadataConsolePresented = true
+                }
             }
         } header: {
             Text("GitHub Copilot")

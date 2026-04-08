@@ -303,6 +303,67 @@ extension AppModel {
         availableAgents = await services.agentManager.checkAvailability()
     }
 
+    func refreshACPMetadata() {
+        guard !isRefreshingACPMetadata else { return }
+        isRefreshingACPMetadata = true
+        isACPMetadataConsolePresented = true
+        acpMetadataRefreshSummary = "Refreshing ACP metadata..."
+        acpMetadataDiscoveryReportsByTool = [:]
+
+        Task {
+            let workingDirectoryURL = URL(
+                fileURLWithPath: FileManager.default.currentDirectoryPath,
+                isDirectory: true
+            )
+            let tools = Set(AIAgentTool.allCases.filter(\.supportsACPDiscovery))
+            let localToolStatuses = await services.localToolManager.allStatuses()
+            let availableAgents = await services.agentManager.checkAvailability()
+            let reports = await services.acpDiscoveryService.reports(
+                for: tools,
+                workingDirectoryURL: workingDirectoryURL,
+                onUpdate: { report in
+                    self.acpMetadataDiscoveryReportsByTool[report.tool] = report
+                }
+            )
+
+            self.localToolStatuses = localToolStatuses
+            self.availableAgents = availableAgents
+            self.acpMetadataDiscoveryReportsByTool = reports
+            self.acpAgentSnapshotsByTool = reports.reduce(into: [:]) { partialResult, entry in
+                if let snapshot = entry.value.snapshot {
+                    partialResult[entry.key] = snapshot
+                }
+            }
+            self.lastACPMetadataRefreshAt = .now
+            self.isRefreshingACPMetadata = false
+
+            let refreshedCount = reports.values.filter { $0.status == .succeeded }.count
+            let issueCount = reports.values.count - refreshedCount
+            let summary: String
+            switch (refreshedCount, issueCount) {
+            case (0, _):
+                summary = "No ACP metadata could be loaded."
+            case (_, 0):
+                summary = "ACP metadata refreshed for \(refreshedCount) CLI(s)."
+            default:
+                summary = "ACP metadata refreshed for \(refreshedCount) CLI(s); \(issueCount) need attention."
+            }
+            self.acpMetadataRefreshSummary = summary
+
+            if issueCount == 0 {
+                self.notifyOperationSuccess(
+                    title: "ACP metadata refreshed",
+                    body: summary
+                )
+            } else {
+                self.notifyOperationFailure(
+                    title: refreshedCount > 0 ? "ACP metadata partially refreshed" : "ACP metadata refresh failed",
+                    body: summary
+                )
+            }
+        }
+    }
+
     func launchFixWithAI(for run: RunRecord, using tool: AIAgentTool, in modelContext: ModelContext) async {
         guard run.isFixableBuildFailure,
               let runConfigurationID = run.runConfigurationID?.nonEmpty,
@@ -471,7 +532,7 @@ extension AppModel {
 
             let shellCommand: String
             let stdinText: String?
-            let managedPathExport = "export PATH=\(AppPaths.localToolsBinDirectory.path.shellEscaped):$PATH"
+            let managedPathExport = "export PATH=\(ShellEnvironment.managedPATHEntries().joined(separator: ":").shellEscaped):$PATH"
             if let prompt = promptText {
                 let cmd = tool.launchCommandWithPrompt(prompt, in: worktreeURL.path, options: options)
                 if cmd != tool.launchCommand(in: worktreeURL.path) {
