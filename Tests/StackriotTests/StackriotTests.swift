@@ -1687,6 +1687,35 @@ struct StackriotTests {
     }
 
     @Test
+    func appPathHelpersResolveConfiguredBasesAndSanitizeWorktreeRoots() throws {
+        let applicationSupportBase = AppPaths.baseDirectory(location: .applicationSupport, customPath: nil)
+        let homeBase = AppPaths.baseDirectory(location: .homeDirectory, customPath: nil)
+        let documentsBase = AppPaths.baseDirectory(location: .documentsDirectory, customPath: nil)
+        let customBase = AppPaths.baseDirectory(location: .custom, customPath: "  ~/Custom Stackriot  ")
+        let customFallback = AppPaths.baseDirectory(location: .custom, customPath: nil)
+
+        let expectedHomeBase = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Stackriot", isDirectory: true)
+        let expectedDocumentsBase = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents", isDirectory: true))
+            .appendingPathComponent("Stackriot", isDirectory: true)
+
+        #expect(applicationSupportBase == AppPaths.applicationSupportDirectory)
+        #expect(homeBase == expectedHomeBase)
+        #expect(documentsBase == expectedDocumentsBase)
+        #expect(customBase.path.hasSuffix("/Custom Stackriot"))
+        #expect(customFallback == AppPaths.applicationSupportDirectory)
+        #expect(AppPaths.repositoriesRoot(in: homeBase) == expectedHomeBase.appendingPathComponent("Repositories", isDirectory: true))
+        #expect(AppPaths.worktreesRoot(in: documentsBase) == expectedDocumentsBase.appendingPathComponent("Worktrees", isDirectory: true))
+        #expect(
+            AppPaths.defaultWorktreeRoot(
+                forRepositoryName: "Feature Repo",
+                worktreesRoot: URL(fileURLWithPath: "/tmp/worktrees", isDirectory: true)
+            ).path == "/tmp/worktrees/feature-repo"
+        )
+    }
+
+    @Test
     func copilotModelPreferencesDefaultAndNormalizeConfiguredModels() {
         let defaults = UserDefaults.standard
         let previousModels = defaults.object(forKey: AppPreferences.copilotModelsKey)

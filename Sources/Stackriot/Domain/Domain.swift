@@ -1998,6 +1998,28 @@ struct NodeRuntimeStatusSnapshot: Codable, Sendable {
     var lastErrorMessage: String?
 }
 
+enum AppPathLocation: String, CaseIterable, Identifiable, Codable, Sendable {
+    case applicationSupport
+    case homeDirectory
+    case documentsDirectory
+    case custom
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .applicationSupport:
+            "Application Support/Stackriot"
+        case .homeDirectory:
+            "~/Stackriot"
+        case .documentsDirectory:
+            "~/Documents/Stackriot"
+        case .custom:
+            "Custom folder"
+        }
+    }
+}
+
 enum AppPreferences {
     static let selectedNamespaceIDKey = "navigation.selectedNamespaceID"
     static let selectedSettingsCategoryKey = "settings.selectedCategory"
@@ -2008,10 +2030,15 @@ enum AppPreferences {
     static let autoRefreshIntervalKey = "repositories.autoRefreshIntervalSeconds"
     static let worktreeStatusPollingEnabledKey = "repositories.worktreeStatusPollingEnabled"
     static let worktreeStatusPollingIntervalKey = "repositories.worktreeStatusPollingIntervalSeconds"
+    static let repositoriesRootLocationKey = "repositories.defaultRepositoriesRootLocation"
+    static let repositoriesRootCustomPathKey = "repositories.defaultRepositoriesRootCustomPath"
+    static let worktreesRootLocationKey = "repositories.defaultWorktreesRootLocation"
+    static let worktreesRootCustomPathKey = "repositories.defaultWorktreesRootCustomPath"
     static let defaultAutoRefreshEnabled = true
     static let defaultAutoRefreshInterval: Double = 900
     static let defaultWorktreeStatusPollingEnabled = true
     static let defaultWorktreeStatusPollingInterval: Double = 120
+    static let defaultPathLocation: AppPathLocation = .applicationSupport
     static let defaultQuickIntentHotkey = QuickIntentHotkeyConfiguration.default
     static let terminalTabRetentionModeKey = "terminal.tabs.retentionMode"
     static let externalTerminalKey = "terminal.externalApp"
@@ -2102,6 +2129,22 @@ enum AppPreferences {
         let defaults = UserDefaults.standard
         let value = defaults.double(forKey: worktreeStatusPollingIntervalKey)
         return value > 0 ? value : defaultWorktreeStatusPollingInterval
+    }
+
+    static var repositoriesRootLocation: AppPathLocation {
+        normalizedPathLocation(forKey: repositoriesRootLocationKey)
+    }
+
+    static var repositoriesRootCustomPath: String? {
+        normalizedCustomPath(forKey: repositoriesRootCustomPathKey)
+    }
+
+    static var worktreesRootLocation: AppPathLocation {
+        normalizedPathLocation(forKey: worktreesRootLocationKey)
+    }
+
+    static var worktreesRootCustomPath: String? {
+        normalizedCustomPath(forKey: worktreesRootCustomPathKey)
     }
 
     static var terminalTabRetentionMode: TerminalTabRetentionMode {
@@ -2441,6 +2484,23 @@ enum AppPreferences {
             return defaultDevContainerGlobalVisibilityEnabled
         }
         return defaults.bool(forKey: devContainerGlobalVisibilityEnabledKey)
+    }
+
+    private static func normalizedPathLocation(forKey key: String) -> AppPathLocation {
+        let defaults = UserDefaults.standard
+        guard
+            let rawValue = defaults.string(forKey: key),
+            let location = AppPathLocation(rawValue: rawValue)
+        else {
+            return defaultPathLocation
+        }
+        return location
+    }
+
+    private static func normalizedCustomPath(forKey key: String) -> String? {
+        UserDefaults.standard.string(forKey: key)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty
     }
 }
 

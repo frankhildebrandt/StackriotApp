@@ -350,10 +350,7 @@ struct WorktreeManager {
         }
 
         try AppPaths.ensureBaseDirectories()
-        let worktreeRoot = AppPaths.worktreesRoot.appendingPathComponent(
-            AppPaths.sanitizedPathComponent(repositoryName),
-            isDirectory: true
-        )
+        let worktreeRoot = AppPaths.defaultWorktreeRoot(forRepositoryName: repositoryName)
         try FileManager.default.createDirectory(at: worktreeRoot, withIntermediateDirectories: true)
 
         let destination = worktreeRoot.appendingPathComponent("default-branch", isDirectory: true)
@@ -424,10 +421,7 @@ struct WorktreeManager {
         }
 
         try AppPaths.ensureBaseDirectories()
-        return AppPaths.worktreesRoot.appendingPathComponent(
-            AppPaths.sanitizedPathComponent(repositoryName),
-            isDirectory: true
-        )
+        return AppPaths.defaultWorktreeRoot(forRepositoryName: repositoryName)
     }
 
     private static func normalizedWorktreeSegment(from value: String) -> String {
