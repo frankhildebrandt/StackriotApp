@@ -1,7 +1,303 @@
 import Foundation
 import SwiftData
 
+enum PathRelocationScope: String, Sendable, Equatable {
+    case repositories
+    case worktrees
+
+    var title: String {
+        switch self {
+        case .repositories:
+            "repositories"
+        case .worktrees:
+            "worktrees"
+        }
+    }
+
+    var singularTitle: String {
+        switch self {
+        case .repositories:
+            "repository"
+        case .worktrees:
+            "worktree"
+        }
+    }
+}
+
+struct PathRelocationRequest: Identifiable, Sendable, Equatable {
+    let id: UUID
+    let scope: PathRelocationScope
+    let oldLocation: AppPathLocation
+    let oldCustomPath: String?
+    let newLocation: AppPathLocation
+    let newCustomPath: String?
+    let oldRoot: URL
+    let newRoot: URL
+    let affectedCount: Int
+
+    init(
+        scope: PathRelocationScope,
+        oldLocation: AppPathLocation,
+        oldCustomPath: String?,
+        newLocation: AppPathLocation,
+        newCustomPath: String?,
+        oldRoot: URL,
+        newRoot: URL,
+        affectedCount: Int
+    ) {
+        id = UUID()
+        self.scope = scope
+        self.oldLocation = oldLocation
+        self.oldCustomPath = oldCustomPath?.nilIfBlank
+        self.newLocation = newLocation
+        self.newCustomPath = newCustomPath?.nilIfBlank
+        self.oldRoot = oldRoot.standardizedFileURL
+        self.newRoot = newRoot.standardizedFileURL
+        self.affectedCount = affectedCount
+    }
+}
+
+struct PathRelocationProgress: Sendable, Equatable {
+    let scope: PathRelocationScope
+    let totalCount: Int
+    var completedCount: Int
+    var currentItemName: String?
+    let startedAt: Date
+
+    var progressLabel: String {
+        "\(completedCount) / \(max(totalCount, 1)) \(scope.title)"
+    }
+}
+
 extension AppModel {
+    func preparePathRelocationRequest(
+        scope: PathRelocationScope,
+        currentLocation: AppPathLocation,
+        currentCustomPath: String?,
+        newLocation: AppPathLocation,
+        newCustomPath: String?,
+        modelContext: ModelContext
+    ) -> PathRelocationRequest? {
+        let normalizedCurrentCustomPath = currentCustomPath?.nilIfBlank
+        let normalizedNewCustomPath = newCustomPath?.nilIfBlank
+        let oldBase = AppPaths.baseDirectory(location: currentLocation, customPath: normalizedCurrentCustomPath)
+        let newBase = AppPaths.baseDirectory(location: newLocation, customPath: normalizedNewCustomPath)
+        let oldRoot = scope == .repositories ? AppPaths.repositoriesRoot(in: oldBase) : AppPaths.worktreesRoot(in: oldBase)
+        let newRoot = scope == .repositories ? AppPaths.repositoriesRoot(in: newBase) : AppPaths.worktreesRoot(in: newBase)
+        guard oldRoot.standardizedFileURL != newRoot.standardizedFileURL else {
+            return nil
+        }
+
+        let affectedCount: Int
+        switch scope {
+        case .repositories:
+            let descriptor = FetchDescriptor<ManagedRepository>(sortBy: [SortDescriptor(\.displayName)])
+            affectedCount = (try? modelContext.fetch(descriptor).count) ?? 0
+        case .worktrees:
+            let descriptor = FetchDescriptor<WorktreeRecord>()
+            affectedCount = (try? modelContext.fetch(descriptor).count) ?? 0
+        }
+
+        return PathRelocationRequest(
+            scope: scope,
+            oldLocation: currentLocation,
+            oldCustomPath: normalizedCurrentCustomPath,
+            newLocation: newLocation,
+            newCustomPath: normalizedNewCustomPath,
+            oldRoot: oldRoot,
+            newRoot: newRoot,
+            affectedCount: affectedCount
+        )
+    }
+
+    func applyPathRelocationRequest(
+        _ request: PathRelocationRequest,
+        moveExistingItems: Bool,
+        modelContext: ModelContext
+    ) async {
+        if moveExistingItems && !activeRunIDs.isEmpty {
+            pendingErrorMessage = "Path moves are blocked while jobs are running. Wait for the active jobs to finish, then try again."
+            return
+        }
+
+        do {
+            if moveExistingItems {
+                pathRelocationProgress = PathRelocationProgress(
+                    scope: request.scope,
+                    totalCount: max(request.affectedCount, 1),
+                    completedCount: 0,
+                    currentItemName: nil,
+                    startedAt: .now
+                )
+                switch request.scope {
+                case .repositories:
+                    try await moveRepositories(to: request.newRoot, in: modelContext)
+                case .worktrees:
+                    try await moveWorktrees(to: request.newRoot, in: modelContext)
+                }
+            }
+
+            persistPathRelocationPreferences(for: request)
+            try AppPaths.ensureBaseDirectories()
+
+            if let repository = selectedRepository() {
+                refreshRepositorySidebarSnapshot(for: repository)
+                refreshRepositoryDetailSnapshot(for: repository)
+            }
+
+            notifyOperationSuccess(
+                title: moveExistingItems ? "Path updated and existing items moved" : "Default path updated",
+                subtitle: request.scope.title.capitalized,
+                body: moveExistingItems
+                    ? "Moved \(request.affectedCount) \(request.scope.title) to the new root."
+                    : "New \(request.scope.singularTitle) items will use the updated path."
+            )
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+            notifyOperationFailure(
+                title: "Path update failed",
+                subtitle: request.scope.title.capitalized,
+                body: error.localizedDescription
+            )
+        }
+
+        pathRelocationProgress = nil
+    }
+
+    private func moveRepositories(to newRepositoriesRoot: URL, in modelContext: ModelContext) async throws {
+        let descriptor = FetchDescriptor<ManagedRepository>(sortBy: [SortDescriptor(\.displayName)])
+        let repositories = try modelContext.fetch(descriptor)
+
+        if repositories.isEmpty {
+            pathRelocationProgress?.completedCount = 1
+            return
+        }
+
+        for (index, repository) in repositories.enumerated() {
+            pathRelocationProgress?.currentItemName = repository.displayName
+            let worktreeURLs = repository.worktrees.compactMap(\.materializedURL)
+            let destination = try await services.repositoryManager.moveBareRepository(
+                bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
+                newRepositoriesRoot: newRepositoriesRoot
+            )
+            repository.bareRepositoryPath = destination.path
+            repository.updatedAt = .now
+            save(modelContext)
+            for worktreeURL in worktreeURLs {
+                services.devToolDiscovery.invalidateCache(for: worktreeURL)
+            }
+            await updateRepositoryWorktreeMonitoring(for: repository)
+            pathRelocationProgress?.completedCount = index + 1
+        }
+    }
+
+    private func moveWorktrees(to newWorktreesRoot: URL, in modelContext: ModelContext) async throws {
+        let descriptor = FetchDescriptor<ManagedRepository>(sortBy: [SortDescriptor(\.displayName)])
+        let repositories = try modelContext.fetch(descriptor)
+        let totalCount = repositories.reduce(0) { $0 + $1.worktrees.count }
+
+        if totalCount == 0 {
+            pathRelocationProgress?.completedCount = 1
+            return
+        }
+
+        var completedCount = 0
+        for repository in repositories {
+            let targetRoot = AppPaths.defaultWorktreeRoot(
+                forRepositoryName: repository.displayName,
+                worktreesRoot: newWorktreesRoot
+            )
+
+            for worktree in worktrees(for: repository) {
+                pathRelocationProgress?.currentItemName = "\(repository.displayName) - \(worktree.branchName)"
+                try await relocateWorktree(worktree, in: repository, to: targetRoot)
+                completedCount += 1
+                pathRelocationProgress?.completedCount = completedCount
+            }
+
+            repository.updatedAt = .now
+            save(modelContext)
+            refreshRepositorySidebarSnapshot(for: repository)
+            refreshRepositoryDetailSnapshot(for: repository)
+            await refreshWorktreeStatuses(for: repository)
+        }
+    }
+
+    private func relocateWorktree(
+        _ worktree: WorktreeRecord,
+        in repository: ManagedRepository,
+        to targetRoot: URL
+    ) async throws {
+        if worktree.isIdeaTree, !worktree.isMaterialized {
+            worktree.destinationRootPath = targetRoot.path
+            return
+        }
+
+        guard let currentURL = worktree.materializedURL else {
+            worktree.destinationRootPath = targetRoot.path
+            return
+        }
+
+        let directoryName = preferredRelocationDirectoryName(for: worktree, in: repository)
+        let previousURL = currentURL
+        let destination = try await services.worktreeManager.moveWorktree(
+            bareRepositoryPath: URL(fileURLWithPath: repository.bareRepositoryPath),
+            worktreePath: currentURL,
+            newParentDirectory: targetRoot,
+            directoryName: directoryName
+        )
+
+        worktree.markMaterialized(at: destination.path, kind: worktree.kind)
+        if !worktree.isDefaultBranchWorkspace {
+            worktree.destinationRootPath = targetRoot.path
+        }
+        worktree.lastOpenedAt = .now
+        services.devToolDiscovery.invalidateCache(for: previousURL)
+        invalidateWorktreeDiscoverySnapshot(for: worktree.id)
+        invalidateRunConfigurationCache(for: worktree.id)
+        _ = refreshWorktreeConfigurationSnapshot(for: worktree)
+        _ = refreshAvailableDevToolsCache(for: worktree)
+        await refreshAvailableRunConfigurationsCache(for: worktree)
+    }
+
+    private func preferredRelocationDirectoryName(for worktree: WorktreeRecord, in repository: ManagedRepository) -> String {
+        if worktree.isDefaultBranchWorkspace {
+            return "default-branch"
+        }
+
+        if let materializedURL = worktree.materializedURL {
+            let currentDefaultRoot = AppPaths.defaultWorktreeRoot(forRepositoryName: repository.displayName)
+            if materializedURL.path.hasPrefix(currentDefaultRoot.path + "/") {
+                let relativePath = String(materializedURL.path.dropFirst(currentDefaultRoot.path.count + 1))
+                if let relativePath = relativePath.nilIfBlank {
+                    return relativePath
+                }
+            }
+        }
+
+        return worktree.branchName
+    }
+
+    private func persistPathRelocationPreferences(for request: PathRelocationRequest) {
+        let defaults = UserDefaults.standard
+        switch request.scope {
+        case .repositories:
+            defaults.set(request.newLocation.rawValue, forKey: AppPreferences.repositoriesRootLocationKey)
+            if let customPath = request.newCustomPath {
+                defaults.set(customPath, forKey: AppPreferences.repositoriesRootCustomPathKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.repositoriesRootCustomPathKey)
+            }
+        case .worktrees:
+            defaults.set(request.newLocation.rawValue, forKey: AppPreferences.worktreesRootLocationKey)
+            if let customPath = request.newCustomPath {
+                defaults.set(customPath, forKey: AppPreferences.worktreesRootCustomPathKey)
+            } else {
+                defaults.removeObject(forKey: AppPreferences.worktreesRootCustomPathKey)
+            }
+        }
+    }
+
     func migrateLegacyRepositoriesIfNeeded(in modelContext: ModelContext) {
         let defaultNamespace = defaultNamespace(in: modelContext)
         let descriptor = FetchDescriptor<ManagedRepository>()
@@ -198,6 +494,7 @@ extension AppModel {
             return
         }
 
+        _ = await reconcileRepositoryRemotes(for: repository, in: modelContext)
         ensureDefaultRemoteSelection(for: repository)
         _ = await ensureDefaultBranchWorkspace(for: repository, in: modelContext)
         let contexts = repository.remotes.map(remoteExecutionContext(for:))
@@ -452,6 +749,92 @@ extension AppModel {
                 }
             }
         }
+    }
+
+    @discardableResult
+    func reconcileRepositoryRemotes(for repository: ManagedRepository, in modelContext: ModelContext) async -> Bool {
+        do {
+            let descriptors = try await services.repositoryManager.listRemotes(
+                in: URL(fileURLWithPath: repository.bareRepositoryPath)
+            )
+            let didChange = reconcileRepositoryRemoteDescriptors(descriptors, for: repository, in: modelContext)
+            if didChange {
+                repository.updatedAt = .now
+                save(modelContext)
+                refreshRepositoryDetailSnapshot(for: repository)
+            }
+            return didChange
+        } catch {
+            pendingErrorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private func reconcileRepositoryRemoteDescriptors(
+        _ descriptors: [GitRemoteDescriptor],
+        for repository: ManagedRepository,
+        in modelContext: ModelContext
+    ) -> Bool {
+        var didChange = false
+        var remainingRemotes = repository.remotes
+        var matchedRemoteIDs: Set<UUID> = []
+
+        for descriptor in descriptors {
+            let match = remainingRemotes.first(where: { $0.name == descriptor.name })
+                ?? remainingRemotes.first(where: { $0.canonicalURL == descriptor.canonicalURL })
+
+            if let match {
+                var didChangeForMatch = false
+                remainingRemotes.removeAll(where: { $0.id == match.id })
+                matchedRemoteIDs.insert(match.id)
+                if match.name != descriptor.name {
+                    match.name = descriptor.name
+                    didChange = true
+                    didChangeForMatch = true
+                }
+                if match.url != descriptor.url {
+                    match.url = descriptor.url
+                    didChange = true
+                    didChangeForMatch = true
+                }
+                if match.canonicalURL != descriptor.canonicalURL {
+                    match.canonicalURL = descriptor.canonicalURL
+                    didChange = true
+                    didChangeForMatch = true
+                }
+                if didChangeForMatch {
+                    match.updatedAt = .now
+                }
+                continue
+            }
+
+            let remote = RepositoryRemote(
+                name: descriptor.name,
+                url: descriptor.url,
+                canonicalURL: descriptor.canonicalURL,
+                repository: repository
+            )
+            repository.remotes.append(remote)
+            modelContext.insert(remote)
+            matchedRemoteIDs.insert(remote.id)
+            didChange = true
+        }
+
+        let removableRemotes = repository.remotes.filter { !matchedRemoteIDs.contains($0.id) }
+        if !removableRemotes.isEmpty {
+            for remote in removableRemotes {
+                modelContext.delete(remote)
+            }
+            didChange = true
+        }
+
+        let previousDefaultRemoteName = repository.defaultRemoteName
+        ensureDefaultRemoteSelection(for: repository)
+        if repository.defaultRemoteName != previousDefaultRemoteName {
+            didChange = true
+        }
+
+        return didChange
     }
 
     func defaultTemplates(for repository: ManagedRepository) -> [ActionTemplateRecord] {

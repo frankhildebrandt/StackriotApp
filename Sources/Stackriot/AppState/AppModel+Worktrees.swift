@@ -664,6 +664,7 @@ extension AppModel {
         }
 
         do {
+            let didRemoteChange = await reconcileRepositoryRemotes(for: repository, in: modelContext)
             let bareRepositoryPath = URL(fileURLWithPath: repository.bareRepositoryPath)
             let entries = try await services.repositoryManager.listWorktreeEntries(in: bareRepositoryPath)
             let result = reconcileRepositoryWorktreeEntries(entries, for: repository, in: modelContext)
@@ -687,7 +688,10 @@ extension AppModel {
             }
             await updateRepositoryWorktreeMonitoring(for: repository)
             await refreshWorktreeStatuses(for: repository)
-            return result.didChange
+            if didRemoteChange {
+                refreshRepositoryDetailSnapshot(for: repository)
+            }
+            return didRemoteChange || result.didChange
         } catch {
             pendingErrorMessage = error.localizedDescription
             return false

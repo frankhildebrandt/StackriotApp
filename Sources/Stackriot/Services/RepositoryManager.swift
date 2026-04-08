@@ -29,6 +29,12 @@ struct RepositoryGitAdminPaths: Sendable, Equatable {
     let worktrees: URL?
 }
 
+struct GitRemoteDescriptor: Sendable, Equatable {
+    let name: String
+    let url: String
+    let canonicalURL: String
+}
+
 struct RepositoryManager {
     private let sshEnvironmentBuilder = GitSSHEnvironmentBuilder()
 
@@ -257,6 +263,41 @@ struct RepositoryManager {
         return RepositoryGitAdminPaths(config: configPath, worktrees: worktreesPath)
     }
 
+    func listRemotes(in bareRepositoryPath: URL) async throws -> [GitRemoteDescriptor] {
+        let listResult = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["--git-dir", bareRepositoryPath.path, "remote"]
+        )
+        guard listResult.exitCode == 0 else {
+            throw StackriotError.commandFailed(listResult.stderr.isEmpty ? listResult.stdout : listResult.stderr)
+        }
+
+        let remoteNames = listResult.stdout
+            .split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+
+        var descriptors: [GitRemoteDescriptor] = []
+        descriptors.reserveCapacity(remoteNames.count)
+        for name in remoteNames {
+            let urlResult = try await CommandRunner.runCollected(
+                executable: "git",
+                arguments: ["--git-dir", bareRepositoryPath.path, "remote", "get-url", name]
+            )
+            guard urlResult.exitCode == 0 else {
+                throw StackriotError.commandFailed(urlResult.stderr.isEmpty ? urlResult.stdout : urlResult.stderr)
+            }
+            let url = urlResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let canonicalURL = Self.canonicalRemoteURL(from: url) else {
+                throw StackriotError.commandFailed("Remote \(name) has an invalid URL: \(url)")
+            }
+            descriptors.append(GitRemoteDescriptor(name: name, url: url, canonicalURL: canonicalURL))
+        }
+
+        return descriptors
+    }
+
     func listWorktreeEntries(in bareRepositoryPath: URL) async throws -> [GitWorktreeListEntry] {
         let result = try await CommandRunner.runCollected(
             executable: "git",
@@ -286,6 +327,36 @@ struct RepositoryManager {
         guard result.exitCode == 0 else {
             throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
+    }
+
+    func moveBareRepository(
+        bareRepositoryPath: URL,
+        newRepositoriesRoot: URL
+    ) async throws -> URL {
+        let fileManager = FileManager.default
+        let source = bareRepositoryPath.standardizedFileURL
+        let destinationRoot = newRepositoriesRoot.standardizedFileURL
+        try fileManager.createDirectory(at: destinationRoot, withIntermediateDirectories: true)
+
+        if source.deletingLastPathComponent().standardizedFileURL == destinationRoot {
+            return source
+        }
+
+        let adminPaths = try await repositoryGitAdminPaths(for: source)
+        let worktreeLinks = try referencedWorktreeGitLinks(in: adminPaths.worktrees)
+        let destination = uniquePathPreservingName(
+            in: destinationRoot,
+            preferredName: source.lastPathComponent.nonEmpty ?? "repository"
+        )
+
+        try fileManager.moveItem(at: source, to: destination)
+        do {
+            try rewriteWorktreeGitLinks(worktreeLinks, newBareRepositoryPath: destination)
+        } catch {
+            throw StackriotError.commandFailed("Repository moved, but linked worktree metadata could not be updated: \(error.localizedDescription)")
+        }
+
+        return destination
     }
 
     func updateRemote(
@@ -502,6 +573,66 @@ struct RepositoryManager {
     private func optionalGitPath(named name: String, in bareRepositoryPath: URL) async throws -> URL? {
         let path = try await gitPath(named: name, in: bareRepositoryPath)
         return FileManager.default.fileExists(atPath: path.path) ? path : nil
+    }
+
+    private func referencedWorktreeGitLinks(in worktreesPath: URL?) throws -> [ReferencedWorktreeGitLink] {
+        guard let worktreesPath else { return [] }
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: worktreesPath.path) else {
+            return []
+        }
+
+        let children = try fileManager.contentsOfDirectory(
+            at: worktreesPath,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+        var links: [ReferencedWorktreeGitLink] = []
+        for child in children {
+            guard try isDirectory(child) else { continue }
+            let gitdirFile = child.appendingPathComponent("gitdir", isDirectory: false)
+            let rawGitFilePath = try String(contentsOf: gitdirFile, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rawGitFilePath.isEmpty else { continue }
+
+            let gitFileURL = URL(fileURLWithPath: rawGitFilePath).standardizedFileURL
+            guard fileManager.fileExists(atPath: gitFileURL.path) else {
+                throw StackriotError.commandFailed("Linked worktree metadata is missing for \(gitFileURL.path).")
+            }
+
+            links.append(
+                ReferencedWorktreeGitLink(
+                    adminDirectoryName: child.lastPathComponent,
+                    gitFileURL: gitFileURL
+                )
+            )
+        }
+        return links
+    }
+
+    private func rewriteWorktreeGitLinks(
+        _ links: [ReferencedWorktreeGitLink],
+        newBareRepositoryPath: URL
+    ) throws {
+        let worktreesRoot = newBareRepositoryPath.appendingPathComponent("worktrees", isDirectory: true)
+        for link in links {
+            let newAdminPath = worktreesRoot.appendingPathComponent(link.adminDirectoryName, isDirectory: true)
+            let contents = "gitdir: \(newAdminPath.path)\n"
+            try contents.write(to: link.gitFileURL, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func uniquePathPreservingName(in root: URL, preferredName: String) -> URL {
+        let fileManager = FileManager.default
+        let trimmedName = preferredName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseName = trimmedName.nonEmpty ?? "repository"
+        var candidate = root.appendingPathComponent(baseName, isDirectory: true)
+        var index = 2
+        while fileManager.fileExists(atPath: candidate.path) {
+            candidate = root.appendingPathComponent("\(baseName)-\(index)", isDirectory: true)
+            index += 1
+        }
+        return candidate
     }
 
     private func materializeNPXTemplate(command: String, into stageURL: URL) async throws {
@@ -921,4 +1052,9 @@ struct RepositoryManager {
         }
         return result
     }
+}
+
+private struct ReferencedWorktreeGitLink: Sendable, Equatable {
+    let adminDirectoryName: String
+    let gitFileURL: URL
 }

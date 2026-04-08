@@ -33,6 +33,7 @@ final class AppModel: @unchecked Sendable {
     var projectEditorDraft: ProjectEditorDraft?
     var projectDocumentationSourceDraft: ProjectDocumentationSourceDraft?
     var pendingErrorMessage: String?
+    var pathRelocationProgress: PathRelocationProgress?
     var worktreeStatuses: [UUID: WorktreeStatus] = [:]
     var pullRequestUpstreamStatuses: [UUID: PullRequestUpstreamStatus] = [:]
     var syncLogs: [UUID: String] = [:]

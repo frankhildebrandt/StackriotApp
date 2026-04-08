@@ -4947,6 +4947,119 @@ struct StackriotTests {
         try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
     }
 
+    @MainActor
+    @Test
+    func reconcileRepositoryRemotesImportsExternalConfigChanges() async throws {
+        let remote = try await createSeededRemote(named: "external-remote-config")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Remote-Reconcile-\(UUID().uuidString)"
+        )
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: cloneInfo.displayName,
+            remoteURL: remote.remote.absoluteString,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath.path,
+            defaultBranch: cloneInfo.defaultBranch,
+            defaultRemoteName: "origin"
+        )
+        let staleRemote = RepositoryRemote(
+            name: "stale",
+            url: "git@github.com:example/stale.git",
+            canonicalURL: "/example/stale",
+            repository: repository
+        )
+        repository.remotes = [staleRemote]
+        modelContext.insert(repository)
+        modelContext.insert(staleRemote)
+        try modelContext.save()
+
+        let addRemoteResult = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["--git-dir", cloneInfo.bareRepositoryPath.path, "remote", "add", "upstream", remote.remote.absoluteString]
+        )
+        #expect(addRemoteResult.exitCode == 0)
+
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        let didChange = await appModel.reconcileRepositoryRemotes(for: repository, in: modelContext)
+
+        #expect(didChange)
+        #expect(repository.remotes.contains(where: { $0.name == "origin" }))
+        #expect(repository.remotes.contains(where: { $0.name == "upstream" }))
+        #expect(repository.remotes.contains(where: { $0.name == "stale" }) == false)
+
+        try? FileManager.default.removeItem(at: cloneInfo.bareRepositoryPath)
+    }
+
+    @Test
+    func moveBareRepositoryKeepsLinkedWorktreesUsable() async throws {
+        let remote = try await createSeededRemote(named: "move-bare-repository")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Move-Bare-\(UUID().uuidString)"
+        )
+        let worktreeInfo = try await WorktreeManager().createWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            branchName: "feature/linked-move",
+            sourceBranch: cloneInfo.defaultBranch,
+            directoryName: "feature/linked-move"
+        )
+        let newRoot = try temporaryDirectory(named: "moved-bare-root")
+
+        let movedRepository = try await RepositoryManager().moveBareRepository(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            newRepositoriesRoot: newRoot
+        )
+
+        let statusResult = try await CommandRunner.runCollected(
+            executable: "git",
+            arguments: ["-C", worktreeInfo.path.path, "status", "--short"]
+        )
+
+        #expect(statusResult.exitCode == 0)
+        #expect(FileManager.default.fileExists(atPath: movedRepository.path))
+        #expect(FileManager.default.fileExists(atPath: worktreeInfo.path.path))
+
+        try? FileManager.default.removeItem(at: worktreeInfo.path)
+        try? FileManager.default.removeItem(at: movedRepository)
+        try? FileManager.default.removeItem(at: newRoot)
+    }
+
+    @MainActor
+    @Test
+    func pathRelocationMoveIsBlockedWhileJobsAreRunning() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let repository = ManagedRepository(
+            displayName: "Blocked-Path-Move",
+            bareRepositoryPath: "/tmp/blocked-path-move",
+            defaultBranch: "main"
+        )
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        appModel.activeRunIDs = [UUID()]
+
+        let request = appModel.preparePathRelocationRequest(
+            scope: .repositories,
+            currentLocation: .applicationSupport,
+            currentCustomPath: nil,
+            newLocation: .homeDirectory,
+            newCustomPath: nil,
+            modelContext: modelContext
+        )
+
+        guard let request else {
+            Issue.record("Expected a path relocation request")
+            return
+        }
+
+        await appModel.applyPathRelocationRequest(request, moveExistingItems: true, modelContext: modelContext)
+
+        #expect(appModel.pendingErrorMessage?.contains("blocked while jobs are running") == true)
+    }
+
     @Test
     func quickIntentHotkeyFormattingAndCodingStayStable() throws {
         let configuration = QuickIntentHotkeyConfiguration(
