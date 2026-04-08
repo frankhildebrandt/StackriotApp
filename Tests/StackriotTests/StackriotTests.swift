@@ -404,6 +404,28 @@ struct StackriotTests {
     }
 
     @Test
+    func acpDiscoveryUsesDedicatedAdapterCommands() {
+        #expect(AIAgentTool.claudeCode.acpExecutableName == "claude-code-acp")
+        #expect(AIAgentTool.codex.acpExecutableName == "codex-acp")
+        #expect(AIAgentTool.githubCopilot.acpExecutableName == "copilot")
+        #expect(AIAgentTool.cursorCLI.acpExecutableName == "cursor-agent")
+        #expect(AIAgentTool.openCode.acpExecutableName == "opencode")
+
+        #expect(AIAgentTool.claudeCode.acpLaunchArguments == [])
+        #expect(AIAgentTool.codex.acpLaunchArguments == [])
+        #expect(AIAgentTool.githubCopilot.acpLaunchArguments == ["--acp"])
+        #expect(AIAgentTool.cursorCLI.acpLaunchArguments == ["acp"])
+        #expect(AIAgentTool.openCode.acpLaunchArguments == ["acp"])
+
+        #expect(AIAgentTool.claudeCode.supportsACPDiscovery)
+        #expect(AIAgentTool.codex.supportsACPDiscovery)
+        #expect(AIAgentTool.githubCopilot.supportsACPDiscovery)
+        #expect(AIAgentTool.cursorCLI.supportsACPDiscovery)
+        #expect(AIAgentTool.openCode.supportsACPDiscovery)
+        #expect(!AIAgentTool.none.supportsACPDiscovery)
+    }
+
+    @Test
     func shellEnvironmentUsesLoginPathUnlessOverridden() async {
         let loginPath = await ShellEnvironment.loginShellPath()
 

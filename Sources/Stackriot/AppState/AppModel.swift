@@ -92,6 +92,8 @@ final class AppModel: @unchecked Sendable {
     @ObservationIgnored
     var terminalSessions: [UUID: AgentTerminalSession] = [:]
     @ObservationIgnored
+    var acpRunSessionsByRunID: [UUID: ACPAgentRunSession] = [:]
+    @ObservationIgnored
     var terminalTabAutoHideTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored
     var forceClosingTerminalRunIDs: Set<UUID> = []
@@ -124,6 +126,7 @@ final class AppModel: @unchecked Sendable {
     @ObservationIgnored
     var rawLogRecordIDsByRunID: [UUID: UUID] = [:]
     var agentRunSegmentsByRunID: [UUID: [AgentRunSegment]] = [:]
+    var pendingACPPermissionRequestsByRunID: [UUID: ACPPermissionRequestState] = [:]
     @ObservationIgnored
     var deliveredCursorAgentMarkdownSnapshotRunIDs: Set<UUID> = []
     var storedModelContext: ModelContext?

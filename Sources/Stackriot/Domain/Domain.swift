@@ -389,6 +389,59 @@ struct ACPAgentSnapshot: Sendable, Equatable {
     let configOptions: [ACPDiscoveredConfigOption]
 }
 
+enum ACPPermissionOptionKind: String, Sendable {
+    case allowOnce = "allow_once"
+    case allowAlways = "allow_always"
+    case rejectOnce = "reject_once"
+    case rejectAlways = "reject_always"
+    case other
+
+    init(rawValue: String) {
+        switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case Self.allowOnce.rawValue:
+            self = .allowOnce
+        case Self.allowAlways.rawValue:
+            self = .allowAlways
+        case Self.rejectOnce.rawValue:
+            self = .rejectOnce
+        case Self.rejectAlways.rawValue:
+            self = .rejectAlways
+        default:
+            self = .other
+        }
+    }
+
+    var isAllowing: Bool {
+        switch self {
+        case .allowOnce, .allowAlways:
+            true
+        case .rejectOnce, .rejectAlways, .other:
+            false
+        }
+    }
+}
+
+struct ACPPermissionOption: Identifiable, Sendable, Equatable {
+    let optionID: String
+    let name: String
+    let kind: ACPPermissionOptionKind
+
+    var id: String { optionID }
+}
+
+struct ACPPermissionRequestState: Identifiable, Sendable, Equatable {
+    let runID: UUID
+    let requestID: String
+    let sessionID: String
+    let tool: AIAgentTool
+    let title: String
+    let message: String?
+    let options: [ACPPermissionOption]
+    let createdAt: Date
+
+    var id: String { requestID }
+}
+
 struct CopilotModelOption: Identifiable, Sendable, Equatable, Hashable, Codable {
     let id: String
     let displayName: String
@@ -786,6 +839,23 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    var acpExecutableName: String? {
+        switch self {
+        case .none:
+            nil
+        case .claudeCode:
+            "claude-code-acp"
+        case .codex:
+            "codex-acp"
+        case .githubCopilot:
+            "copilot"
+        case .cursorCLI:
+            "cursor-agent"
+        case .openCode:
+            "opencode"
+        }
+    }
+
     var managedTool: AppManagedTool? {
         switch self {
         case .claudeCode:
@@ -803,17 +873,25 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
 
     var acpLaunchArguments: [String]? {
         switch self {
+        case .claudeCode, .codex:
+            []
         case .githubCopilot:
             ["--acp"]
+        case .cursorCLI:
+            ["acp"]
         case .openCode:
             ["acp"]
         default:
-            nil
+            []
         }
     }
 
     var supportsACPDiscovery: Bool {
-        acpLaunchArguments != nil
+        acpExecutableName != nil
+    }
+
+    var supportsACPExecution: Bool {
+        acpExecutableName != nil
     }
 
     var promptOutputInterpreter: RunOutputInterpreterKind? {
@@ -1413,6 +1491,7 @@ struct CommandExecutionDescriptor: Sendable {
     let outputInterpreter: RunOutputInterpreterKind?
     let agentTool: AIAgentTool?
     let initialPrompt: String?
+    let acpExecution: ACPExecutionDescriptor?
 
     init(
         title: String,
@@ -1432,7 +1511,8 @@ struct CommandExecutionDescriptor: Sendable {
         usesTerminalSession: Bool = true,
         outputInterpreter: RunOutputInterpreterKind? = nil,
         agentTool: AIAgentTool? = nil,
-        initialPrompt: String? = nil
+        initialPrompt: String? = nil,
+        acpExecution: ACPExecutionDescriptor? = nil
     ) {
         self.title = title
         self.actionKind = actionKind
@@ -1452,6 +1532,39 @@ struct CommandExecutionDescriptor: Sendable {
         self.outputInterpreter = outputInterpreter
         self.agentTool = agentTool
         self.initialPrompt = initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        self.acpExecution = acpExecution
+    }
+}
+
+struct ACPExecutionDescriptor: Sendable {
+    let tool: AIAgentTool
+    let workingDirectoryURL: URL
+    let prompt: String
+    let existingSessionID: String?
+    let modeID: String?
+    let configOverrides: [String: String]
+    let initialPrompt: String
+
+    init(
+        tool: AIAgentTool,
+        workingDirectoryURL: URL,
+        prompt: String,
+        existingSessionID: String? = nil,
+        modeID: String? = nil,
+        configOverrides: [String: String] = [:],
+        initialPrompt: String
+    ) {
+        self.tool = tool
+        self.workingDirectoryURL = workingDirectoryURL
+        self.prompt = prompt
+        self.existingSessionID = existingSessionID?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        self.modeID = modeID?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        self.configOverrides = configOverrides.reduce(into: [:]) { partialResult, entry in
+            if let value = entry.value.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty {
+                partialResult[entry.key] = value
+            }
+        }
+        self.initialPrompt = initialPrompt
     }
 }
 
@@ -1461,6 +1574,7 @@ enum RunOutputInterpreterKind: String, Codable, Sendable {
     case copilotPromptJSONL
     case cursorAgentPrintJSON
     case openCodePromptJSONL
+    case acpEventJSONL
 }
 
 struct CursorAgentPrintedResponse: Decodable, Equatable, Sendable {

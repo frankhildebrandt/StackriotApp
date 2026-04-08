@@ -249,7 +249,7 @@ struct PlanEditorView: View {
         if draft.didImportPlan {
             return "Plan Imported"
         }
-        return draft.tool.supportsPlanResume && !draft.latestQuestions.isEmpty ? "Plan Needs Reply" : "Open Plan Run"
+        return appModel.canResumeAgentPlanDraft(draft) && !draft.latestQuestions.isEmpty ? "Plan Needs Reply" : "Open Plan Run"
     }
 
     private func planRunStatusSymbol(for draft: AgentPlanDraft) -> String {

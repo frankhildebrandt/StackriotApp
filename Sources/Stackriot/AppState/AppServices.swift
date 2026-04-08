@@ -420,6 +420,7 @@ struct AppServices {
     let devContainerService: DevContainerService
     let mcpServerManager: MCPServerManager
     let acpDiscoveryService: ACPAgentDiscoveryService
+    let acpRunService: ACPAgentRunService
     let rawLogArchive: AgentRawLogArchiveService
     let projectDocumentationArchiveService: ProjectDocumentationArchiveService
     let notificationService: any AppNotificationServing
@@ -445,6 +446,7 @@ struct AppServices {
         devContainerService: DevContainerService? = nil,
         mcpServerManager: MCPServerManager = MCPServerManager(),
         acpDiscoveryService: ACPAgentDiscoveryService = ACPAgentDiscoveryService(),
+        acpRunService: ACPAgentRunService = ACPAgentRunService(),
         rawLogArchive: AgentRawLogArchiveService = AgentRawLogArchiveService(),
         projectDocumentationArchiveService: ProjectDocumentationArchiveService = ProjectDocumentationArchiveService(),
         notificationService: any AppNotificationServing = AppNotificationService(),
@@ -472,6 +474,7 @@ struct AppServices {
         self.devContainerService = devContainerService ?? DevContainerService(localToolManager: localToolManager)
         self.mcpServerManager = mcpServerManager
         self.acpDiscoveryService = acpDiscoveryService
+        self.acpRunService = acpRunService
         self.rawLogArchive = rawLogArchive
         self.projectDocumentationArchiveService = projectDocumentationArchiveService
         self.notificationService = notificationService
@@ -498,6 +501,7 @@ struct AppServices {
         devContainerService: nil,
         mcpServerManager: MCPServerManager(),
         acpDiscoveryService: ACPAgentDiscoveryService(),
+        acpRunService: ACPAgentRunService(),
         rawLogArchive: AgentRawLogArchiveService(),
         projectDocumentationArchiveService: ProjectDocumentationArchiveService(),
         notificationService: AppNotificationService(),

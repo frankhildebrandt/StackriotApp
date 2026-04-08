@@ -84,11 +84,15 @@ struct AgentRunFeedView: View {
 
     private var usesAssistantDrawer: Bool {
         switch run.outputInterpreter {
-        case .cursorAgentPrintJSON, .copilotPromptJSONL, .openCodePromptJSONL:
+        case .cursorAgentPrintJSON, .copilotPromptJSONL, .openCodePromptJSONL, .acpEventJSONL:
             true
         default:
             false
         }
+    }
+
+    private var pendingPermissionRequest: ACPPermissionRequestState? {
+        appModel.acpPermissionRequest(for: run.id)
     }
 
     private var segments: [AgentRunSegment] {
@@ -130,6 +134,10 @@ struct AgentRunFeedView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let pendingPermissionRequest {
+                permissionRequestCard(request: pendingPermissionRequest)
+            }
+
             Picker("Ansicht", selection: $selectedMode) {
                 ForEach(AgentRunContentMode.allCases) { mode in
                     Text(mode.title).tag(mode)
@@ -181,6 +189,42 @@ struct AgentRunFeedView: View {
             guard !Task.isCancelled else { return }
             cachedRawLogDisplayText = nextText
         }
+    }
+
+    private func permissionRequestCard(request: ACPPermissionRequestState) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Approval Required", systemImage: "hand.raised.circle.fill")
+                .font(.headline)
+
+            Text(request.title)
+                .font(.subheadline.weight(.semibold))
+
+            if let message = request.message?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(request.options) { option in
+                    Group {
+                        if option.kind.isAllowing {
+                            Button(option.name) {
+                                appModel.respondToACPPermissionRequest(runID: run.id, optionID: option.optionID)
+                            }
+                            .buttonStyle(.borderedProminent)
+                        } else {
+                            Button(option.name) {
+                                appModel.respondToACPPermissionRequest(runID: run.id, optionID: option.optionID)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var feedView: some View {
