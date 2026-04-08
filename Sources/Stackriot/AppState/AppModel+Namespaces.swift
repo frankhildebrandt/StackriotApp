@@ -171,6 +171,12 @@ extension AppModel {
         }
 
         for project in projects(in: namespace, modelContext: modelContext) {
+            if let documentationRepository = project.documentationRepository {
+                documentationRepository.namespace = fallbackNamespace
+                documentationRepository.documentationProject = nil
+                documentationRepository.updatedAt = Date.now
+                project.documentationRepository = nil
+            }
             for repository in repositories(in: project, from: namespaceRepositories) {
                 repository.namespace = fallbackNamespace
                 repository.project = nil
@@ -199,11 +205,19 @@ extension AppModel {
             in: project,
             from: (try? modelContext.fetch(FetchDescriptor<ManagedRepository>())) ?? []
         )
+        let documentationRepository = project.documentationRepository
 
         for repository in projectRepositories {
             repository.namespace = fallbackNamespace
             repository.project = nil
             repository.updatedAt = Date.now
+        }
+
+        if let documentationRepository {
+            documentationRepository.namespace = fallbackNamespace
+            documentationRepository.documentationProject = nil
+            documentationRepository.updatedAt = Date.now
+            project.documentationRepository = nil
         }
 
         let projectName = project.name
@@ -224,7 +238,7 @@ extension AppModel {
 
         project.namespace = namespace
         project.sortOrder = nextProjectSortOrder(in: namespace, modelContext: modelContext)
-        project.updatedAt = .now
+        project.updatedAt = Date.now
 
         let projectID = project.id
         let repositories = ((try? modelContext.fetch(FetchDescriptor<ManagedRepository>())) ?? []).filter {
@@ -233,7 +247,12 @@ extension AppModel {
         for repository in repositories {
             repository.namespace = namespace
             repository.project = project
-            repository.updatedAt = .now
+            repository.updatedAt = Date.now
+        }
+
+        if let documentationRepository = project.documentationRepository {
+            documentationRepository.namespace = namespace
+            documentationRepository.updatedAt = Date.now
         }
 
         save(modelContext)
@@ -249,10 +268,14 @@ extension AppModel {
             pendingErrorMessage = "Project and namespace must match."
             return
         }
+        guard repository.documentationProject == nil else {
+            pendingErrorMessage = "Documentation repositories cannot be assigned as regular project repositories."
+            return
+        }
 
         repository.namespace = namespace
         repository.project = project
-        repository.updatedAt = .now
+        repository.updatedAt = Date.now
         save(modelContext)
 
         if selectedNamespaceID == nil {

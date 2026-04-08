@@ -1150,10 +1150,19 @@ extension AppModel {
 
         switch draft.method {
         case .localMerge:
+            let archiveTargetBranchName = worktree.parentWorktreeID
+                .flatMap { parentID in repository.worktrees.first(where: { $0.id == parentID })?.branchName }
+                ?? repository.defaultBranch
             let outcome = await performLocalMerge(worktree, repository: repository, modelContext: modelContext)
             if case .committed = outcome {
                 worktree.lifecycleState = .merged
                 save(modelContext)
+                await archiveProjectDocumentationIfNeeded(
+                    for: worktree,
+                    repository: repository,
+                    targetBranchName: archiveTargetBranchName,
+                    modelContext: modelContext
+                )
                 if deleteAfterIntegration {
                     await removeWorktree(worktree, in: modelContext, notifySuccess: false)
                 } else {
@@ -1231,6 +1240,12 @@ extension AppModel {
                     upstreamSHA: worktree.primaryContext?.upstreamSHA
                 )
                 save(modelContext)
+                await archiveProjectDocumentationIfNeeded(
+                    for: worktree,
+                    repository: repository,
+                    targetBranchName: target.branchName,
+                    modelContext: modelContext
+                )
                 startPRMonitoring(for: worktree, repository: repository, in: modelContext)
                 repository.updatedAt = .now
                 scheduleWorktreeStatusRefresh(for: repository)

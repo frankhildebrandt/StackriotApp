@@ -25,6 +25,18 @@ extension AppModel {
                 }
             }
 
+            if let documentationProject = repository.documentationProject {
+                if repository.project != nil {
+                    repository.project = nil
+                    didChange = true
+                }
+                if repository.namespace?.id != documentationProject.namespace?.id {
+                    repository.namespace = documentationProject.namespace
+                    repository.updatedAt = .now
+                    didChange = true
+                }
+            }
+
             guard repository.remotes.isEmpty else { continue }
             guard
                 let remoteURL = repository.remoteURL?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -503,13 +515,14 @@ extension AppModel {
         return archiveURL
     }
 
-    private func persistRepository(
+    func persistRepository(
         displayName: String,
         remoteURL: String?,
         bareRepositoryPath: String,
         defaultBranch: String,
         defaultRemoteName: String?,
         remoteDescriptor: (name: String, url: String, canonicalURL: String)?,
+        namespace: RepositoryNamespace? = nil,
         in modelContext: ModelContext
     ) throws -> ManagedRepository {
         let repository = ManagedRepository(
@@ -518,7 +531,7 @@ extension AppModel {
             bareRepositoryPath: bareRepositoryPath,
             defaultBranch: defaultBranch,
             defaultRemoteName: defaultRemoteName,
-            namespace: selectedNamespace(in: modelContext) ?? defaultNamespace(in: modelContext)
+            namespace: namespace ?? selectedNamespace(in: modelContext) ?? defaultNamespace(in: modelContext)
         )
 
         if let remoteDescriptor {

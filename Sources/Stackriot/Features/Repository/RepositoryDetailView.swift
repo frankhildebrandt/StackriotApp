@@ -102,6 +102,10 @@ struct RepositoryDetailView: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                if let projectDocumentationSection {
+                    projectDocumentationSection
+                }
+
                 worktreeSection(worktrees: worktrees, buckets: worktreeBuckets, detailSnapshot: detailSnapshot)
 
                 if selectedWorktree == nil {
@@ -141,6 +145,60 @@ struct RepositoryDetailView: View {
                 )
             }
         }
+    }
+
+    private var projectDocumentationSection: AnyView? {
+        let linkedProject = repository.documentationProject ?? repository.project
+        guard let project = linkedProject else { return nil }
+
+        let documentationRepository = project.documentationRepository
+        let remoteSummary = documentationRepository?.defaultRemote?.url ?? documentationRepository?.remoteURL ?? "Kein Remote konfiguriert"
+        let roleTitle = repository.documentationProject?.id == project.id
+            ? "Dokumentationsquelle fuer dieses Projekt"
+            : "Projekt-Dokumentationsquelle"
+
+        return AnyView(
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "book.closed")
+                        .foregroundStyle(.blue)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(roleTitle)
+                            .font(.headline)
+                        Text(project.name)
+                            .font(.subheadline)
+                        Text(remoteSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .lineLimit(2)
+                    }
+                    Spacer()
+                }
+
+                HStack(spacing: 10) {
+                    if let documentationRepository {
+                        Button("Dokumentations-Repository oeffnen") {
+                            appModel.openDocumentationRepository(for: project)
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Text(documentationRepository.bareRepositoryPath)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    } else {
+                        Button("Dokumentationsquelle einrichten") {
+                            appModel.presentProjectDocumentationSourceEditor(for: project)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    Spacer()
+                }
+            }
+            .padding(16)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        )
     }
 
     private func worktreeSection(

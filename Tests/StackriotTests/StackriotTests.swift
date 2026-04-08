@@ -1105,6 +1105,28 @@ struct StackriotTests {
     }
 
     @Test
+    func repositoryManagerCanCreateBareRepositoryFromSeedEntries() async throws {
+        let info = try await RepositoryManager().createBareRepository(
+            displayName: "Docs-Seed-\(UUID().uuidString)",
+            seed: .entries([
+                .file(path: "README.md", contents: "# Docs\n"),
+                .file(path: "market-data/.gitkeep", contents: ""),
+                .file(path: "archive/worktrees/.gitkeep", contents: ""),
+            ])
+        )
+
+        let workspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: info.bareRepositoryPath,
+            repositoryName: info.displayName,
+            defaultBranch: info.defaultBranch
+        )
+
+        #expect(FileManager.default.fileExists(atPath: workspace.path.appendingPathComponent("README.md").path))
+        #expect(FileManager.default.fileExists(atPath: workspace.path.appendingPathComponent("market-data/.gitkeep").path))
+        #expect(FileManager.default.fileExists(atPath: workspace.path.appendingPathComponent("archive/worktrees/.gitkeep").path))
+    }
+
+    @Test
     func publishCurrentBranchIfNeededSkipsPushWhenUpstreamExists() async throws {
         let remoteOne = try await createSeededRemote(named: "publish-if-needed")
         let cloneInfo = try await RepositoryManager().cloneBareRepository(remoteURL: remoteOne.remote, preferredName: "Sample")
@@ -1179,6 +1201,156 @@ struct StackriotTests {
         )
         #expect(log.exitCode == 0)
         #expect(log.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "Integrate feature/integration into main")
+    }
+
+    @MainActor
+    @Test
+    func startIntegrationArchivesArtifactsWhenProjectDocumentationSourceExists() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        appModel.storedModelContext = modelContext
+
+        let namespace = RepositoryNamespace(name: "Workspace", sortOrder: 1)
+        let project = RepositoryProject(name: "Project Docs", namespace: namespace)
+        modelContext.insert(namespace)
+        modelContext.insert(project)
+        try modelContext.save()
+
+        let remote = try await createSeededRemote(named: "integrate-archive")
+        let cloneInfo = try await RepositoryManager().cloneBareRepository(
+            remoteURL: remote.remote,
+            preferredName: "Archive-App-\(UUID().uuidString)"
+        )
+        let docsInfo = try await RepositoryManager().createBareRepository(
+            displayName: "Archive-Docs-\(UUID().uuidString)",
+            seed: .entries([.file(path: "README.md", contents: "# Docs\n")])
+        )
+
+        let repository = ManagedRepository(
+            displayName: cloneInfo.displayName,
+            remoteURL: remote.remote.absoluteString,
+            bareRepositoryPath: cloneInfo.bareRepositoryPath.path,
+            defaultBranch: cloneInfo.defaultBranch,
+            defaultRemoteName: "origin",
+            namespace: namespace,
+            project: project
+        )
+        let remoteRecord = RepositoryRemote(
+            name: "origin",
+            url: remote.remote.absoluteString,
+            canonicalURL: try appModel.canonicalRemoteURL(from: remote.remote.absoluteString),
+            repository: repository
+        )
+        repository.remotes = [remoteRecord]
+
+        let documentationRepository = ManagedRepository(
+            displayName: docsInfo.displayName,
+            bareRepositoryPath: docsInfo.bareRepositoryPath.path,
+            defaultBranch: docsInfo.defaultBranch,
+            namespace: namespace
+        )
+        documentationRepository.documentationProject = project
+        project.documentationRepository = documentationRepository
+
+        let defaultWorkspace = try await WorktreeManager().ensureDefaultBranchWorkspace(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            defaultBranch: cloneInfo.defaultBranch
+        )
+        let featureWorkspace = try await WorktreeManager().createWorktree(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            repositoryName: cloneInfo.displayName,
+            branchName: "feature/archive-docs",
+            sourceBranch: cloneInfo.defaultBranch
+        )
+        try await configureGitIdentity(in: defaultWorkspace.path)
+        try await configureGitIdentity(in: featureWorkspace.path)
+
+        try "hello\narchive\n".write(
+            to: featureWorkspace.path.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await runGit(["-C", featureWorkspace.path.path, "add", "."], currentDirectoryURL: featureWorkspace.path)
+        try await runGit(["-C", featureWorkspace.path.path, "commit", "-m", "Archive docs"], currentDirectoryURL: featureWorkspace.path)
+
+        let defaultWorktree = WorktreeRecord(
+            branchName: cloneInfo.defaultBranch,
+            isDefaultBranchWorkspace: true,
+            path: defaultWorkspace.path.path,
+            materializedPath: defaultWorkspace.path.path,
+            materializedAt: .now,
+            repository: repository
+        )
+        let featureWorktree = WorktreeRecord(
+            branchName: "feature/archive-docs",
+            path: featureWorkspace.path.path,
+            materializedPath: featureWorkspace.path.path,
+            materializedAt: .now,
+            repository: repository
+        )
+        repository.worktrees = [defaultWorktree, featureWorktree]
+
+        modelContext.insert(repository)
+        modelContext.insert(remoteRecord)
+        modelContext.insert(documentationRepository)
+        modelContext.insert(defaultWorktree)
+        modelContext.insert(featureWorktree)
+        try modelContext.save()
+
+        let intentURL = AppPaths.intentFile(for: featureWorktree.id)
+        let planURL = AppPaths.implementationPlanFile(for: featureWorktree.id)
+        defer {
+            try? FileManager.default.removeItem(at: intentURL)
+            try? FileManager.default.removeItem(at: planURL)
+        }
+        try "Intent for archive test\n".write(
+            to: intentURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        try "Plan for archive test\n".write(
+            to: planURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        await appModel.startIntegration(
+            featureWorktree,
+            repository: repository,
+            draft: IntegrationDraft(method: .localMerge, deleteAfterIntegration: false),
+            modelContext: modelContext
+        )
+
+        let archiveRelativePath = appModel.services.projectDocumentationArchiveService.archiveDirectoryRelativePath(
+            for: featureWorktree.branchName
+        )
+        let documentationDefaultWorktree = documentationRepository.worktrees.first(where: \.isDefaultBranchWorkspace)
+        let documentationWorkspaceURL = try #require(documentationDefaultWorktree?.materializedURL)
+        let archiveDirectory = documentationWorkspaceURL.appendingPathComponent(archiveRelativePath, isDirectory: true)
+
+        let archivedIntent = try String(
+            contentsOf: archiveDirectory.appendingPathComponent("intent.md"),
+            encoding: .utf8
+        )
+        let archivedPlan = try String(
+            contentsOf: archiveDirectory.appendingPathComponent("implementation-plan.md"),
+            encoding: .utf8
+        )
+
+        #expect(featureWorktree.lifecycleState == .merged)
+        #expect(archivedIntent.contains("Intent for archive test"))
+        #expect(archivedPlan.contains("Plan for archive test"))
+        #expect(FileManager.default.fileExists(atPath: archiveDirectory.appendingPathComponent("metadata.json").path))
+
+        try await RepositoryManager().deleteRepository(
+            bareRepositoryPath: cloneInfo.bareRepositoryPath,
+            worktreePaths: repository.worktrees.compactMap(\.materializedURL)
+        )
+        try await RepositoryManager().deleteRepository(
+            bareRepositoryPath: docsInfo.bareRepositoryPath,
+            worktreePaths: documentationRepository.worktrees.compactMap(\.materializedURL)
+        )
     }
 
     @Test
@@ -1704,6 +1876,137 @@ struct StackriotTests {
         #expect(repository.namespace?.id == workspaceNamespace.id)
         #expect(repository.project?.id == project.id)
         #expect(repository.project?.namespace?.id == workspaceNamespace.id)
+    }
+
+    @MainActor
+    @Test
+    func projectDocumentationSourceCanBeConfiguredAndRemoved() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        appModel.storedModelContext = modelContext
+
+        let namespace = RepositoryNamespace(name: "Workspace", sortOrder: 1)
+        let project = RepositoryProject(name: "Client", namespace: namespace)
+        modelContext.insert(namespace)
+        modelContext.insert(project)
+        try modelContext.save()
+
+        appModel.presentProjectDocumentationSourceEditor(for: project)
+        appModel.projectDocumentationSourceDraft?.mode = .automaticRepository
+        appModel.projectDocumentationSourceDraft?.repositoryName = "workspace-client-docs"
+
+        await appModel.saveProjectDocumentationSource(in: modelContext)
+
+        let documentationRepository = try #require(project.documentationRepository)
+        #expect(documentationRepository.documentationProject?.id == project.id)
+        #expect(documentationRepository.project == nil)
+        #expect(documentationRepository.namespace?.id == namespace.id)
+        #expect(FileManager.default.fileExists(atPath: documentationRepository.bareRepositoryPath))
+
+        appModel.removeDocumentationRepository(from: project, in: modelContext)
+
+        #expect(project.documentationRepository == nil)
+        #expect(documentationRepository.documentationProject == nil)
+
+        try await RepositoryManager().deleteRepository(
+            bareRepositoryPath: URL(fileURLWithPath: documentationRepository.bareRepositoryPath),
+            worktreePaths: documentationRepository.worktrees.compactMap(\.materializedURL)
+        )
+    }
+
+    @Test
+    func projectDocumentationArchiveServiceCopiesArtifactsAndMetadata() throws {
+        let root = try temporaryDirectory(named: "documentation-archive")
+        let documentationWorktreeURL = root.appendingPathComponent("docs-worktree", isDirectory: true)
+        try FileManager.default.createDirectory(at: documentationWorktreeURL, withIntermediateDirectories: true)
+        try AppPaths.ensureBaseDirectories()
+
+        let service = ProjectDocumentationArchiveService(
+            currentDate: { Date(timeIntervalSince1970: 1_715_000_000) }
+        )
+        let project = RepositoryProject(name: "Client")
+        let repository = makeRepository(name: "App")
+        let worktree = WorktreeRecord(
+            id: UUID(),
+            branchName: "feature/docs-archive",
+            path: "/tmp/feature/docs-archive",
+            repository: repository
+        )
+        worktree.prNumber = 42
+        worktree.prURL = "https://example.com/pr/42"
+
+        let intentURL = AppPaths.intentFile(for: worktree.id)
+        let planURL = AppPaths.implementationPlanFile(for: worktree.id)
+        try "Intent snapshot\n".write(to: intentURL, atomically: true, encoding: .utf8)
+        try "Implementation plan\n".write(to: planURL, atomically: true, encoding: .utf8)
+        defer {
+            try? FileManager.default.removeItem(at: intentURL)
+            try? FileManager.default.removeItem(at: planURL)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let result = try service.archiveWorktreeArtifacts(
+            documentationWorktreeURL: documentationWorktreeURL,
+            worktree: worktree,
+            repository: repository,
+            project: project,
+            targetBranchName: "main"
+        )
+
+        let metadataData = try Data(contentsOf: result.metadataURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let metadata = try decoder.decode(ProjectDocumentationArchiveMetadata.self, from: metadataData)
+
+        #expect(result.destinationDirectory.lastPathComponent == service.archiveDirectoryName(for: worktree.branchName))
+        #expect(metadata.branchName == "feature/docs-archive")
+        #expect(metadata.targetBranchName == "main")
+        #expect(metadata.pullRequestNumber == 42)
+        #expect(metadata.files.allSatisfy { $0.exists })
+        #expect(FileManager.default.fileExists(atPath: result.destinationDirectory.appendingPathComponent("intent.md").path))
+        #expect(FileManager.default.fileExists(atPath: result.destinationDirectory.appendingPathComponent("implementation-plan.md").path))
+    }
+
+    @MainActor
+    @Test
+    func documentationSourceRejectsRepositoryAlreadyAssignedToProject() async throws {
+        let modelContext = try makeInMemoryModelContext()
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        appModel.storedModelContext = modelContext
+
+        let namespace = RepositoryNamespace(name: "Workspace", sortOrder: 1)
+        let project = RepositoryProject(name: "Docs Project", namespace: namespace)
+        let existingProject = RepositoryProject(name: "Existing", namespace: namespace)
+        let repository = makeRepository(name: "Shared", namespace: namespace, project: existingProject)
+        modelContext.insert(namespace)
+        modelContext.insert(project)
+        modelContext.insert(existingProject)
+        modelContext.insert(repository)
+        try modelContext.save()
+
+        let remoteURL = "https://github.com/example/shared-docs.git"
+        let remote = RepositoryRemote(
+            name: "origin",
+            url: remoteURL,
+            canonicalURL: try appModel.canonicalRemoteURL(from: remoteURL),
+            repository: repository
+        )
+        repository.remotes = [remote]
+        modelContext.insert(remote)
+        try modelContext.save()
+
+        appModel.projectDocumentationSourceDraft = ProjectDocumentationSourceDraft(
+            projectID: project.id,
+            mode: .existingRemote,
+            remoteURLString: remoteURL,
+            displayName: "",
+            repositoryName: ""
+        )
+
+        await appModel.saveProjectDocumentationSource(in: modelContext)
+
+        #expect(project.documentationRepository == nil)
+        #expect(appModel.pendingErrorMessage?.contains("already assigned as a working repository") == true)
     }
 
     @MainActor

@@ -11,6 +11,8 @@ final class RepositoryProject {
     var namespace: RepositoryNamespace?
     @Relationship(deleteRule: .nullify, inverse: \ManagedRepository.project)
     var repositories: [ManagedRepository]
+    @Relationship(deleteRule: .nullify)
+    var documentationRepository: ManagedRepository?
 
     init(
         id: UUID = UUID(),
@@ -27,5 +29,10 @@ final class RepositoryProject {
         self.updatedAt = updatedAt
         self.namespace = namespace
         self.repositories = []
+        self.documentationRepository = nil
+    }
+
+    var hasDocumentationRepository: Bool {
+        documentationRepository != nil
     }
 }

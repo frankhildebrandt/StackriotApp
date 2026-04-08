@@ -1,9 +1,22 @@
 import Foundation
 
+enum RepositorySeedEntry: Sendable, Equatable {
+    case directory(path: String)
+    case file(path: String, contents: String)
+
+    var path: String {
+        switch self {
+        case let .directory(path), let .file(path, _):
+            path
+        }
+    }
+}
+
 enum RepositorySeedSource: Sendable {
     case npx(command: String)
     case readme(contents: String)
     case archive(fileURL: URL)
+    case entries([RepositorySeedEntry])
 }
 
 struct PublishBranchResult: Sendable, Equatable {
@@ -129,6 +142,8 @@ struct RepositoryManager {
             try contents.write(to: readmeURL, atomically: true, encoding: .utf8)
         case let .archive(fileURL):
             try await extractArchive(fileURL, into: stageURL)
+        case let .entries(entries):
+            try materializeEntries(entries, into: stageURL)
         }
 
         let resolvedSource = try resolvedSeedSourceDirectory(from: stageURL)
@@ -508,6 +523,24 @@ struct RepositoryManager {
         }
     }
 
+    private func materializeEntries(_ entries: [RepositorySeedEntry], into stageURL: URL) throws {
+        let fileManager = FileManager.default
+
+        for entry in entries {
+            let destinationURL = try seedDestinationURL(for: entry.path, in: stageURL)
+            switch entry {
+            case .directory:
+                try fileManager.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+            case let .file(_, contents):
+                try fileManager.createDirectory(
+                    at: destinationURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try contents.write(to: destinationURL, atomically: true, encoding: .utf8)
+            }
+        }
+    }
+
     private func extractArchive(_ fileURL: URL, into destinationURL: URL) async throws {
         let accessingSecurityScopedResource = fileURL.startAccessingSecurityScopedResource()
         defer {
@@ -536,6 +569,20 @@ struct RepositoryManager {
         guard result.exitCode == 0 else {
             throw StackriotError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
+    }
+
+    private func seedDestinationURL(for relativePath: String, in rootURL: URL) throws -> URL {
+        let trimmedPath = relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else {
+            throw StackriotError.commandFailed("Repository seed entries require a relative path.")
+        }
+
+        let standardizedRoot = rootURL.standardizedFileURL
+        let destinationURL = standardizedRoot.appendingPathComponent(trimmedPath, isDirectory: false).standardizedFileURL
+        guard destinationURL.path.hasPrefix(standardizedRoot.path + "/") || destinationURL == standardizedRoot else {
+            throw StackriotError.commandFailed("Repository seed entries must stay within the repository root.")
+        }
+        return destinationURL
     }
 
     private func resolvedSeedSourceDirectory(from stageURL: URL) throws -> URL {
