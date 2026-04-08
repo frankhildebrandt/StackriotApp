@@ -389,6 +389,31 @@ struct ACPAgentSnapshot: Sendable, Equatable {
     let configOptions: [ACPDiscoveredConfigOption]
 }
 
+enum ACPMetadataDiscoveryStatus: String, Sendable, Equatable {
+    case running
+    case succeeded
+    case unavailable
+    case failed
+
+    var isSuccessful: Bool { self == .succeeded }
+
+    var isRunning: Bool { self == .running }
+}
+
+struct ACPMetadataDiscoveryReport: Sendable, Equatable {
+    let tool: AIAgentTool
+    let status: ACPMetadataDiscoveryStatus
+    let executablePath: String?
+    let commandLine: String
+    let workingDirectoryPath: String
+    let environmentPath: String
+    let summary: String
+    let detail: String?
+    let startedAt: Date?
+    let finishedAt: Date?
+    let snapshot: ACPAgentSnapshot?
+}
+
 enum ACPPermissionOptionKind: String, Sendable {
     case allowOnce = "allow_once"
     case allowAlways = "allow_always"

@@ -53,6 +53,15 @@ struct LocalToolManagerTests {
         #expect(AppManagedTool.vscode.executableName == "code")
     }
 
+    @Test
+    func managedPATHEntriesIncludeAppManagedACPDirectories() {
+        let entries = ShellEnvironment.managedPATHEntries()
+
+        #expect(entries.contains(AppPaths.localToolsBinDirectory.path))
+        #expect(entries.contains(AppPaths.localToolsNPMPrefix.appendingPathComponent("bin", isDirectory: true).path))
+        #expect(entries.contains(AppPaths.localToolsCursorBinDirectory.path))
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

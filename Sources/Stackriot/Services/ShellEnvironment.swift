@@ -91,6 +91,8 @@ enum ShellEnvironment {
     static func managedPATHEntries() -> [String] {
         [
             AppPaths.localToolsBinDirectory.path,
+            AppPaths.localToolsNPMPrefix.appendingPathComponent("bin", isDirectory: true).path,
+            AppPaths.localToolsCursorBinDirectory.path,
         ]
     }
 
