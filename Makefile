@@ -40,8 +40,10 @@ production-build:
 	@mkdir -p "$(BUILD_DIR)" "$(SOURCE_PACKAGES_DIR)" "$(LOCAL_CACHE_DIR)" "$(PACKAGE_CACHE_DIR)" "$(LOCAL_TMP_DIR)" "$(LOCAL_HOME_DIR)/Library/Caches"
 	CLANG_MODULE_CACHE_PATH="$(LOCAL_CACHE_DIR)/clang" \
 	SWIFT_MODULECACHE_PATH="$(LOCAL_CACHE_DIR)/swift" \
+	SWIFTPM_MODULECACHE_OVERRIDE="$(LOCAL_CACHE_DIR)/swiftpm-modulecache" \
 	XDG_CACHE_HOME="$(LOCAL_CACHE_DIR)/xdg" \
 	HOME="$(LOCAL_HOME_DIR)" \
+	CFFIXED_USER_HOME="$(LOCAL_HOME_DIR)" \
 	TMPDIR="$(LOCAL_TMP_DIR)" \
 	xcodebuild \
 		-project "$(PROJECT)" \
@@ -55,10 +57,13 @@ production-build:
 		-onlyUsePackageVersionsFromResolvedFile \
 		CLANG_MODULE_CACHE_PATH="$(LOCAL_CACHE_DIR)/clang" \
 		SWIFT_MODULECACHE_PATH="$(LOCAL_CACHE_DIR)/swift" \
+		SWIFTPM_MODULECACHE_OVERRIDE="$(LOCAL_CACHE_DIR)/swiftpm-modulecache" \
 		XDG_CACHE_HOME="$(LOCAL_CACHE_DIR)/xdg" \
 		HOME="$(LOCAL_HOME_DIR)" \
+		CFFIXED_USER_HOME="$(LOCAL_HOME_DIR)" \
 		TMPDIR="$(LOCAL_TMP_DIR)" \
 		-skipPackagePluginValidation \
+		OTHER_SWIFT_FLAGS='$(inherited) -disable-sandbox' \
 		ONLY_ACTIVE_ARCH=NO \
 		ARCHS="arm64 x86_64" \
 		build
@@ -78,8 +83,10 @@ debug-run:
 	@mkdir -p "$(BUILD_DIR)" "$(SOURCE_PACKAGES_DIR)" "$(LOCAL_CACHE_DIR)" "$(PACKAGE_CACHE_DIR)" "$(LOCAL_TMP_DIR)" "$(LOCAL_HOME_DIR)/Library/Caches"
 	CLANG_MODULE_CACHE_PATH="$(LOCAL_CACHE_DIR)/clang" \
 	SWIFT_MODULECACHE_PATH="$(LOCAL_CACHE_DIR)/swift" \
+	SWIFTPM_MODULECACHE_OVERRIDE="$(LOCAL_CACHE_DIR)/swiftpm-modulecache" \
 	XDG_CACHE_HOME="$(LOCAL_CACHE_DIR)/xdg" \
 	HOME="$(LOCAL_HOME_DIR)" \
+	CFFIXED_USER_HOME="$(LOCAL_HOME_DIR)" \
 	TMPDIR="$(LOCAL_TMP_DIR)" \
 	xcodebuild \
 		-project "$(PROJECT)" \
@@ -92,10 +99,13 @@ debug-run:
 		-onlyUsePackageVersionsFromResolvedFile \
 		CLANG_MODULE_CACHE_PATH="$(LOCAL_CACHE_DIR)/clang" \
 		SWIFT_MODULECACHE_PATH="$(LOCAL_CACHE_DIR)/swift" \
+		SWIFTPM_MODULECACHE_OVERRIDE="$(LOCAL_CACHE_DIR)/swiftpm-modulecache" \
 		XDG_CACHE_HOME="$(LOCAL_CACHE_DIR)/xdg" \
 		HOME="$(LOCAL_HOME_DIR)" \
+		CFFIXED_USER_HOME="$(LOCAL_HOME_DIR)" \
 		TMPDIR="$(LOCAL_TMP_DIR)" \
 		-skipPackagePluginValidation \
+		OTHER_SWIFT_FLAGS='$(inherited) -disable-sandbox' \
 		build
 	@printf "Launching Debug app: %s\n" "$(DEBUG_APP_BUNDLE)"
 	@open "$(DEBUG_APP_BUNDLE)"
