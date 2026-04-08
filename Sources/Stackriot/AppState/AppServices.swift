@@ -421,6 +421,7 @@ struct AppServices {
     let mcpServerManager: MCPServerManager
     let acpDiscoveryService: ACPAgentDiscoveryService
     let rawLogArchive: AgentRawLogArchiveService
+    let projectDocumentationArchiveService: ProjectDocumentationArchiveService
     let notificationService: any AppNotificationServing
     let quickIntentContextService: any QuickIntentContextServing
     let globalHotKeyManager: any GlobalHotKeyRegistering
@@ -445,6 +446,7 @@ struct AppServices {
         mcpServerManager: MCPServerManager = MCPServerManager(),
         acpDiscoveryService: ACPAgentDiscoveryService = ACPAgentDiscoveryService(),
         rawLogArchive: AgentRawLogArchiveService = AgentRawLogArchiveService(),
+        projectDocumentationArchiveService: ProjectDocumentationArchiveService = ProjectDocumentationArchiveService(),
         notificationService: any AppNotificationServing = AppNotificationService(),
         quickIntentContextService: any QuickIntentContextServing = QuickIntentContextService(),
         globalHotKeyManager: any GlobalHotKeyRegistering = CarbonGlobalHotKeyManager()
@@ -471,6 +473,7 @@ struct AppServices {
         self.mcpServerManager = mcpServerManager
         self.acpDiscoveryService = acpDiscoveryService
         self.rawLogArchive = rawLogArchive
+        self.projectDocumentationArchiveService = projectDocumentationArchiveService
         self.notificationService = notificationService
         self.quickIntentContextService = quickIntentContextService
         self.globalHotKeyManager = globalHotKeyManager
@@ -496,6 +499,7 @@ struct AppServices {
         mcpServerManager: MCPServerManager(),
         acpDiscoveryService: ACPAgentDiscoveryService(),
         rawLogArchive: AgentRawLogArchiveService(),
+        projectDocumentationArchiveService: ProjectDocumentationArchiveService(),
         notificationService: AppNotificationService(),
         quickIntentContextService: QuickIntentContextService(),
         globalHotKeyManager: CarbonGlobalHotKeyManager()

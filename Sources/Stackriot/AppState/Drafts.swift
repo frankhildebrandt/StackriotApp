@@ -283,6 +283,31 @@ struct ProjectEditorDraft: Identifiable {
     var name = ""
 }
 
+enum ProjectDocumentationSourceMode: String, CaseIterable, Identifiable {
+    case existingRemote
+    case automaticRepository
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .existingRemote:
+            "Bestehendes Remote"
+        case .automaticRepository:
+            "Automatisch anlegen"
+        }
+    }
+}
+
+struct ProjectDocumentationSourceDraft: Identifiable {
+    var id = UUID()
+    var projectID: UUID
+    var mode: ProjectDocumentationSourceMode = .existingRemote
+    var remoteURLString = ""
+    var displayName = ""
+    var repositoryName = ""
+}
+
 struct AgentPlanDraft: Identifiable {
     enum Presentation {
         case foreground

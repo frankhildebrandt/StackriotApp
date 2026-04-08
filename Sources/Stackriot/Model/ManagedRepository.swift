@@ -16,6 +16,7 @@ final class ManagedRepository {
     var lastErrorMessage: String?
     var namespace: RepositoryNamespace?
     var project: RepositoryProject?
+    var documentationProject: RepositoryProject?
     @Relationship(deleteRule: .cascade, inverse: \RepositoryRemote.repository)
     var remotes: [RepositoryRemote]
     @Relationship(deleteRule: .cascade, inverse: \WorktreeRecord.repository)
@@ -53,6 +54,7 @@ final class ManagedRepository {
         self.lastErrorMessage = lastErrorMessage
         self.namespace = namespace
         self.project = project
+        self.documentationProject = nil
         self.remotes = []
         self.worktrees = []
         self.actionTemplates = []
@@ -78,6 +80,10 @@ final class ManagedRepository {
 
     var primaryRemote: RepositoryRemote? {
         defaultRemote
+    }
+
+    var isDocumentationRepository: Bool {
+        documentationProject != nil
     }
 
     func childWorktrees(of parent: WorktreeRecord) -> [WorktreeRecord] {

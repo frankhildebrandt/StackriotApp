@@ -68,6 +68,9 @@ struct SidebarView: View {
     let onEditProject: (RepositoryProject) -> Void
     let onMoveProject: (RepositoryProject, RepositoryNamespace) -> Void
     let onDeleteProject: (RepositoryProject) -> Void
+    let onConfigureProjectDocumentation: (RepositoryProject) -> Void
+    let onOpenProjectDocumentation: (RepositoryProject) -> Void
+    let onRemoveProjectDocumentation: (RepositoryProject) -> Void
     let onAssignRepository: (ManagedRepository, RepositoryNamespace, RepositoryProject?) -> Void
     let onAddRepository: () -> Void
     let onRefreshRepository: (ManagedRepository) -> Void
@@ -101,6 +104,7 @@ struct SidebarView: View {
                             ProjectHeaderRow(
                                 project: project,
                                 repositoryCount: layout.repositoriesByProjectID[project.id, default: []].count,
+                                documentationConfigured: project.documentationRepository != nil,
                                 isExpanded: isExpanded,
                                 onToggle: {
                                     toggleProject(project)
@@ -338,6 +342,22 @@ struct SidebarView: View {
             onEditProject(project)
         }
 
+        Divider()
+
+        Button(project.documentationRepository == nil ? "Dokumentationsquelle einrichten" : "Dokumentationsquelle verwalten") {
+            onConfigureProjectDocumentation(project)
+        }
+
+        if project.documentationRepository != nil {
+            Button("Dokumentations-Repository oeffnen") {
+                onOpenProjectDocumentation(project)
+            }
+
+            Button("Dokumentationsquelle entfernen", role: .destructive) {
+                onRemoveProjectDocumentation(project)
+            }
+        }
+
         Menu("Move To Namespace") {
             ForEach(namespaces.filter { !$0.isDefault }) { namespace in
                 Button(namespace.name) {
@@ -417,6 +437,11 @@ private struct RepositoryRow: View {
             HStack(spacing: 8) {
                 Text(repository.displayName)
                     .font(.headline)
+                if repository.isDocumentationRepository {
+                    Label("Docs", systemImage: "book.closed.fill")
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                }
                 if isAgentRunning {
                     AgentActivityDot()
                 }
@@ -474,6 +499,7 @@ private struct SidebarSectionHeader: View {
 private struct ProjectHeaderRow: View {
     let project: RepositoryProject
     let repositoryCount: Int
+    let documentationConfigured: Bool
     let isExpanded: Bool
     let onToggle: () -> Void
 
@@ -487,6 +513,12 @@ private struct ProjectHeaderRow: View {
                     .foregroundStyle(.secondary)
                 Text(project.name)
                     .font(.subheadline.weight(.semibold))
+                if documentationConfigured {
+                    Image(systemName: "book.closed.fill")
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                        .help("Dokumentationsquelle konfiguriert")
+                }
                 Spacer()
                 Text("\(repositoryCount)")
                     .font(.caption)

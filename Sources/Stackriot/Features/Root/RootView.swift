@@ -52,6 +52,13 @@ struct RootView: View {
                 onDeleteProject: { project in
                     appModel.deleteProject(project, in: modelContext)
                 },
+                onConfigureProjectDocumentation: { project in
+                    appModel.presentProjectDocumentationSourceEditor(for: project)
+                },
+                onOpenProjectDocumentation: appModel.openDocumentationRepository,
+                onRemoveProjectDocumentation: { project in
+                    appModel.removeDocumentationRepository(from: project, in: modelContext)
+                },
                 onAssignRepository: { repository, namespace, project in
                     appModel.assignRepository(repository, to: namespace, project: project, in: modelContext)
                 },
@@ -141,6 +148,9 @@ struct RootView: View {
         }
         .sheet(item: $appModel.projectEditorDraft) { draft in
             ProjectEditorSheet(draft: draft)
+        }
+        .sheet(item: $appModel.projectDocumentationSourceDraft) { draft in
+            ProjectDocumentationRepositorySheet(draft: draft)
         }
         .sheet(isPresented: $appModel.isWorktreeSheetPresented) {
             if let repository = appModel.repository(for: visibleRepositories) {

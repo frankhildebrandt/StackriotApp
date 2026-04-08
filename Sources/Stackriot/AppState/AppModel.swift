@@ -31,6 +31,7 @@ final class AppModel: @unchecked Sendable {
     var pullRequestCheckoutDraft = PullRequestCheckoutDraft()
     var namespaceEditorDraft: NamespaceEditorDraft?
     var projectEditorDraft: ProjectEditorDraft?
+    var projectDocumentationSourceDraft: ProjectDocumentationSourceDraft?
     var pendingErrorMessage: String?
     var worktreeStatuses: [UUID: WorktreeStatus] = [:]
     var pullRequestUpstreamStatuses: [UUID: PullRequestUpstreamStatus] = [:]
@@ -351,13 +352,17 @@ final class AppModel: @unchecked Sendable {
     func navigateToRun(_ run: RunRecord) {
         guard let repository = run.repository else { return }
 
+        openRepository(repository)
+
+        guard run.worktree != nil else { return }
+        selectTab(run)
+    }
+
+    func openRepository(_ repository: ManagedRepository) {
         if let namespaceID = repository.namespace?.id {
             selectedNamespaceID = namespaceID
         }
         selectedRepositoryID = repository.id
-
-        guard run.worktree != nil else { return }
-        selectTab(run)
     }
 
     func closeTab(_ run: RunRecord) {
