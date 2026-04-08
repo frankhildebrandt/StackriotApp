@@ -415,7 +415,6 @@ extension AppModel {
         let toolTemplates: [ActionTemplateRecord]
         if let worktree = worktrees(for: repository).first {
             toolTemplates = availableDevTools(for: worktree)
-                .prefix(2)
                 .map {
                     ActionTemplateRecord(
                         kind: .openIDE,

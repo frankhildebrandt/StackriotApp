@@ -220,7 +220,7 @@ struct RepositoryDetailView: View {
                     if !ideaTrees.isEmpty {
                         worktreeGroup(
                             title: "IdeaTrees",
-                            subtitle: "Leichte Worktree-Entwuerfe ohne lokalen Checkout. Materialisieren erst bei Plan/Agent/Terminal.",
+                            subtitle: "Leichte Worktree-Entwuerfe ohne lokalen Checkout. Materialisieren erst bei Bedarf, z. B. beim Oeffnen in Editor, Finder, Plan oder Terminal.",
                             worktrees: ideaTrees,
                             detailSnapshot: detailSnapshot
                         )
@@ -560,7 +560,6 @@ struct RepositoryDetailView: View {
             } label: {
                 Label("Open in \(AppPreferences.externalTerminal.displayName)", systemImage: "terminal")
             }
-            .disabled(worktree.isIdeaTree)
 
             let runConfigurations = appModel.cachedAvailableRunConfigurations(for: worktree)
             if !runConfigurations.isEmpty {
@@ -585,7 +584,6 @@ struct RepositoryDetailView: View {
             } label: {
                 Label("In Finder zeigen", systemImage: "folder")
             }
-            .disabled(worktree.isIdeaTree)
             Menu("Kartenfarbe") {
                 ForEach(WorktreeCardColor.allCases) { color in
                     Button {
