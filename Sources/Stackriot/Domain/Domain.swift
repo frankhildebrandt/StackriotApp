@@ -256,11 +256,15 @@ struct QuickIntentHotkeyConfiguration: Codable, Equatable, Sendable {
 struct AgentLaunchOptions: Sendable, Equatable {
     let copilotModelOverride: String?
     let copilotAgentOverride: String?
+    let acpModeOverride: String?
+    let acpConfigOverrides: [String: String]
     let activatesTerminalTab: Bool
 
     init(
         copilotModelOverride: String? = nil,
         copilotAgentOverride: String? = nil,
+        acpModeOverride: String? = nil,
+        acpConfigOverrides: [String: String] = [:],
         activatesTerminalTab: Bool = true
     ) {
         let trimmedOverride = copilotModelOverride?
@@ -273,6 +277,15 @@ struct AgentLaunchOptions: Sendable, Equatable {
             self.copilotModelOverride = trimmedOverride
         } else {
             self.copilotModelOverride = nil
+        }
+        self.acpModeOverride = acpModeOverride?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty
+        self.acpConfigOverrides = acpConfigOverrides.reduce(into: [:]) { partialResult, entry in
+            let key = entry.key.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = entry.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, !value.isEmpty else { return }
+            partialResult[key] = value
         }
         self.activatesTerminalTab = activatesTerminalTab
     }
@@ -287,6 +300,93 @@ enum AgentPromptCommandMode: Sendable, Equatable {
     case execute
     case plan
     case planResume(sessionID: String)
+}
+
+struct ACPAgentInfo: Sendable, Equatable {
+    let name: String
+    let title: String?
+    let version: String?
+}
+
+struct ACPAuthMethod: Identifiable, Sendable, Equatable {
+    let id: String
+    let name: String
+    let description: String?
+}
+
+struct ACPDiscoveredModel: Identifiable, Sendable, Equatable, Hashable {
+    let id: String
+    let displayName: String
+    let description: String?
+}
+
+struct ACPDiscoveredMode: Identifiable, Sendable, Equatable, Hashable {
+    let id: String
+    let displayName: String
+    let description: String?
+}
+
+enum ACPDiscoveredConfigSemanticCategory: String, Sendable {
+    case mode
+    case model
+    case thoughtLevel = "thought_level"
+    case other
+}
+
+struct ACPDiscoveredConfigValue: Identifiable, Sendable, Equatable, Hashable {
+    let value: String
+    let displayName: String
+    let description: String?
+
+    var id: String { value }
+}
+
+struct ACPDiscoveredConfigValueGroup: Identifiable, Sendable, Equatable {
+    let groupID: String?
+    let displayName: String?
+    let options: [ACPDiscoveredConfigValue]
+
+    var id: String {
+        groupID ?? displayName ?? options.map(\.value).joined(separator: "|")
+    }
+}
+
+struct ACPDiscoveredConfigOption: Identifiable, Sendable, Equatable {
+    let id: String
+    let displayName: String
+    let description: String?
+    let rawCategory: String?
+    let currentValue: String
+    let groups: [ACPDiscoveredConfigValueGroup]
+
+    var semanticCategory: ACPDiscoveredConfigSemanticCategory {
+        guard let rawCategory else { return .other }
+        return ACPDiscoveredConfigSemanticCategory(rawValue: rawCategory) ?? .other
+    }
+
+    var flatOptions: [ACPDiscoveredConfigValue] {
+        groups.flatMap(\.options)
+    }
+}
+
+struct ACPAgentSnapshot: Sendable, Equatable {
+    let tool: AIAgentTool
+    let protocolVersion: Int
+    let agentInfo: ACPAgentInfo?
+    let authMethods: [ACPAuthMethod]
+    let loadSession: Bool
+    let supportsSessionList: Bool
+    let promptSupportsEmbeddedContext: Bool
+    let promptSupportsImage: Bool
+    let promptSupportsAudio: Bool
+    let mcpSupportsHTTP: Bool
+    let mcpSupportsSSE: Bool
+    let currentSessionID: String?
+    let currentModeID: String?
+    let modes: [ACPDiscoveredMode]
+    let currentModelID: String?
+    let models: [ACPDiscoveredModel]
+    let configOptions: [ACPDiscoveredConfigOption]
 }
 
 struct CopilotModelOption: Identifiable, Sendable, Equatable, Hashable, Codable {
@@ -376,6 +476,10 @@ struct CopilotRepoAgent: Identifiable, Sendable, Equatable, Hashable {
 private struct StoredCopilotModelPreference: Codable {
     let id: String
     let displayName: String
+}
+
+private struct StoredACPToolPreference: Codable {
+    var configValues: [String: String]
 }
 
 enum RunConfigurationSource: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -697,6 +801,21 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    var acpLaunchArguments: [String]? {
+        switch self {
+        case .githubCopilot:
+            ["--acp"]
+        case .openCode:
+            ["acp"]
+        default:
+            nil
+        }
+    }
+
+    var supportsACPDiscovery: Bool {
+        acpLaunchArguments != nil
+    }
+
     var promptOutputInterpreter: RunOutputInterpreterKind? {
         switch self {
         case .claudeCode:
@@ -784,19 +903,29 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
                 displayCommandLine: "codex exec --full-auto --json --color never \(prompt.shellEscaped)"
             )
         case .githubCopilot:
-            // `--model` is only set when the user explicitly selects a concrete model.
-            let modelArguments = options.copilotModelOverride.map { ["--model", $0] } ?? []
-            let modelDisplaySuffix = options.copilotModelOverride.map { " --model \($0.shellEscaped)" } ?? ""
+            let selectedModelID = options.acpConfigOverrides["model"] ?? options.copilotModelOverride
+            let modelArguments = selectedModelID.map { ["--model", $0] } ?? []
+            let modelDisplaySuffix = selectedModelID.map { " --model \($0.shellEscaped)" } ?? ""
             let agentArguments = options.copilotAgentOverride.map { ["--agent", $0] } ?? []
             let agentDisplaySuffix = options.copilotAgentOverride.map { " --agent \($0.shellEscaped)" } ?? ""
+            let effortOverride = options.acpConfigOverrides["reasoning_effort"] ?? options.acpConfigOverrides["thought_level"]
+            let effortArguments = effortOverride.map { ["--effort", $0] } ?? []
+            let effortDisplaySuffix = effortOverride.map { " --effort \($0.shellEscaped)" } ?? ""
+            let autopilotArguments = isCopilotAutopilotMode(options.acpModeOverride) ? ["--autopilot"] : []
+            let autopilotDisplaySuffix = isCopilotAutopilotMode(options.acpModeOverride) ? " --autopilot" : ""
             return AgentPromptCommandComponents(
-                arguments: ["-p", prompt] + modelArguments + agentArguments + ["--allow-all-tools", "--output-format", "json"],
-                displayCommandLine: "copilot -p \(prompt.shellEscaped)\(modelDisplaySuffix)\(agentDisplaySuffix) --allow-all-tools --output-format json"
+                arguments: ["-p", prompt]
+                    + modelArguments
+                    + agentArguments
+                    + effortArguments
+                    + autopilotArguments
+                    + ["--allow-all-tools", "--output-format", "json"],
+                displayCommandLine: "copilot -p \(prompt.shellEscaped)\(modelDisplaySuffix)\(agentDisplaySuffix)\(effortDisplaySuffix)\(autopilotDisplaySuffix) --allow-all-tools --output-format json"
             )
         case .cursorCLI:
             return cursorPromptCommandComponents(for: prompt, mode: .execute)
         case .openCode:
-            return openCodePromptCommandComponents(for: prompt, mode: .execute)
+            return openCodePromptCommandComponents(for: prompt, mode: .execute, options: options)
         }
     }
 
@@ -825,7 +954,7 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         case .cursorCLI:
             return cursorPromptCommandComponents(for: prompt, mode: .plan)
         case .openCode:
-            return openCodePromptCommandComponents(for: prompt, mode: .plan)
+            return openCodePromptCommandComponents(for: prompt, mode: .plan, options: options)
         case .none:
             return nil
         }
@@ -854,7 +983,7 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         case .cursorCLI:
             return cursorPromptCommandComponents(for: prompt, mode: .planResume(sessionID: sessionID))
         case .openCode:
-            return openCodePromptCommandComponents(for: prompt, mode: .planResume(sessionID: sessionID))
+            return openCodePromptCommandComponents(for: prompt, mode: .planResume(sessionID: sessionID), options: AgentLaunchOptions())
         default:
             return nil
         }
@@ -899,14 +1028,23 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
 
     private func openCodePromptCommandComponents(
         for prompt: String,
-        mode: AgentPromptCommandMode
+        mode: AgentPromptCommandMode,
+        options: AgentLaunchOptions
     ) -> AgentPromptCommandComponents {
         var arguments = ["run"]
         var displayCommand = "opencode run"
 
+        if let modelID = options.acpConfigOverrides["model"]?.nonEmpty {
+            arguments += ["--model", modelID]
+            displayCommand += " --model \(modelID.shellEscaped)"
+        }
+
         switch mode {
         case .execute:
-            break
+            if isOpenCodePlanMode(options.acpModeOverride) {
+                arguments += ["--agent", "plan"]
+                displayCommand += " --agent plan"
+            }
         case .plan:
             arguments += ["--agent", "plan"]
             displayCommand += " --agent plan"
@@ -926,6 +1064,16 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         }
         displayCommand += " --format json \(displayPrompt)"
         return AgentPromptCommandComponents(arguments: arguments, displayCommandLine: displayCommand)
+    }
+
+    private func isCopilotAutopilotMode(_ modeID: String?) -> Bool {
+        guard let normalized = modeID?.lowercased() else { return false }
+        return normalized == "autopilot" || normalized.hasSuffix("#autopilot")
+    }
+
+    private func isOpenCodePlanMode(_ modeID: String?) -> Bool {
+        guard let normalized = modeID?.lowercased() else { return false }
+        return normalized == "plan" || normalized.hasSuffix("#plan")
     }
 }
 
@@ -1763,6 +1911,7 @@ enum AppPreferences {
     static let aiModelKey = "ai.model"
     static let copilotModelsKey = "copilot.models"
     static let copilotDefaultModelIDKey = "copilot.defaultModelID"
+    static let acpToolPreferencesKey = "agentCLI.acp.preferences"
     static let jiraBaseURLKey = "jira.baseURL"
     static let jiraUserEmailKey = "jira.userEmail"
     static let mcpEnabledKey = "mcp.enabled"
@@ -2008,6 +2157,58 @@ enum AppPreferences {
     static func setDefaultCopilotModelID(_ modelID: String) {
         let validatedModelID = validatedCopilotModelID(modelID, availableModels: copilotModelOptions)
         UserDefaults.standard.set(validatedModelID, forKey: copilotDefaultModelIDKey)
+    }
+
+    static func defaultACPConfigValue(
+        for tool: AIAgentTool,
+        configOption: ACPDiscoveredConfigOption,
+        fallbackValue: String? = nil
+    ) -> String {
+        let storedValues = acpStoredPreferences()[tool.rawValue]?.configValues ?? [:]
+        let candidate = storedValues[configOption.id] ?? fallbackValue
+        return validatedACPConfigValue(candidate, for: configOption)
+    }
+
+    static func setDefaultACPConfigValue(
+        _ value: String?,
+        for tool: AIAgentTool,
+        configOption: ACPDiscoveredConfigOption
+    ) {
+        var stored = acpStoredPreferences()
+        var preference = stored[tool.rawValue] ?? StoredACPToolPreference(configValues: [:])
+        preference.configValues[configOption.id] = validatedACPConfigValue(value, for: configOption)
+        stored[tool.rawValue] = preference
+        persistACPStoredPreferences(stored)
+    }
+
+    static func validatedACPConfigValue(_ candidate: String?, for configOption: ACPDiscoveredConfigOption) -> String {
+        let trimmedCandidate = candidate?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let values = configOption.flatOptions.map(\.value)
+        if let trimmedCandidate, values.contains(trimmedCandidate) {
+            return trimmedCandidate
+        }
+        if values.contains(configOption.currentValue) {
+            return configOption.currentValue
+        }
+        return values.first ?? configOption.currentValue
+    }
+
+    private static func acpStoredPreferences() -> [String: StoredACPToolPreference] {
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: acpToolPreferencesKey) else {
+            return [:]
+        }
+        return (try? JSONDecoder().decode([String: StoredACPToolPreference].self, from: data)) ?? [:]
+    }
+
+    private static func persistACPStoredPreferences(_ preferences: [String: StoredACPToolPreference]) {
+        let defaults = UserDefaults.standard
+        do {
+            let data = try JSONEncoder().encode(preferences)
+            defaults.set(data, forKey: acpToolPreferencesKey)
+        } catch {
+            defaults.removeObject(forKey: acpToolPreferencesKey)
+        }
     }
 
     static var jiraBaseURL: String {

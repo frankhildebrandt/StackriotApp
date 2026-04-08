@@ -419,6 +419,7 @@ struct AppServices {
     let runConfigurationDiscovery: RunConfigurationDiscoveryService
     let devContainerService: DevContainerService
     let mcpServerManager: MCPServerManager
+    let acpDiscoveryService: ACPAgentDiscoveryService
     let rawLogArchive: AgentRawLogArchiveService
     let notificationService: any AppNotificationServing
     let quickIntentContextService: any QuickIntentContextServing
@@ -442,6 +443,7 @@ struct AppServices {
         runConfigurationDiscovery: RunConfigurationDiscoveryService = RunConfigurationDiscoveryService(),
         devContainerService: DevContainerService? = nil,
         mcpServerManager: MCPServerManager = MCPServerManager(),
+        acpDiscoveryService: ACPAgentDiscoveryService = ACPAgentDiscoveryService(),
         rawLogArchive: AgentRawLogArchiveService = AgentRawLogArchiveService(),
         notificationService: any AppNotificationServing = AppNotificationService(),
         quickIntentContextService: any QuickIntentContextServing = QuickIntentContextService(),
@@ -467,6 +469,7 @@ struct AppServices {
         self.runConfigurationDiscovery = runConfigurationDiscovery
         self.devContainerService = devContainerService ?? DevContainerService(localToolManager: localToolManager)
         self.mcpServerManager = mcpServerManager
+        self.acpDiscoveryService = acpDiscoveryService
         self.rawLogArchive = rawLogArchive
         self.notificationService = notificationService
         self.quickIntentContextService = quickIntentContextService
@@ -491,6 +494,7 @@ struct AppServices {
         runConfigurationDiscovery: RunConfigurationDiscoveryService(),
         devContainerService: nil,
         mcpServerManager: MCPServerManager(),
+        acpDiscoveryService: ACPAgentDiscoveryService(),
         rawLogArchive: AgentRawLogArchiveService(),
         notificationService: AppNotificationService(),
         quickIntentContextService: QuickIntentContextService(),

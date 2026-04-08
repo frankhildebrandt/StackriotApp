@@ -222,3 +222,310 @@ final class LocalToolManager {
         }
     }
 }
+
+actor ACPAgentDiscoveryService {
+    func snapshots(for tools: Set<AIAgentTool>, workingDirectoryURL: URL) async -> [AIAgentTool: ACPAgentSnapshot] {
+        await withTaskGroup(of: (AIAgentTool, ACPAgentSnapshot?).self) { group in
+            for tool in tools where tool.supportsACPDiscovery {
+                group.addTask { [workingDirectoryURL] in
+                    let snapshot = await self.snapshot(for: tool, workingDirectoryURL: workingDirectoryURL)
+                    return (tool, snapshot)
+                }
+            }
+
+            var snapshots: [AIAgentTool: ACPAgentSnapshot] = [:]
+            for await (tool, snapshot) in group {
+                if let snapshot {
+                    snapshots[tool] = snapshot
+                }
+            }
+            return snapshots
+        }
+    }
+
+    func snapshot(for tool: AIAgentTool, workingDirectoryURL: URL) async -> ACPAgentSnapshot? {
+        guard let executable = tool.executableName,
+              let acpArguments = tool.acpLaunchArguments else {
+            return nil
+        }
+
+        return try? await Task.detached(priority: .utility) {
+            let transport = try ACPJSONRPCTransport(
+                executable: executable,
+                arguments: acpArguments,
+                currentDirectoryURL: workingDirectoryURL
+            )
+            defer { transport.terminate() }
+
+            let initializeResponse = try await transport.request(
+                method: "initialize",
+                params: [
+                    "protocolVersion": 1,
+                    "clientCapabilities": [
+                        "fs": [
+                            "readTextFile": false,
+                            "writeTextFile": false,
+                        ],
+                        "terminal": false,
+                    ],
+                    "clientInfo": [
+                        "name": "Stackriot",
+                        "version": "1.0.21",
+                    ],
+                ]
+            )
+            let sessionResponse = try await transport.request(
+                method: "session/new",
+                params: [
+                    "cwd": workingDirectoryURL.path,
+                    "mcpServers": [],
+                ]
+            )
+
+            return Self.parseSnapshot(
+                tool: tool,
+                initializeResponse: initializeResponse,
+                sessionResponse: sessionResponse
+            )
+        }.value
+    }
+
+    private static func parseSnapshot(
+        tool: AIAgentTool,
+        initializeResponse: [String: Any],
+        sessionResponse: [String: Any]
+    ) -> ACPAgentSnapshot? {
+        guard let initializeResult = initializeResponse["result"] as? [String: Any],
+              let protocolVersion = initializeResult["protocolVersion"] as? Int,
+              let sessionResult = sessionResponse["result"] as? [String: Any] else {
+            return nil
+        }
+
+        let agentCapabilities = initializeResult["agentCapabilities"] as? [String: Any] ?? [:]
+        let promptCapabilities = agentCapabilities["promptCapabilities"] as? [String: Any] ?? [:]
+        let sessionCapabilities = agentCapabilities["sessionCapabilities"] as? [String: Any] ?? [:]
+        let mcpCapabilities = agentCapabilities["mcpCapabilities"] as? [String: Any] ?? [:]
+        let agentInfo = parseAgentInfo(initializeResult["agentInfo"] as? [String: Any])
+        let authMethods = parseAuthMethods(initializeResult["authMethods"] as? [[String: Any]] ?? [])
+
+        let modes = parseModes(from: sessionResult["modes"] as? [String: Any])
+        let configOptions = parseConfigOptions(from: sessionResult["configOptions"] as? [[String: Any]] ?? [])
+        let modelsPayload = sessionResult["models"] as? [String: Any]
+        let models = parseModels(from: modelsPayload)
+
+        return ACPAgentSnapshot(
+            tool: tool,
+            protocolVersion: protocolVersion,
+            agentInfo: agentInfo,
+            authMethods: authMethods,
+            loadSession: (agentCapabilities["loadSession"] as? Bool) ?? false,
+            supportsSessionList: sessionCapabilities["list"] != nil,
+            promptSupportsEmbeddedContext: (promptCapabilities["embeddedContext"] as? Bool) ?? false,
+            promptSupportsImage: (promptCapabilities["image"] as? Bool) ?? false,
+            promptSupportsAudio: (promptCapabilities["audio"] as? Bool) ?? false,
+            mcpSupportsHTTP: (mcpCapabilities["http"] as? Bool) ?? false,
+            mcpSupportsSSE: (mcpCapabilities["sse"] as? Bool) ?? false,
+            currentSessionID: sessionResult["sessionId"] as? String,
+            currentModeID: (sessionResult["modes"] as? [String: Any])?["currentModeId"] as? String,
+            modes: modes,
+            currentModelID: modelsPayload?["currentModelId"] as? String,
+            models: models,
+            configOptions: configOptions
+        )
+    }
+
+    private static func parseAgentInfo(_ payload: [String: Any]?) -> ACPAgentInfo? {
+        guard let payload, let name = payload["name"] as? String else {
+            return nil
+        }
+        return ACPAgentInfo(
+            name: name,
+            title: payload["title"] as? String,
+            version: payload["version"] as? String
+        )
+    }
+
+    private static func parseAuthMethods(_ payload: [[String: Any]]) -> [ACPAuthMethod] {
+        payload.compactMap { entry in
+            guard let id = entry["id"] as? String,
+                  let name = entry["name"] as? String else {
+                return nil
+            }
+            return ACPAuthMethod(id: id, name: name, description: entry["description"] as? String)
+        }
+    }
+
+    private static func parseModes(from payload: [String: Any]?) -> [ACPDiscoveredMode] {
+        guard let availableModes = payload?["availableModes"] as? [[String: Any]] else {
+            return []
+        }
+        return availableModes.compactMap { entry in
+            guard let id = entry["id"] as? String,
+                  let name = entry["name"] as? String else {
+                return nil
+            }
+            return ACPDiscoveredMode(id: id, displayName: name, description: entry["description"] as? String)
+        }
+    }
+
+    private static func parseModels(from payload: [String: Any]?) -> [ACPDiscoveredModel] {
+        guard let availableModels = payload?["availableModels"] as? [[String: Any]] else {
+            return []
+        }
+        return availableModels.compactMap { entry in
+            guard let id = entry["modelId"] as? String,
+                  let name = entry["name"] as? String else {
+                return nil
+            }
+            return ACPDiscoveredModel(id: id, displayName: name, description: entry["description"] as? String)
+        }
+    }
+
+    private static func parseConfigOptions(from payload: [[String: Any]]) -> [ACPDiscoveredConfigOption] {
+        payload.compactMap { entry in
+            guard let id = entry["id"] as? String,
+                  let name = entry["name"] as? String,
+                  let currentValue = entry["currentValue"] as? String else {
+                return nil
+            }
+            let groups = parseConfigValueGroups(from: entry["options"])
+            guard groups.isEmpty == false else { return nil }
+            return ACPDiscoveredConfigOption(
+                id: id,
+                displayName: name,
+                description: entry["description"] as? String,
+                rawCategory: entry["category"] as? String,
+                currentValue: currentValue,
+                groups: groups
+            )
+        }
+    }
+
+    private static func parseConfigValueGroups(from payload: Any?) -> [ACPDiscoveredConfigValueGroup] {
+        if let options = payload as? [[String: Any]], options.first?["value"] != nil {
+            let values = options.compactMap(parseConfigValue(_:))
+            return values.isEmpty ? [] : [ACPDiscoveredConfigValueGroup(groupID: nil, displayName: nil, options: values)]
+        }
+
+        guard let groups = payload as? [[String: Any]] else {
+            return []
+        }
+        return groups.compactMap { entry in
+            guard let options = entry["options"] as? [[String: Any]] else {
+                return nil
+            }
+            let values = options.compactMap(parseConfigValue(_:))
+            guard values.isEmpty == false else { return nil }
+            return ACPDiscoveredConfigValueGroup(
+                groupID: entry["group"] as? String,
+                displayName: entry["name"] as? String,
+                options: values
+            )
+        }
+    }
+
+    private static func parseConfigValue(_ payload: [String: Any]) -> ACPDiscoveredConfigValue? {
+        guard let value = payload["value"] as? String,
+              let name = payload["name"] as? String else {
+            return nil
+        }
+        return ACPDiscoveredConfigValue(value: value, displayName: name, description: payload["description"] as? String)
+    }
+}
+
+private final class ACPJSONRPCTransport {
+    private let process: Process
+    private let stdinHandle: FileHandle
+    private let stdoutHandle: FileHandle
+    private let stderrDrainer: Task<Void, Never>
+    private var bytesIterator: FileHandle.AsyncBytes.Iterator
+    private var bufferedData = Data()
+    private var nextRequestID = 1
+
+    init(executable: String, arguments: [String], currentDirectoryURL: URL) throws {
+        process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = [executable] + arguments
+        process.currentDirectoryURL = currentDirectoryURL
+
+        let stdinPipe = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardInput = stdinPipe
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        stdinHandle = stdinPipe.fileHandleForWriting
+        stdoutHandle = stdoutPipe.fileHandleForReading
+        bytesIterator = stdoutHandle.bytes.makeAsyncIterator()
+        stderrDrainer = Task.detached(priority: .background) {
+            var iterator = stderrPipe.fileHandleForReading.bytes.makeAsyncIterator()
+            while (try? await iterator.next()) != nil {}
+        }
+
+        try process.run()
+    }
+
+    func terminate() {
+        stderrDrainer.cancel()
+        if process.isRunning {
+            process.terminate()
+        }
+        try? stdinHandle.close()
+        try? stdoutHandle.close()
+    }
+
+    func request(method: String, params: [String: Any]) async throws -> [String: Any] {
+        let requestID = nextRequestID
+        nextRequestID += 1
+
+        let request: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": requestID,
+            "method": method,
+            "params": params,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: request)
+        stdinHandle.write(data)
+        stdinHandle.write(Data("\n".utf8))
+
+        return try await waitForResponse(requestID: requestID)
+    }
+
+    private func waitForResponse(requestID: Int) async throws -> [String: Any] {
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            if let message = try await nextJSONMessage() {
+                if let id = message["id"] as? Int, id == requestID {
+                    return message
+                }
+            } else if !process.isRunning {
+                break
+            }
+        }
+        throw StackriotError.commandFailed("ACP discovery timed out.")
+    }
+
+    private func nextJSONMessage() async throws -> [String: Any]? {
+        while true {
+            if let newlineRange = bufferedData.firstRange(of: Data([0x0A])) {
+                let lineData = bufferedData[..<newlineRange.lowerBound]
+                bufferedData.removeSubrange(..<newlineRange.upperBound)
+                guard !lineData.isEmpty else { continue }
+                guard let json = try JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                    continue
+                }
+                return json
+            }
+
+            guard let nextByte = try await waitForNextByte() else {
+                return nil
+            }
+            bufferedData.append(nextByte)
+        }
+    }
+
+    private func waitForNextByte() async throws -> UInt8? {
+        try await bytesIterator.next()
+    }
+}

@@ -237,13 +237,14 @@ extension AppModel {
         _ = await launchAgent(tool, for: worktree, in: modelContext, initialPrompt: promptText, options: options)
     }
 
-    func prepareCopilotExecutionWithPlan(
+    func prepareAgentExecutionWithPlan(
+        _ tool: AIAgentTool,
         for worktree: WorktreeRecord,
         in repository: ManagedRepository,
         options: AgentLaunchOptions = AgentLaunchOptions()
     ) async {
-        guard availableAgents.contains(.githubCopilot) else {
-            pendingErrorMessage = "GitHub Copilot is not available on this machine."
+        guard availableAgents.contains(tool) else {
+            pendingErrorMessage = "\(tool.displayName) is not available on this machine."
             return
         }
         if worktree.isIdeaTree {
@@ -260,26 +261,69 @@ extension AppModel {
             pendingErrorMessage = "\(prompt.sourceTitle) is empty."
             return
         }
-        let repoAgents: [CopilotRepoAgent]
-        do {
-            repoAgents = try availableCopilotRepoAgents(for: worktree)
-        } catch {
-            pendingErrorMessage = "Failed to read Copilot repo agents: \(error.localizedDescription)"
+
+        if let draft = makePendingAgentExecutionDraft(
+            purpose: .execution,
+            tool: tool,
+            worktree: worktree,
+            repository: repository,
+            promptSourceTitle: prompt.sourceTitle,
+            promptText: prompt.text,
+            activatesTerminalTab: options.activatesTerminalTab
+        ) {
+            pendingAgentExecutionDraft = draft
             return
         }
 
-        pendingCopilotExecutionDraft = PendingAgentExecutionDraft(
-            purpose: .execution,
-            tool: .githubCopilot,
-            worktreeID: worktree.id,
-            repositoryID: repository.id,
-            promptSourceTitle: prompt.sourceTitle,
-            promptText: prompt.text,
-            activatesTerminalTab: options.activatesTerminalTab,
-            availableCopilotModels: AppPreferences.copilotModelOptions,
-            selectedCopilotModelID: AppPreferences.defaultCopilotModelID,
-            availableCopilotRepoAgents: repoAgents,
-            selectedCopilotRepoAgentID: nil
+        if let modelContext = storedModelContext {
+            await launchAgentWithPlan(tool, for: worktree, in: modelContext, options: options, promptOverride: prompt.text)
+        } else {
+            pendingErrorMessage = "The model context is unavailable."
+        }
+    }
+
+    func prepareCopilotExecutionWithPlan(
+        for worktree: WorktreeRecord,
+        in repository: ManagedRepository,
+        options: AgentLaunchOptions = AgentLaunchOptions()
+    ) async {
+        await prepareAgentExecutionWithPlan(.githubCopilot, for: worktree, in: repository, options: options)
+    }
+
+    func prepareAgentPlanningWithIntent(
+        _ tool: AIAgentTool,
+        for worktree: WorktreeRecord,
+        in repository: ManagedRepository,
+        currentIntentText: String,
+        modelContext: ModelContext
+    ) async {
+        guard availableAgents.contains(tool) else {
+            pendingErrorMessage = "\(tool.displayName) is not available on this machine."
+            return
+        }
+        guard !worktree.isDefaultBranchWorkspace else { return }
+        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil else { return }
+
+        let trimmedIntent = currentIntentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let draft = makePendingAgentExecutionDraft(
+            purpose: .planning,
+            tool: tool,
+            worktree: worktree,
+            repository: repository,
+            promptSourceTitle: "Intent",
+            promptText: trimmedIntent,
+            activatesTerminalTab: true
+        ) {
+            pendingAgentExecutionDraft = draft
+            return
+        }
+
+        await startAgentPlanDraft(
+            using: tool,
+            for: worktree,
+            in: repository,
+            currentIntentText: trimmedIntent,
+            modelContext: modelContext
         )
     }
 
@@ -289,64 +333,65 @@ extension AppModel {
         currentIntentText: String,
         modelContext: ModelContext
     ) async {
-        guard availableAgents.contains(.githubCopilot) else {
-            pendingErrorMessage = "GitHub Copilot is not available on this machine."
-            return
-        }
-        guard !worktree.isDefaultBranchWorkspace else { return }
-        guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil else { return }
-        let repoAgents: [CopilotRepoAgent]
-        do {
-            repoAgents = try availableCopilotRepoAgents(for: worktree)
-        } catch {
-            pendingErrorMessage = "Failed to read Copilot repo agents: \(error.localizedDescription)"
-            return
-        }
-
-        let trimmedIntent = currentIntentText.trimmingCharacters(in: .whitespacesAndNewlines)
-        pendingCopilotExecutionDraft = PendingAgentExecutionDraft(
-            purpose: .planning,
-            tool: .githubCopilot,
-            worktreeID: worktree.id,
-            repositoryID: repository.id,
-            promptSourceTitle: "Intent",
-            promptText: trimmedIntent,
-            activatesTerminalTab: true,
-            availableCopilotModels: AppPreferences.copilotModelOptions,
-            selectedCopilotModelID: AppPreferences.defaultCopilotModelID,
-            availableCopilotRepoAgents: repoAgents,
-            selectedCopilotRepoAgentID: nil
+        await prepareAgentPlanningWithIntent(
+            .githubCopilot,
+            for: worktree,
+            in: repository,
+            currentIntentText: currentIntentText,
+            modelContext: modelContext
         )
     }
 
-    func dismissPendingCopilotExecutionDraft() {
-        pendingCopilotExecutionDraft = nil
+    func dismissPendingAgentExecutionDraft() {
+        pendingAgentExecutionDraft = nil
     }
 
-    func executePendingCopilotExecution(in modelContext: ModelContext) {
-        guard let draft = pendingCopilotExecutionDraft else { return }
+    func dismissPendingCopilotExecutionDraft() {
+        dismissPendingAgentExecutionDraft()
+    }
+
+    func executePendingAgentExecution(in modelContext: ModelContext) {
+        guard let draft = pendingAgentExecutionDraft else { return }
         guard let worktree = worktreeRecord(with: draft.worktreeID) else {
-            pendingCopilotExecutionDraft = nil
+            pendingAgentExecutionDraft = nil
             pendingErrorMessage = StackriotError.worktreeUnavailable.localizedDescription
             return
         }
 
-        let selectedModel = draft.availableCopilotModels.first(where: { $0.id == draft.selectedCopilotModelID })
         let selectedRepoAgentID = draft.selectedCopilotRepoAgentID.flatMap { selectedID in
             draft.availableCopilotRepoAgents.contains(where: { $0.id == selectedID }) ? selectedID : nil
         }
+        let configOptionsByID = Dictionary(uniqueKeysWithValues: draft.availableConfigOptions.map { ($0.id, $0) })
+        let selectedConfigValues: [String: String] = draft.selectedConfigValues.reduce(into: [:]) { partialResult, entry in
+            guard let option = configOptionsByID[entry.key] else { return }
+            partialResult[entry.key] = AppPreferences.validatedACPConfigValue(entry.value, for: option)
+        }
+        if let modelOption = configOptionsByID["model"], draft.tool == .githubCopilot {
+            let selectedModelID = AppPreferences.validatedACPConfigValue(
+                selectedConfigValues["model"],
+                for: modelOption
+            )
+            AppPreferences.setDefaultCopilotModelID(selectedModelID)
+        }
+        for option in draft.availableConfigOptions {
+            if let selectedValue = selectedConfigValues[option.id] {
+                AppPreferences.setDefaultACPConfigValue(selectedValue, for: draft.tool, configOption: option)
+            }
+        }
+
         let options = AgentLaunchOptions(
-            copilotModelOverride: selectedModel?.isAuto == false ? selectedModel?.id : nil,
             copilotAgentOverride: selectedRepoAgentID,
+            acpModeOverride: effectiveModeOverride(for: draft),
+            acpConfigOverrides: selectedConfigValues,
             activatesTerminalTab: draft.activatesTerminalTab
         )
 
-        pendingCopilotExecutionDraft = nil
+        pendingAgentExecutionDraft = nil
         Task {
             switch draft.purpose {
             case .execution:
                 await launchAgentWithPlan(
-                    .githubCopilot,
+                    draft.tool,
                     for: worktree,
                     in: modelContext,
                     options: options,
@@ -358,7 +403,7 @@ extension AppModel {
                     return
                 }
                 await startAgentPlanDraft(
-                    using: .githubCopilot,
+                    using: draft.tool,
                     for: worktree,
                     in: repository,
                     currentIntentText: draft.promptText,
@@ -369,9 +414,179 @@ extension AppModel {
         }
     }
 
+    func executePendingCopilotExecution(in modelContext: ModelContext) {
+        executePendingAgentExecution(in: modelContext)
+    }
+
     private func availableCopilotRepoAgents(for worktree: WorktreeRecord) throws -> [CopilotRepoAgent] {
         guard let worktreeURL = worktree.materializedURL else { return [] }
         return try CopilotRepoAgent.discover(in: worktreeURL)
+    }
+
+    private func makePendingAgentExecutionDraft(
+        purpose: PendingAgentExecutionPurpose,
+        tool: AIAgentTool,
+        worktree: WorktreeRecord,
+        repository: ManagedRepository,
+        promptSourceTitle: String,
+        promptText: String,
+        activatesTerminalTab: Bool
+    ) -> PendingAgentExecutionDraft? {
+        let availableModes = launchableModes(for: tool, purpose: purpose)
+        let availableConfigOptions = launchableConfigOptions(for: tool)
+        let repoAgents: [CopilotRepoAgent]
+        do {
+            repoAgents = tool == .githubCopilot ? try availableCopilotRepoAgents(for: worktree) : []
+        } catch {
+            pendingErrorMessage = "Failed to read \(tool.displayName) repo configuration: \(error.localizedDescription)"
+            return nil
+        }
+
+        guard availableModes.isEmpty == false || availableConfigOptions.isEmpty == false || repoAgents.isEmpty == false || tool == .githubCopilot else {
+            return nil
+        }
+
+        let selectedModeID = purpose == .execution ? defaultModeSelection(for: tool, availableModes: availableModes) : nil
+        let selectedConfigValues = defaultConfigSelections(for: tool, configOptions: availableConfigOptions)
+
+        return PendingAgentExecutionDraft(
+            purpose: purpose,
+            tool: tool,
+            worktreeID: worktree.id,
+            repositoryID: repository.id,
+            promptSourceTitle: promptSourceTitle,
+            promptText: promptText,
+            activatesTerminalTab: activatesTerminalTab,
+            availableModes: availableModes,
+            selectedModeID: selectedModeID,
+            availableConfigOptions: availableConfigOptions,
+            selectedConfigValues: selectedConfigValues,
+            availableCopilotRepoAgents: repoAgents,
+            selectedCopilotRepoAgentID: nil
+        )
+    }
+
+    private func defaultModeSelection(for tool: AIAgentTool, availableModes: [ACPDiscoveredMode]) -> String? {
+        guard let snapshot = acpAgentSnapshotsByTool[tool] else { return nil }
+        let currentModeID = snapshot.currentModeID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let currentModeID, availableModes.contains(where: { $0.id == currentModeID }) {
+            return currentModeID
+        }
+        return availableModes.first?.id
+    }
+
+    private func defaultConfigSelections(
+        for tool: AIAgentTool,
+        configOptions: [ACPDiscoveredConfigOption]
+    ) -> [String: String] {
+        configOptions.reduce(into: [:]) { partialResult, option in
+            let fallbackValue: String?
+            if tool == .githubCopilot, option.id == "model" {
+                fallbackValue = AppPreferences.defaultCopilotModelID
+            } else {
+                fallbackValue = nil
+            }
+            partialResult[option.id] = AppPreferences.defaultACPConfigValue(
+                for: tool,
+                configOption: option,
+                fallbackValue: fallbackValue
+            )
+        }
+    }
+
+    private func launchableModes(
+        for tool: AIAgentTool,
+        purpose: PendingAgentExecutionPurpose
+    ) -> [ACPDiscoveredMode] {
+        guard purpose == .execution else { return [] }
+        let modes = acpAgentSnapshotsByTool[tool]?.modes ?? []
+        return modes.filter { mode in
+            switch tool {
+            case .githubCopilot:
+                let id = mode.id.lowercased()
+                return id.hasSuffix("#agent") || id.hasSuffix("#autopilot")
+                    || id == "agent" || id == "autopilot"
+            case .openCode:
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
+    private func launchableConfigOptions(for tool: AIAgentTool) -> [ACPDiscoveredConfigOption] {
+        let snapshot = acpAgentSnapshotsByTool[tool]
+        var configOptions = snapshot?.configOptions ?? []
+
+        if let synthesizedModelOption = synthesizedModelConfigOption(for: tool, snapshot: snapshot) {
+            configOptions.removeAll { $0.semanticCategory == .model || $0.id == "model" }
+            configOptions.insert(synthesizedModelOption, at: 0)
+        }
+
+        return configOptions.filter { option in
+            switch tool {
+            case .githubCopilot:
+                option.id == "model" || option.id == "reasoning_effort" || option.semanticCategory == .thoughtLevel
+            case .openCode:
+                option.id == "model" || option.semanticCategory == .model
+            default:
+                false
+            }
+        }
+    }
+
+    private func synthesizedModelConfigOption(
+        for tool: AIAgentTool,
+        snapshot: ACPAgentSnapshot?
+    ) -> ACPDiscoveredConfigOption? {
+        switch tool {
+        case .githubCopilot:
+            let discoveredModels = snapshot?.models.map {
+                ACPDiscoveredConfigValue(value: $0.id, displayName: $0.displayName, description: $0.description)
+            } ?? AppPreferences.copilotModelOptions.map {
+                ACPDiscoveredConfigValue(value: $0.id, displayName: $0.displayName, description: nil)
+            }
+            let autoOption = ACPDiscoveredConfigValue(value: CopilotModelOption.auto.id, displayName: CopilotModelOption.auto.displayName, description: nil)
+            let deduplicated = ([autoOption] + discoveredModels).reduce(into: [ACPDiscoveredConfigValue]()) { partialResult, option in
+                if partialResult.contains(where: { $0.value == option.value }) == false {
+                    partialResult.append(option)
+                }
+            }
+            guard deduplicated.isEmpty == false else { return nil }
+            return ACPDiscoveredConfigOption(
+                id: "model",
+                displayName: "Model",
+                description: "Preferred default model for prompt-mode runs.",
+                rawCategory: ACPDiscoveredConfigSemanticCategory.model.rawValue,
+                currentValue: snapshot?.currentModelID ?? CopilotModelOption.auto.id,
+                groups: [ACPDiscoveredConfigValueGroup(groupID: nil, displayName: nil, options: deduplicated)]
+            )
+        case .openCode:
+            let discoveredModels = snapshot?.models.map {
+                ACPDiscoveredConfigValue(value: $0.id, displayName: $0.displayName, description: $0.description)
+            } ?? []
+            guard discoveredModels.isEmpty == false else { return nil }
+            return ACPDiscoveredConfigOption(
+                id: "model",
+                displayName: "Model",
+                description: "ACP-discovered OpenCode model catalog.",
+                rawCategory: ACPDiscoveredConfigSemanticCategory.model.rawValue,
+                currentValue: snapshot?.currentModelID ?? discoveredModels[0].value,
+                groups: [ACPDiscoveredConfigValueGroup(groupID: nil, displayName: nil, options: discoveredModels)]
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func effectiveModeOverride(for draft: PendingAgentExecutionDraft) -> String? {
+        guard let selectedModeID = draft.selectedModeID?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty else {
+            return nil
+        }
+        guard draft.availableModes.contains(where: { $0.id == selectedModeID }) else {
+            return nil
+        }
+        return selectedModeID
     }
 
     func availablePlanningAgents() -> [AIAgentTool] {
