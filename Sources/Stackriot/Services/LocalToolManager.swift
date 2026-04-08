@@ -213,6 +213,36 @@ final class LocalToolManager {
 }
 
 actor ACPAgentDiscoveryService {
+    typealias ReportProvider = @Sendable (
+        AIAgentTool,
+        URL,
+        [String: String],
+        String,
+        Date,
+        TimeInterval
+    ) async -> ACPMetadataDiscoveryReport
+
+    private let environmentProvider: @Sendable () async -> [String: String]
+    private let pathProvider: @Sendable () async -> String
+    private let requestTimeout: TimeInterval
+    private let reportProvider: ReportProvider?
+
+    init(
+        environmentProvider: @escaping @Sendable () async -> [String: String] = {
+            await ShellEnvironment.resolvedEnvironment(includeAppManagedPaths: true)
+        },
+        pathProvider: @escaping @Sendable () async -> String = {
+            await ShellEnvironment.loginShellPath(includeAppManagedPaths: true)
+        },
+        requestTimeout: TimeInterval = 20,
+        reportProvider: ReportProvider? = nil
+    ) {
+        self.environmentProvider = environmentProvider
+        self.pathProvider = pathProvider
+        self.requestTimeout = requestTimeout
+        self.reportProvider = reportProvider
+    }
+
     func snapshots(for tools: Set<AIAgentTool>, workingDirectoryURL: URL) async -> [AIAgentTool: ACPAgentSnapshot] {
         let reports = await reports(for: tools, workingDirectoryURL: workingDirectoryURL)
         return reports.reduce(into: [:]) { partialResult, entry in
@@ -229,51 +259,53 @@ actor ACPAgentDiscoveryService {
         workingDirectoryURL: URL,
         onUpdate: UpdateHandler? = nil
     ) async -> [AIAgentTool: ACPMetadataDiscoveryReport] {
-        let environment = await ShellEnvironment.resolvedEnvironment(includeAppManagedPaths: true)
-        let path = environment["PATH"] ?? ""
+        let environment = await environmentProvider()
+        let path = await pathProvider()
         let discoveryTools = AIAgentTool.allCases.filter { tools.contains($0) && $0.supportsACPDiscovery }
 
-        return await withTaskGroup(of: (AIAgentTool, ACPMetadataDiscoveryReport).self) { group in
-            for tool in discoveryTools {
-                let startedAt = Date()
-                if let onUpdate {
-                    await onUpdate(Self.makeRunningReport(
-                        tool: tool,
-                        workingDirectoryURL: workingDirectoryURL,
-                        path: path,
-                        startedAt: startedAt
-                    ))
-                }
+        var reports: [AIAgentTool: ACPMetadataDiscoveryReport] = [:]
+        for tool in discoveryTools {
+            guard !Task.isCancelled else { break }
 
-                group.addTask { [workingDirectoryURL, environment, path] in
-                    let report = await self.report(
-                        for: tool,
-                        workingDirectoryURL: workingDirectoryURL,
-                        environment: environment,
-                        path: path,
-                        startedAt: startedAt
-                    )
-                    return (tool, report)
-                }
+            let startedAt = Date()
+            if let onUpdate {
+                await onUpdate(Self.makeRunningReport(
+                    tool: tool,
+                    workingDirectoryURL: workingDirectoryURL,
+                    path: path,
+                    startedAt: startedAt
+                ))
             }
 
-            var reports: [AIAgentTool: ACPMetadataDiscoveryReport] = [:]
-            for await (tool, report) in group {
-                reports[tool] = report
-                if let onUpdate {
-                    await onUpdate(report)
-                }
+            let report: ACPMetadataDiscoveryReport
+            if let reportProvider {
+                report = await reportProvider(tool, workingDirectoryURL, environment, path, startedAt, requestTimeout)
+            } else {
+                report = await self.report(
+                    for: tool,
+                    workingDirectoryURL: workingDirectoryURL,
+                    environment: environment,
+                    path: path,
+                    startedAt: startedAt
+                )
             }
-            return reports
+            reports[tool] = report
+            if let onUpdate {
+                await onUpdate(report)
+            }
+            if report.status == .cancelled {
+                break
+            }
         }
+        return reports
     }
 
     func snapshot(for tool: AIAgentTool, workingDirectoryURL: URL) async -> ACPAgentSnapshot? {
         let report = await report(
             for: tool,
             workingDirectoryURL: workingDirectoryURL,
-            environment: await ShellEnvironment.resolvedEnvironment(includeAppManagedPaths: true),
-            path: await ShellEnvironment.loginShellPath(includeAppManagedPaths: true),
+            environment: await environmentProvider(),
+            path: await pathProvider(),
             startedAt: Date()
         )
         return report.snapshot
@@ -310,11 +342,12 @@ actor ACPAgentDiscoveryService {
         }
 
         let commandLine = Self.commandLine(executable: executable, arguments: acpArguments)
-        guard let executablePath = resolvedExecutablePath(
+        let executablePath = resolvedExecutablePath(
             named: executable,
             inPATH: path,
             fileManager: FileManager.default
-        ) else {
+        )
+        guard let executablePath else {
             return ACPMetadataDiscoveryReport(
                 tool: tool,
                 status: .unavailable,
@@ -336,14 +369,26 @@ actor ACPAgentDiscoveryService {
             )
         }
 
+        if Task.isCancelled {
+            return Self.makeCancelledReport(
+                tool: tool,
+                executablePath: executablePath,
+                commandLine: commandLine,
+                workingDirectoryPath: workingDirectoryURL.path,
+                environmentPath: path,
+                startedAt: startedAt
+            )
+        }
+
         do {
-            let snapshot = try await Task.detached(priority: .utility) {
-                let transport = try ACPJSONRPCTransport(
-                    executableURL: URL(fileURLWithPath: executablePath),
-                    arguments: acpArguments,
-                    currentDirectoryURL: workingDirectoryURL,
-                    environment: environment
-                )
+            let transport = try ACPJSONRPCTransport(
+                executableURL: URL(fileURLWithPath: executablePath),
+                arguments: acpArguments,
+                currentDirectoryURL: workingDirectoryURL,
+                environment: environment,
+                requestTimeout: requestTimeout
+            )
+            let snapshot = try await withTaskCancellationHandler {
                 defer { transport.terminate() }
 
                 let initializeResponse = try await transport.request(
@@ -363,6 +408,8 @@ actor ACPAgentDiscoveryService {
                         ],
                     ]
                 )
+                try Task.checkCancellation()
+
                 let sessionResponse = try await transport.request(
                     method: "session/new",
                     params: [
@@ -376,7 +423,9 @@ actor ACPAgentDiscoveryService {
                     initializeResponse: initializeResponse,
                     sessionResponse: sessionResponse
                 )
-            }.value
+            } onCancel: {
+                transport.terminate()
+            }
 
             guard let snapshot else {
                 return ACPMetadataDiscoveryReport(
@@ -428,6 +477,15 @@ actor ACPAgentDiscoveryService {
                 finishedAt: Date(),
                 snapshot: snapshot
             )
+        } catch is CancellationError {
+            return Self.makeCancelledReport(
+                tool: tool,
+                executablePath: executablePath,
+                commandLine: commandLine,
+                workingDirectoryPath: workingDirectoryURL.path,
+                environmentPath: path,
+                startedAt: startedAt
+            )
         } catch {
             return ACPMetadataDiscoveryReport(
                 tool: tool,
@@ -478,6 +536,35 @@ actor ACPAgentDiscoveryService {
             ),
             startedAt: startedAt,
             finishedAt: nil,
+            snapshot: nil
+        )
+    }
+
+    private static func makeCancelledReport(
+        tool: AIAgentTool,
+        executablePath: String?,
+        commandLine: String,
+        workingDirectoryPath: String,
+        environmentPath: String,
+        startedAt: Date
+    ) -> ACPMetadataDiscoveryReport {
+        ACPMetadataDiscoveryReport(
+            tool: tool,
+            status: .cancelled,
+            executablePath: executablePath,
+            commandLine: commandLine,
+            workingDirectoryPath: workingDirectoryPath,
+            environmentPath: environmentPath,
+            summary: "ACP discovery cancelled.",
+            detail: makeDetail(
+                commandLine: commandLine,
+                executablePath: executablePath,
+                workingDirectoryPath: workingDirectoryPath,
+                environmentPath: environmentPath,
+                statusLine: "The ACP discovery run was cancelled before the handshake finished."
+            ),
+            startedAt: startedAt,
+            finishedAt: Date(),
             snapshot: nil
         )
     }
@@ -646,22 +733,30 @@ actor ACPAgentDiscoveryService {
     }
 }
 
-private final class ACPJSONRPCTransport {
+private final class ACPJSONRPCTransport: @unchecked Sendable {
     private let process: Process
     private let stdinHandle: FileHandle
     private let stdoutHandle: FileHandle
     private let stderrDrainer: Task<Void, Never>
     private let diagnostics = ACPDiscoveryDiagnostics()
+    private let requestTimeout: TimeInterval
     private var bytesIterator: FileHandle.AsyncBytes.Iterator
     private var bufferedData = Data()
     private var nextRequestID = 1
 
-    init(executableURL: URL, arguments: [String], currentDirectoryURL: URL, environment: [String: String]) throws {
+    init(
+        executableURL: URL,
+        arguments: [String],
+        currentDirectoryURL: URL,
+        environment: [String: String],
+        requestTimeout: TimeInterval
+    ) throws {
         process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
         process.currentDirectoryURL = currentDirectoryURL
         process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        self.requestTimeout = requestTimeout
 
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
@@ -718,25 +813,45 @@ private final class ACPJSONRPCTransport {
         stdinHandle.write(data)
         stdinHandle.write(Data("\n".utf8))
 
-        return try await waitForResponse(requestID: requestID)
+        return try await withThrowingTaskGroup(of: ACPJSONRPCMessage.self) { group in
+            group.addTask {
+                ACPJSONRPCMessage(payload: try await self.waitForResponse(requestID: requestID))
+            }
+            group.addTask {
+                let timeoutNanoseconds = UInt64(max(self.requestTimeout, 0.1) * 1_000_000_000)
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                self.terminate()
+                throw StackriotError.commandFailed(
+                    self.diagnostics.failureMessage(fallback: "ACP discovery timed out.")
+                )
+            }
+
+            defer { group.cancelAll() }
+            guard let response = try await group.next() else {
+                throw StackriotError.commandFailed("ACP discovery timed out.")
+            }
+            return response.payload
+        }
     }
 
     private func waitForResponse(requestID: Int) async throws -> [String: Any] {
-        let deadline = Date().addingTimeInterval(20)
-        while Date() < deadline {
-            if let message = try await nextJSONMessage() {
-                if let id = message["id"] as? Int, id == requestID {
-                    return message
-                }
-            } else if !process.isRunning {
-                break
+        while true {
+            guard let message = try await nextJSONMessage() else {
+                throw StackriotError.commandFailed(
+                    diagnostics.failureMessage(
+                        fallback: process.isRunning
+                            ? "ACP discovery process closed stdout before returning a response."
+                            : "ACP discovery process exited before returning a response."
+                    )
+                )
+            }
+            if let id = message["id"] as? Int, id == requestID {
+                return message
+            }
+            if Task.isCancelled {
+                throw CancellationError()
             }
         }
-        throw StackriotError.commandFailed(
-            diagnostics.failureMessage(fallback: process.isRunning
-                ? "ACP discovery timed out."
-                : "ACP discovery process exited before returning a response.")
-        )
     }
 
     private func nextJSONMessage() async throws -> [String: Any]? {
@@ -797,6 +912,10 @@ private final class ACPDiscoveryDiagnostics: @unchecked Sendable {
         }
         return fallback
     }
+}
+
+private struct ACPJSONRPCMessage: @unchecked Sendable {
+    let payload: [String: Any]
 }
 
 private func resolvedExecutablePath(

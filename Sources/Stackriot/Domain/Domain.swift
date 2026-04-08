@@ -394,6 +394,7 @@ enum ACPMetadataDiscoveryStatus: String, Sendable, Equatable {
     case succeeded
     case unavailable
     case failed
+    case cancelled
 
     var isSuccessful: Bool { self == .succeeded }
 

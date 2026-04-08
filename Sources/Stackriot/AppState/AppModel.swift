@@ -57,6 +57,8 @@ final class AppModel: @unchecked Sendable {
     var isACPMetadataConsolePresented = false
     var lastACPMetadataRefreshAt: Date?
     var acpMetadataRefreshSummary: String?
+    @ObservationIgnored
+    var acpMetadataRefreshTask: Task<Void, Never>?
     var runningAgentWorktreeIDs: Set<UUID> = []
     var terminalTabs = TerminalTabBookkeeping()
     var summarizingRunIDs: Set<UUID> = []

@@ -305,12 +305,13 @@ extension AppModel {
 
     func refreshACPMetadata() {
         guard !isRefreshingACPMetadata else { return }
+        acpMetadataRefreshTask?.cancel()
         isRefreshingACPMetadata = true
         isACPMetadataConsolePresented = true
         acpMetadataRefreshSummary = "Refreshing ACP metadata..."
         acpMetadataDiscoveryReportsByTool = [:]
 
-        Task {
+        acpMetadataRefreshTask = Task {
             let workingDirectoryURL = URL(
                 fileURLWithPath: FileManager.default.currentDirectoryPath,
                 isDirectory: true
@@ -336,6 +337,15 @@ extension AppModel {
             }
             self.lastACPMetadataRefreshAt = .now
             self.isRefreshingACPMetadata = false
+            self.acpMetadataRefreshTask = nil
+
+            if Task.isCancelled || reports.values.contains(where: { $0.status == .cancelled }) {
+                let completedCount = reports.values.filter { !$0.status.isRunning && $0.status != .cancelled }.count
+                self.acpMetadataRefreshSummary = completedCount > 0
+                    ? "ACP metadata refresh cancelled after \(completedCount) CLI(s)."
+                    : "ACP metadata refresh cancelled."
+                return
+            }
 
             let refreshedCount = reports.values.filter { $0.status == .succeeded }.count
             let issueCount = reports.values.count - refreshedCount
@@ -362,6 +372,12 @@ extension AppModel {
                 )
             }
         }
+    }
+
+    func cancelACPMetadataRefresh() {
+        guard isRefreshingACPMetadata else { return }
+        acpMetadataRefreshSummary = "Cancelling ACP metadata refresh..."
+        acpMetadataRefreshTask?.cancel()
     }
 
     func launchFixWithAI(for run: RunRecord, using tool: AIAgentTool, in modelContext: ModelContext) async {
