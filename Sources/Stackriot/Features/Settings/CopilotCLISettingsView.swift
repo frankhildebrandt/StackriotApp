@@ -1,118 +1,130 @@
 import SwiftUI
 
 struct CopilotCLISettingsView: View {
-    @State private var copilotModels: [EditableCopilotModel]
-    @State private var defaultCopilotModelID: String
-
-    init() {
-        _copilotModels = State(initialValue: AppPreferences.copilotModelOptions
-            .filter { !$0.isAuto }
-            .map(EditableCopilotModel.init)
-        )
-        _defaultCopilotModelID = State(initialValue: AppPreferences.defaultCopilotModelID)
-    }
+    @Environment(AppModel.self) private var appModel
 
     var body: some View {
-        Group {
-            Section {
-                Picker("Default model", selection: $defaultCopilotModelID) {
-                    ForEach(configuredCopilotModels) { option in
-                        Text(option.displayName).tag(option.id)
-                    }
-                }
+        Section {
+            if let snapshot {
+                ACPAgentSnapshotSummary(snapshot: snapshot)
 
-                ForEach($copilotModels) { $model in
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField("Display name", text: $model.displayName)
-                            .textFieldStyle(.roundedBorder)
-                        TextField("Copilot CLI model ID", text: $model.modelID)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-
-                        HStack {
-                            Spacer()
-                            Button(role: .destructive) {
-                                removeCopilotModel(model.id)
-                            } label: {
-                                Label("Remove", systemImage: "trash")
-                            }
-                            .buttonStyle(.borderless)
+                if let modelOption {
+                    Picker("Default model", selection: Binding(
+                        get: {
+                            AppPreferences.defaultACPConfigValue(
+                                for: .githubCopilot,
+                                configOption: modelOption,
+                                fallbackValue: AppPreferences.defaultCopilotModelID
+                            )
+                        },
+                        set: { newValue in
+                            AppPreferences.setDefaultACPConfigValue(newValue, for: .githubCopilot, configOption: modelOption)
+                            AppPreferences.setDefaultCopilotModelID(newValue)
+                        }
+                    )) {
+                        ForEach(modelOption.flatOptions) { option in
+                            Text(option.displayName).tag(option.value)
                         }
                     }
-                    .padding(.vertical, 4)
                 }
 
-                HStack {
-                    Button {
-                        copilotModels.append(EditableCopilotModel())
-                    } label: {
-                        Label("Add model", systemImage: "plus")
-                    }
-
-                    Button("Reset defaults") {
-                        copilotModels = CopilotModelOption.defaultManualOptions.map(EditableCopilotModel.init)
-                        defaultCopilotModelID = CopilotModelOption.auto.id
-                        persistCopilotModelSettings()
+                if let reasoningOption {
+                    Picker("Default reasoning effort", selection: Binding(
+                        get: {
+                            AppPreferences.defaultACPConfigValue(for: .githubCopilot, configOption: reasoningOption)
+                        },
+                        set: { newValue in
+                            AppPreferences.setDefaultACPConfigValue(newValue, for: .githubCopilot, configOption: reasoningOption)
+                        }
+                    )) {
+                        ForEach(reasoningOption.flatOptions) { option in
+                            Text(option.displayName).tag(option.value)
+                        }
                     }
                 }
-            } header: {
-                Text("GitHub Copilot")
-            } footer: {
-                Text("`Auto` is always available. Add the Copilot CLI model IDs you want Stackriot to offer and choose which one should be preselected for new runs. Repo agents from `.github/agents` appear directly in the run sheet.")
+            } else {
+                Text("No ACP metadata available yet.")
+                    .foregroundStyle(.secondary)
             }
-        }
-        .onChange(of: copilotModels) { _, _ in
-            persistCopilotModelSettings()
-        }
-        .onChange(of: defaultCopilotModelID) { _, _ in
-            persistCopilotModelSettings()
-        }
-    }
 
-    private var configuredCopilotModels: [CopilotModelOption] {
-        AppPreferences.normalizedCopilotModelOptions(
-            from: copilotModels.map {
-                CopilotModelOption(
-                    id: $0.modelID,
-                    displayName: $0.displayName,
-                    isAuto: false
-                )
+            Button("Refresh ACP metadata") {
+                appModel.refreshLocalToolStatuses()
             }
-        )
-    }
-
-    private func persistCopilotModelSettings() {
-        let normalizedModels = configuredCopilotModels
-        let validatedDefault = AppPreferences.validatedCopilotModelID(
-            defaultCopilotModelID,
-            availableModels: normalizedModels
-        )
-
-        AppPreferences.setCopilotModelOptions(normalizedModels)
-        AppPreferences.setDefaultCopilotModelID(validatedDefault)
-
-        if defaultCopilotModelID != validatedDefault {
-            defaultCopilotModelID = validatedDefault
+        } header: {
+            Text("GitHub Copilot")
+        } footer: {
+            Text("When Copilot exposes ACP metadata, Stackriot uses it to show live models, modes, auth hints, and other session configuration surfaced by the CLI.")
         }
     }
 
-    private func removeCopilotModel(_ rowID: UUID) {
-        copilotModels.removeAll { $0.id == rowID }
+    private var snapshot: ACPAgentSnapshot? {
+        appModel.acpAgentSnapshotsByTool[.githubCopilot]
+    }
+
+    private var modelOption: ACPDiscoveredConfigOption? {
+        snapshot?.configOptions.first(where: { $0.id == "model" || $0.semanticCategory == .model }).map { option in
+            let autoOption = ACPDiscoveredConfigValue(value: CopilotModelOption.auto.id, displayName: CopilotModelOption.auto.displayName, description: nil)
+            let options = ([autoOption] + option.flatOptions).reduce(into: [ACPDiscoveredConfigValue]()) { partialResult, candidate in
+                if partialResult.contains(where: { $0.value == candidate.value }) == false {
+                    partialResult.append(candidate)
+                }
+            }
+            return ACPDiscoveredConfigOption(
+                id: "model",
+                displayName: option.displayName,
+                description: option.description,
+                rawCategory: ACPDiscoveredConfigSemanticCategory.model.rawValue,
+                currentValue: option.currentValue,
+                groups: [ACPDiscoveredConfigValueGroup(groupID: nil, displayName: nil, options: options)]
+            )
+        }
+    }
+
+    private var reasoningOption: ACPDiscoveredConfigOption? {
+        snapshot?.configOptions.first {
+            $0.id == "reasoning_effort" || $0.semanticCategory == .thoughtLevel
+        }
     }
 }
 
-private struct EditableCopilotModel: Identifiable, Equatable {
-    let id: UUID
-    var displayName: String
-    var modelID: String
+struct ACPAgentSnapshotSummary: View {
+    let snapshot: ACPAgentSnapshot
 
-    init(id: UUID = UUID(), displayName: String = "", modelID: String = "") {
-        self.id = id
-        self.displayName = displayName
-        self.modelID = modelID
-    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let agentInfo = snapshot.agentInfo {
+                LabeledContent("Version") {
+                    Text(agentInfo.version ?? "Unknown")
+                }
+            }
 
-    init(_ option: CopilotModelOption) {
-        self.init(displayName: option.displayName, modelID: option.id)
+            if snapshot.authMethods.isEmpty == false {
+                LabeledContent("Auth") {
+                    Text(snapshot.authMethods.map(\.name).joined(separator: ", "))
+                }
+            }
+
+            if snapshot.modes.isEmpty == false {
+                LabeledContent("ACP modes") {
+                    Text(snapshot.modes.map(\.displayName).joined(separator: ", "))
+                }
+            }
+
+            let capabilitySummary = [
+                snapshot.loadSession ? "load-session" : nil,
+                snapshot.supportsSessionList ? "session-list" : nil,
+                snapshot.promptSupportsEmbeddedContext ? "embedded-context" : nil,
+                snapshot.promptSupportsImage ? "image-prompts" : nil,
+                snapshot.mcpSupportsHTTP ? "mcp-http" : nil,
+                snapshot.mcpSupportsSSE ? "mcp-sse" : nil,
+            ].compactMap { $0 }
+
+            if capabilitySummary.isEmpty == false {
+                LabeledContent("Capabilities") {
+                    Text(capabilitySummary.joined(separator: ", "))
+                }
+            }
+        }
+        .font(.callout)
     }
 }

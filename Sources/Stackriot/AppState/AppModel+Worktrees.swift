@@ -499,11 +499,7 @@ extension AppModel {
                     modelContext: modelContext
                 )
             } else if let executionAgent {
-                if executionAgent == .githubCopilot {
-                    await prepareCopilotExecutionWithPlan(for: worktree, in: repository)
-                } else {
-                    await launchAgentWithPlan(executionAgent, for: worktree, in: modelContext)
-                }
+                await prepareAgentExecutionWithPlan(executionAgent, for: worktree, in: repository)
             }
 
             quickIntentSession = nil

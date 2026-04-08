@@ -191,14 +191,14 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: Binding(
-            get: { appModel.pendingCopilotExecutionDraft != nil },
+            get: { appModel.pendingAgentExecutionDraft != nil },
             set: { newValue in
                 if !newValue {
-                    appModel.dismissPendingCopilotExecutionDraft()
+                    appModel.dismissPendingAgentExecutionDraft()
                 }
             }
         )) {
-            PendingCopilotExecutionSheet()
+            PendingAgentExecutionSheet()
                 .environment(appModel)
         }
         .sheet(isPresented: Binding(

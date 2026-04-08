@@ -309,43 +309,63 @@ struct AgentPlanDraft: Identifiable {
     var runID: UUID { run.id }
 }
 
-enum PendingCopilotDraftPurpose {
+enum PendingAgentExecutionPurpose {
     case execution
     case planning
 
-    var title: String {
+    func title(for tool: AIAgentTool) -> String {
         switch self {
         case .execution:
-            "Execute with GitHub Copilot"
+            "Execute with \(tool.displayName)"
         case .planning:
-            "Create Plan with GitHub Copilot"
+            "Create Plan with \(tool.displayName)"
         }
     }
 
-    var backgroundTitle: String {
+    func backgroundTitle(for tool: AIAgentTool) -> String {
         switch self {
         case .execution:
-            "Send to Background with GitHub Copilot"
+            "Send to Background with \(tool.displayName)"
         case .planning:
-            "Create Plan with GitHub Copilot"
+            "Create Plan with \(tool.displayName)"
         }
     }
 }
 
 struct PendingAgentExecutionDraft: Identifiable {
-    let purpose: PendingCopilotDraftPurpose
+    let purpose: PendingAgentExecutionPurpose
     let tool: AIAgentTool
     let worktreeID: UUID
     let repositoryID: UUID
     let promptSourceTitle: String
     let promptText: String
     let activatesTerminalTab: Bool
-    var availableCopilotModels: [CopilotModelOption]
-    var selectedCopilotModelID: String
+    var availableModes: [ACPDiscoveredMode]
+    var selectedModeID: String?
+    var availableConfigOptions: [ACPDiscoveredConfigOption]
+    var selectedConfigValues: [String: String]
     var availableCopilotRepoAgents: [CopilotRepoAgent]
     var selectedCopilotRepoAgentID: String?
 
     var id: UUID { worktreeID }
+
+    var availableCopilotModels: [CopilotModelOption] {
+        guard let modelOption = availableConfigOptions.first(where: { $0.id == "model" }) else {
+            return []
+        }
+        return modelOption.flatOptions.map {
+            CopilotModelOption(
+                id: $0.value,
+                displayName: $0.displayName,
+                isAuto: $0.value.caseInsensitiveCompare(CopilotModelOption.auto.id) == .orderedSame
+            )
+        }
+    }
+
+    var selectedCopilotModelID: String {
+        get { selectedConfigValues["model"] ?? CopilotModelOption.auto.id }
+        set { selectedConfigValues["model"] = newValue }
+    }
 }
 
 struct RunFixRequest {

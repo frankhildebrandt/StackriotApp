@@ -50,6 +50,7 @@ final class AppModel: @unchecked Sendable {
     )
     var localToolStatuses: [AppManagedToolStatus] = []
     var availableAgents: Set<AIAgentTool> = []
+    var acpAgentSnapshotsByTool: [AIAgentTool: ACPAgentSnapshot] = [:]
     var runningAgentWorktreeIDs: Set<UUID> = []
     var terminalTabs = TerminalTabBookkeeping()
     var summarizingRunIDs: Set<UUID> = []
@@ -57,7 +58,7 @@ final class AppModel: @unchecked Sendable {
     var agentPlanDraftsByWorktreeID: [UUID: AgentPlanDraft] = [:]
     var pendingRunFixesByAgentRunID: [UUID: RunFixRequest] = [:]
     var activeAgentPlanDraftWorktreeID: UUID?
-    var pendingCopilotExecutionDraft: PendingAgentExecutionDraft?
+    var pendingAgentExecutionDraft: PendingAgentExecutionDraft?
     var quickIntentSession: QuickIntentSession?
     var pendingQuickIntentActivationID: UUID?
     var intentContentVersionsByWorktreeID: [UUID: Int] = [:]
@@ -162,6 +163,11 @@ final class AppModel: @unchecked Sendable {
             .flatMap(UUID.init(uuidString:))
     }
 
+    var pendingCopilotExecutionDraft: PendingAgentExecutionDraft? {
+        get { pendingAgentExecutionDraft }
+        set { pendingAgentExecutionDraft = newValue }
+    }
+
     func configure(modelContext: ModelContext) {
         if storedModelContext == nil {
             storedModelContext = modelContext
@@ -178,6 +184,11 @@ final class AppModel: @unchecked Sendable {
                 await services.nodeRuntimeManager.refreshDefaultRuntimeIfNeeded(force: false)
                 nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
                 localToolStatuses = await services.localToolManager.allStatuses()
+                availableAgents = await services.agentManager.checkAvailability()
+                acpAgentSnapshotsByTool = await services.acpDiscoveryService.snapshots(
+                    for: availableAgents,
+                    workingDirectoryURL: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+                )
                 await refreshAllRepositories(force: false)
                 await refreshAllDevContainerStates()
                 restoreAllPRMonitoring(in: modelContext)

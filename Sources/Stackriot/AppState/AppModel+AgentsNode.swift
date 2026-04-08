@@ -600,6 +600,10 @@ extension AppModel {
         Task {
             localToolStatuses = await services.localToolManager.allStatuses()
             availableAgents = await services.agentManager.checkAvailability()
+            acpAgentSnapshotsByTool = await services.acpDiscoveryService.snapshots(
+                for: availableAgents,
+                workingDirectoryURL: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            )
         }
     }
 
@@ -609,6 +613,10 @@ extension AppModel {
                 _ = try await services.localToolManager.install(tool)
                 localToolStatuses = await services.localToolManager.allStatuses()
                 availableAgents = await services.agentManager.checkAvailability()
+                acpAgentSnapshotsByTool = await services.acpDiscoveryService.snapshots(
+                    for: availableAgents,
+                    workingDirectoryURL: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+                )
             } catch {
                 pendingErrorMessage = error.localizedDescription
             }

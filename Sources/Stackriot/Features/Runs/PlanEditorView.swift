@@ -145,22 +145,13 @@ struct PlanEditorView: View {
                         saveTask?.cancel()
                         persistCurrentBodyText()
                         Task {
-                            if tool == .githubCopilot {
-                                await appModel.prepareCopilotPlanningWithIntent(
-                                    for: worktree,
-                                    in: repository,
-                                    currentIntentText: bodyText,
-                                    modelContext: modelContext
-                                )
-                            } else {
-                                await appModel.startAgentPlanDraft(
-                                    using: tool,
-                                    for: worktree,
-                                    in: repository,
-                                    currentIntentText: bodyText,
-                                    modelContext: modelContext
-                                )
-                            }
+                            await appModel.prepareAgentPlanningWithIntent(
+                                tool,
+                                for: worktree,
+                                in: repository,
+                                currentIntentText: bodyText,
+                                modelContext: modelContext
+                            )
                         }
                     } label: {
                         Label(tool.displayName, systemImage: tool.systemImageName)
@@ -236,14 +227,8 @@ struct PlanEditorView: View {
         saveTask?.cancel()
         persistCurrentBodyText()
         let options = AgentLaunchOptions()
-        if tool == .githubCopilot {
-            Task {
-                await appModel.prepareCopilotExecutionWithPlan(for: worktree, in: repository, options: options)
-            }
-        } else {
-            Task {
-                await appModel.launchAgentWithPlan(tool, for: worktree, in: modelContext, options: options)
-            }
+        Task {
+            await appModel.prepareAgentExecutionWithPlan(tool, for: worktree, in: repository, options: options)
         }
     }
 
