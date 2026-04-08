@@ -405,7 +405,7 @@ struct StackriotTests {
 
     @Test
     func acpDiscoveryUsesDedicatedAdapterCommands() {
-        #expect(AIAgentTool.claudeCode.acpExecutableName == "claude-code-acp")
+        #expect(AIAgentTool.claudeCode.acpExecutableName == "claude-agent-acp")
         #expect(AIAgentTool.codex.acpExecutableName == "codex-acp")
         #expect(AIAgentTool.githubCopilot.acpExecutableName == "copilot")
         #expect(AIAgentTool.cursorCLI.acpExecutableName == "cursor-agent")
@@ -416,6 +416,12 @@ struct StackriotTests {
         #expect(AIAgentTool.githubCopilot.acpLaunchArguments == ["--acp"])
         #expect(AIAgentTool.cursorCLI.acpLaunchArguments == ["acp"])
         #expect(AIAgentTool.openCode.acpLaunchArguments == ["acp"])
+
+        #expect(AIAgentTool.claudeCode.acpAdapterPackage == "@agentclientprotocol/claude-agent-acp")
+        #expect(AIAgentTool.codex.acpAdapterPackage == "@zed-industries/codex-acp")
+        #expect(AIAgentTool.githubCopilot.acpAdapterPackage == nil)
+        #expect(AIAgentTool.cursorCLI.acpAdapterPackage == nil)
+        #expect(AIAgentTool.openCode.acpAdapterPackage == nil)
 
         #expect(AIAgentTool.claudeCode.supportsACPDiscovery)
         #expect(AIAgentTool.codex.supportsACPDiscovery)

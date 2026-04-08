@@ -870,7 +870,7 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         case .none:
             nil
         case .claudeCode:
-            "claude-code-acp"
+            "claude-agent-acp"
         case .codex:
             "codex-acp"
         case .githubCopilot:
@@ -879,6 +879,20 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
             "cursor-agent"
         case .openCode:
             "opencode"
+        }
+    }
+
+    /// npm package that provides the ACP adapter binary for this tool.
+    /// Installed on demand during ACP metadata refresh when the managed CLI is
+    /// available but the adapter binary is missing.
+    var acpAdapterPackage: String? {
+        switch self {
+        case .claudeCode:
+            "@agentclientprotocol/claude-agent-acp"
+        case .codex:
+            "@zed-industries/codex-acp"
+        default:
+            nil
         }
     }
 
