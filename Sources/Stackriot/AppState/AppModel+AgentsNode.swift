@@ -317,6 +317,11 @@ extension AppModel {
                 isDirectory: true
             )
             let tools = Set(AIAgentTool.allCases.filter(\.supportsACPDiscovery))
+
+            self.acpMetadataRefreshSummary = "Installing ACP adapters..."
+            await services.localToolManager.installACPAdaptersIfNeeded(for: tools)
+            self.acpMetadataRefreshSummary = "Refreshing ACP metadata..."
+
             let localToolStatuses = await services.localToolManager.allStatuses()
             let availableAgents = await services.agentManager.checkAvailability()
             let reports = await services.acpDiscoveryService.reports(

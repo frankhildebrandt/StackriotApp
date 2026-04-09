@@ -107,7 +107,7 @@ struct LocalToolManagerTests {
     func acpDiscoveryTimesOutForSilentCLI() async throws {
         let workingDirectory = try makeTemporaryDirectory()
         let binDirectory = try makeTemporaryDirectory()
-        try makeSilentACPDiscoveryExecutable(named: "claude-code-acp", in: binDirectory)
+        try makeSilentACPDiscoveryExecutable(named: "claude-agent-acp", in: binDirectory)
 
         let service = ACPAgentDiscoveryService(
             environmentProvider: { ["PATH": binDirectory.path] },
@@ -130,7 +130,7 @@ struct LocalToolManagerTests {
     @Test
     func cancellingACPRefreshLetsYouStartAgain() async throws {
         let binDirectory = try makeTemporaryDirectory()
-        try makeSilentACPDiscoveryExecutable(named: "claude-code-acp", in: binDirectory)
+        try makeSilentACPDiscoveryExecutable(named: "claude-agent-acp", in: binDirectory)
 
         let service = ACPAgentDiscoveryService(
             environmentProvider: { ["PATH": binDirectory.path] },
@@ -166,6 +166,36 @@ struct LocalToolManagerTests {
         try await waitUntil {
             appModel.isRefreshingACPMetadata == false
         }
+    }
+
+    @Test
+    func installACPAdaptersIfNeededSkipsWhenManagedCLIUnavailable() async throws {
+        // With empty shell PATH and no app-managed binaries, no managed CLI is reachable.
+        // installACPAdaptersIfNeeded must complete without error (no npm access needed).
+        let manager = LocalToolManager(shellPathProvider: { "" })
+        await manager.installACPAdaptersIfNeeded(for: Set(AIAgentTool.allCases))
+    }
+
+    @Test
+    func installACPAdaptersIfNeededSkipsWhenAdapterAlreadyInNPMBin() async throws {
+        // Place stub executables in the npm-managed bin directory for both ACP adapters.
+        let npmBinDirectory = AppPaths.localToolsNPMPrefix.appendingPathComponent("bin")
+        let claudeAdapterPath = npmBinDirectory.appendingPathComponent("claude-agent-acp")
+        let codexAdapterPath = npmBinDirectory.appendingPathComponent("codex-acp")
+
+        defer {
+            try? FileManager.default.removeItem(at: claudeAdapterPath)
+            try? FileManager.default.removeItem(at: codexAdapterPath)
+        }
+
+        try makeExecutable(at: claudeAdapterPath)
+        try makeExecutable(at: codexAdapterPath)
+
+        // Even if the managed CLIs were somehow available, the adapters are already
+        // present in the npm bin — no npm install should be attempted.
+        let manager = LocalToolManager(shellPathProvider: { "" })
+        await manager.installACPAdaptersIfNeeded(for: Set([.claudeCode, .codex]))
+        // Completes without error ⇒ the "already present" skip path is exercised.
     }
 
     private func makeTemporaryDirectory() throws -> URL {

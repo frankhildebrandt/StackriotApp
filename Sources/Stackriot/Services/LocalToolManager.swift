@@ -76,6 +76,35 @@ final class LocalToolManager {
         return tools
     }
 
+    /// Installs ACP adapter packages on demand for tools whose managed CLI is available
+    /// but whose ACP adapter binary is not yet present. Errors are silently ignored so
+    /// that the caller's discovery run can proceed and report the correct status.
+    func installACPAdaptersIfNeeded(for tools: Set<AIAgentTool>) async {
+        let shellPath = await shellPathProvider()
+        let npmBinURL = AppPaths.localToolsNPMPrefix.appendingPathComponent("bin")
+
+        for tool in tools {
+            guard let managedTool = tool.managedTool,
+                  let acpPackage = tool.acpAdapterPackage,
+                  let acpExecutable = tool.acpExecutableName
+            else { continue }
+
+            guard await status(for: managedTool).isAvailable else { continue }
+
+            let alreadyInShellPath = resolvedExecutablePath(
+                named: acpExecutable,
+                inPATH: shellPath,
+                fileManager: fileManager
+            ) != nil
+            let alreadyInNPMBin = fileManager.isExecutableFile(
+                atPath: npmBinURL.appendingPathComponent(acpExecutable).path
+            )
+            guard !alreadyInShellPath && !alreadyInNPMBin else { continue }
+
+            try? await installNPMPackage(acpPackage)
+        }
+    }
+
     func install(_ tool: AppManagedTool) async throws -> AppManagedToolStatus {
         try AppPaths.ensureBaseDirectories()
 
