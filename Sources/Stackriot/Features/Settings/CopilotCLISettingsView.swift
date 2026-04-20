@@ -50,17 +50,17 @@ struct CopilotCLISettingsView: View {
             ACPMetadataDiscoveryStatusView(
                 tool: .githubCopilot,
                 report: appModel.acpMetadataDiscoveryReportsByTool[.githubCopilot],
-                isRefreshing: appModel.isRefreshingACPMetadata,
-                lastRefreshAt: appModel.lastACPMetadataRefreshAt
+                isRefreshing: appModel.refreshingACPMetadataTools.contains(.githubCopilot),
+                lastRefreshAt: appModel.lastACPMetadataRefreshAtByTool[.githubCopilot]
             )
 
             HStack(spacing: 12) {
                 Button("Refresh ACP metadata") {
-                    appModel.refreshACPMetadata()
+                    appModel.refreshACPMetadata(for: [.githubCopilot])
                 }
                 .disabled(appModel.isRefreshingACPMetadata)
 
-                if appModel.isRefreshingACPMetadata {
+                if appModel.refreshingACPMetadataTools.contains(.githubCopilot) {
                     Button("Cancel ACP refresh") {
                         appModel.cancelACPMetadataRefresh()
                     }

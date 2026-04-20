@@ -145,27 +145,100 @@ struct LocalToolManagerTests {
             notificationService: NoopNotificationService()
         ))
 
-        appModel.refreshACPMetadata()
-        try await waitUntil {
-            appModel.acpMetadataDiscoveryReportsByTool[.claudeCode]?.status == .running
-        }
-
-        appModel.cancelACPMetadataRefresh()
-        try await waitUntil {
-            appModel.isRefreshingACPMetadata == false
-        }
-        #expect(appModel.acpMetadataDiscoveryReportsByTool[.claudeCode]?.status == .cancelled)
-        #expect(appModel.acpMetadataRefreshSummary?.contains("cancelled") == true)
-
-        appModel.refreshACPMetadata()
-        try await waitUntil {
-            appModel.acpMetadataDiscoveryReportsByTool[.claudeCode]?.status == .running
-        }
+        appModel.refreshACPMetadata(for: [.claudeCode])
         #expect(appModel.isRefreshingACPMetadata)
+        #expect(appModel.refreshingACPMetadataTools == Set([.claudeCode]))
+
         appModel.cancelACPMetadataRefresh()
         try await waitUntil {
             appModel.isRefreshingACPMetadata == false
         }
+        #expect(appModel.refreshingACPMetadataTools.isEmpty)
+        #expect(appModel.acpMetadataRefreshSummary?.localizedLowercase.contains("cancel") == true)
+
+        appModel.refreshACPMetadata(for: [.claudeCode])
+        #expect(appModel.isRefreshingACPMetadata)
+        #expect(appModel.refreshingACPMetadataTools == Set([.claudeCode]))
+        appModel.cancelACPMetadataRefresh()
+        try await waitUntil {
+            appModel.isRefreshingACPMetadata == false
+        }
+    }
+
+    @Test
+    func refreshACPMetadataCanTargetSingleTool() async throws {
+        let workingDirectory = try makeTemporaryDirectory()
+        let service = ACPAgentDiscoveryService(
+            environmentProvider: { [:] },
+            pathProvider: { "" },
+            requestTimeout: 1,
+            reportProvider: { tool, workingDirectoryURL, _, path, startedAt, _ in
+                #expect(tool == .githubCopilot)
+                return ACPMetadataDiscoveryReport(
+                    tool: tool,
+                    status: .succeeded,
+                    executablePath: "/tmp/\(tool.rawValue)",
+                    commandLine: tool.displayName,
+                    workingDirectoryPath: workingDirectoryURL.path,
+                    environmentPath: path,
+                    summary: "ok",
+                    detail: nil,
+                    startedAt: startedAt,
+                    finishedAt: Date(),
+                    snapshot: ACPAgentSnapshot(
+                        tool: tool,
+                        protocolVersion: 1,
+                        agentInfo: ACPAgentInfo(name: "Copilot", title: "Copilot", version: "1.0"),
+                        authMethods: [],
+                        loadSession: true,
+                        supportsSessionList: true,
+                        promptSupportsEmbeddedContext: true,
+                        promptSupportsImage: false,
+                        promptSupportsAudio: false,
+                        mcpSupportsHTTP: false,
+                        mcpSupportsSSE: false,
+                        currentSessionID: "session",
+                        currentModeID: nil,
+                        modes: [],
+                        currentModelID: "gpt-5.4-mini",
+                        models: [ACPDiscoveredModel(id: "gpt-5.4-mini", displayName: "GPT-5.4 mini", description: nil)],
+                        configOptions: []
+                    )
+                )
+            }
+        )
+        let localToolManager = LocalToolManager(shellPathProvider: { "" })
+        let appModel = AppModel(services: AppServices(
+            agentManager: AIAgentManager(localToolManager: localToolManager),
+            localToolManager: localToolManager,
+            acpDiscoveryService: service,
+            notificationService: NoopNotificationService()
+        ))
+        appModel.acpMetadataDiscoveryReportsByTool[.claudeCode] = ACPMetadataDiscoveryReport(
+            tool: .claudeCode,
+            status: .failed,
+            executablePath: nil,
+            commandLine: "claude-agent-acp",
+            workingDirectoryPath: workingDirectory.path,
+            environmentPath: "",
+            summary: "existing",
+            detail: nil,
+            startedAt: Date(),
+            finishedAt: Date(),
+            snapshot: nil
+        )
+
+        appModel.refreshACPMetadata(for: [.githubCopilot])
+        try await waitUntil {
+            appModel.isRefreshingACPMetadata == false
+        }
+
+        #expect(appModel.acpMetadataDiscoveryReportsByTool[.githubCopilot]?.status == .succeeded)
+        #expect(appModel.acpMetadataDiscoveryReportsByTool[.claudeCode]?.summary == "existing")
+        #expect(appModel.acpAgentSnapshotsByTool[.githubCopilot]?.agentInfo?.name == "Copilot")
+        #expect(appModel.lastACPMetadataRefreshAtByTool[.githubCopilot] != nil)
+        #expect(appModel.lastACPMetadataRefreshAtByTool[.claudeCode] == nil)
+        #expect(appModel.refreshingACPMetadataTools.isEmpty)
     }
 
     @Test

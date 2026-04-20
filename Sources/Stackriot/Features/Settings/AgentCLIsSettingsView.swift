@@ -72,10 +72,11 @@ struct ClaudeCLISettingsView: View {
             title: "Claude Code",
             snapshot: appModel.acpAgentSnapshotsByTool[.claudeCode],
             report: appModel.acpMetadataDiscoveryReportsByTool[.claudeCode],
-            isRefreshing: appModel.isRefreshingACPMetadata,
-            lastRefreshAt: appModel.lastACPMetadataRefreshAt,
+            isRefreshing: appModel.refreshingACPMetadataTools.contains(.claudeCode),
+            isRefreshDisabled: appModel.isRefreshingACPMetadata,
+            lastRefreshAt: appModel.lastACPMetadataRefreshAtByTool[.claudeCode],
             emptyStateText: "No ACP metadata available yet for Claude Code.",
-            refreshAction: { appModel.refreshACPMetadata() },
+            refreshAction: { appModel.refreshACPMetadata(for: [.claudeCode]) },
             cancelAction: { appModel.cancelACPMetadataRefresh() },
             openConsoleAction: { appModel.isACPMetadataConsolePresented = true }
         ) {}
@@ -91,10 +92,11 @@ struct CodexCLISettingsView: View {
             title: "Codex",
             snapshot: appModel.acpAgentSnapshotsByTool[.codex],
             report: appModel.acpMetadataDiscoveryReportsByTool[.codex],
-            isRefreshing: appModel.isRefreshingACPMetadata,
-            lastRefreshAt: appModel.lastACPMetadataRefreshAt,
+            isRefreshing: appModel.refreshingACPMetadataTools.contains(.codex),
+            isRefreshDisabled: appModel.isRefreshingACPMetadata,
+            lastRefreshAt: appModel.lastACPMetadataRefreshAtByTool[.codex],
             emptyStateText: "No ACP metadata available yet for Codex.",
-            refreshAction: { appModel.refreshACPMetadata() },
+            refreshAction: { appModel.refreshACPMetadata(for: [.codex]) },
             cancelAction: { appModel.cancelACPMetadataRefresh() },
             openConsoleAction: { appModel.isACPMetadataConsolePresented = true }
         ) {}
@@ -110,10 +112,11 @@ struct CursorCLISettingsView: View {
             title: "Cursor",
             snapshot: appModel.acpAgentSnapshotsByTool[.cursorCLI],
             report: appModel.acpMetadataDiscoveryReportsByTool[.cursorCLI],
-            isRefreshing: appModel.isRefreshingACPMetadata,
-            lastRefreshAt: appModel.lastACPMetadataRefreshAt,
+            isRefreshing: appModel.refreshingACPMetadataTools.contains(.cursorCLI),
+            isRefreshDisabled: appModel.isRefreshingACPMetadata,
+            lastRefreshAt: appModel.lastACPMetadataRefreshAtByTool[.cursorCLI],
             emptyStateText: "No ACP metadata available yet for Cursor.",
-            refreshAction: { appModel.refreshACPMetadata() },
+            refreshAction: { appModel.refreshACPMetadata(for: [.cursorCLI]) },
             cancelAction: { appModel.cancelACPMetadataRefresh() },
             openConsoleAction: { appModel.isACPMetadataConsolePresented = true }
         ) {}
@@ -129,10 +132,11 @@ struct OpenCodeCLISettingsView: View {
             title: "OpenCode",
             snapshot: snapshot,
             report: appModel.acpMetadataDiscoveryReportsByTool[.openCode],
-            isRefreshing: appModel.isRefreshingACPMetadata,
-            lastRefreshAt: appModel.lastACPMetadataRefreshAt,
+            isRefreshing: appModel.refreshingACPMetadataTools.contains(.openCode),
+            isRefreshDisabled: appModel.isRefreshingACPMetadata,
+            lastRefreshAt: appModel.lastACPMetadataRefreshAtByTool[.openCode],
             emptyStateText: "OpenCode did not publish ACP metadata yet.",
-            refreshAction: { appModel.refreshACPMetadata() },
+            refreshAction: { appModel.refreshACPMetadata(for: [.openCode]) },
             cancelAction: { appModel.cancelACPMetadataRefresh() },
             openConsoleAction: { appModel.isACPMetadataConsolePresented = true },
             footer: "Stackriot reads OpenCode's ACP handshake to show the live model catalog, auth hint, and advertised session modes."
@@ -180,6 +184,7 @@ private struct AgentACPMetadataSection<Content: View>: View {
     let snapshot: ACPAgentSnapshot?
     let report: ACPMetadataDiscoveryReport?
     let isRefreshing: Bool
+    let isRefreshDisabled: Bool
     let lastRefreshAt: Date?
     let emptyStateText: String
     let footer: String?
@@ -194,6 +199,7 @@ private struct AgentACPMetadataSection<Content: View>: View {
         snapshot: ACPAgentSnapshot?,
         report: ACPMetadataDiscoveryReport?,
         isRefreshing: Bool,
+        isRefreshDisabled: Bool,
         lastRefreshAt: Date?,
         emptyStateText: String,
         refreshAction: @escaping () -> Void,
@@ -207,6 +213,7 @@ private struct AgentACPMetadataSection<Content: View>: View {
         self.snapshot = snapshot
         self.report = report
         self.isRefreshing = isRefreshing
+        self.isRefreshDisabled = isRefreshDisabled
         self.lastRefreshAt = lastRefreshAt
         self.emptyStateText = emptyStateText
         self.footer = footer
@@ -237,7 +244,7 @@ private struct AgentACPMetadataSection<Content: View>: View {
                 Button("Refresh ACP metadata") {
                     refreshAction()
                 }
-                .disabled(isRefreshing)
+                .disabled(isRefreshDisabled)
 
                 if isRefreshing {
                     Button("Cancel ACP refresh") {

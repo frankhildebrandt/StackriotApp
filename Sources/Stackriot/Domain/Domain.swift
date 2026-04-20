@@ -916,7 +916,7 @@ enum AIAgentTool: String, Codable, CaseIterable, Identifiable {
         case .claudeCode, .codex:
             []
         case .githubCopilot:
-            ["--acp"]
+            ["--acp", "--stdio"]
         case .cursorCLI:
             ["acp"]
         case .openCode:
