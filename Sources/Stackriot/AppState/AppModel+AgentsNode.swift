@@ -303,24 +303,31 @@ extension AppModel {
         availableAgents = await services.agentManager.checkAvailability()
     }
 
-    func refreshACPMetadata() {
+    func refreshACPMetadata(for requestedTools: Set<AIAgentTool>? = nil) {
         guard !isRefreshingACPMetadata else { return }
+        let orderedTools = Self.orderedACPDiscoveryTools(from: requestedTools)
+        guard orderedTools.isEmpty == false else { return }
+        let tools = Set(orderedTools)
+        let targetDescription = Self.acpDiscoveryTargetDescription(for: orderedTools)
+        acpMetadataRefreshGeneration += 1
+        let refreshGeneration = acpMetadataRefreshGeneration
         acpMetadataRefreshTask?.cancel()
         isRefreshingACPMetadata = true
+        refreshingACPMetadataTools = tools
         isACPMetadataConsolePresented = true
-        acpMetadataRefreshSummary = "Refreshing ACP metadata..."
-        acpMetadataDiscoveryReportsByTool = [:]
+        acpMetadataRefreshSummary = "Refreshing ACP metadata for \(targetDescription)..."
 
         acpMetadataRefreshTask = Task {
-            let workingDirectoryURL = URL(
-                fileURLWithPath: FileManager.default.currentDirectoryPath,
-                isDirectory: true
-            )
-            let tools = Set(AIAgentTool.allCases.filter(\.supportsACPDiscovery))
+            defer {
+                if self.acpMetadataRefreshGeneration == refreshGeneration {
+                    self.acpMetadataRefreshTask = nil
+                }
+            }
+            let workingDirectoryURL = Self.preferredACPDiscoveryWorkingDirectoryURL()
 
-            self.acpMetadataRefreshSummary = "Installing ACP adapters..."
+            self.acpMetadataRefreshSummary = "Installing ACP adapters for \(targetDescription)..."
             await services.localToolManager.installACPAdaptersIfNeeded(for: tools)
-            self.acpMetadataRefreshSummary = "Refreshing ACP metadata..."
+            self.acpMetadataRefreshSummary = "Refreshing ACP metadata for \(targetDescription)..."
 
             let localToolStatuses = await services.localToolManager.allStatuses()
             let availableAgents = await services.agentManager.checkAvailability()
@@ -328,41 +335,51 @@ extension AppModel {
                 for: tools,
                 workingDirectoryURL: workingDirectoryURL,
                 onUpdate: { report in
+                    guard self.acpMetadataRefreshGeneration == refreshGeneration else { return }
                     self.acpMetadataDiscoveryReportsByTool[report.tool] = report
                 }
             )
 
+            guard self.acpMetadataRefreshGeneration == refreshGeneration else { return }
             self.localToolStatuses = localToolStatuses
             self.availableAgents = availableAgents
-            self.acpMetadataDiscoveryReportsByTool = reports
-            self.acpAgentSnapshotsByTool = reports.reduce(into: [:]) { partialResult, entry in
-                if let snapshot = entry.value.snapshot {
-                    partialResult[entry.key] = snapshot
+            for tool in orderedTools {
+                self.acpMetadataDiscoveryReportsByTool.removeValue(forKey: tool)
+                self.acpAgentSnapshotsByTool.removeValue(forKey: tool)
+                self.lastACPMetadataRefreshAtByTool.removeValue(forKey: tool)
+            }
+            for (tool, report) in reports {
+                self.acpMetadataDiscoveryReportsByTool[tool] = report
+                self.lastACPMetadataRefreshAtByTool[tool] = report.finishedAt ?? .now
+                if let snapshot = report.snapshot {
+                    self.acpAgentSnapshotsByTool[tool] = snapshot
                 }
             }
             self.lastACPMetadataRefreshAt = .now
             self.isRefreshingACPMetadata = false
-            self.acpMetadataRefreshTask = nil
+            self.refreshingACPMetadataTools = []
 
             if Task.isCancelled || reports.values.contains(where: { $0.status == .cancelled }) {
                 let completedCount = reports.values.filter { !$0.status.isRunning && $0.status != .cancelled }.count
-                self.acpMetadataRefreshSummary = completedCount > 0
-                    ? "ACP metadata refresh cancelled after \(completedCount) CLI(s)."
-                    : "ACP metadata refresh cancelled."
+                if orderedTools.count == 1 {
+                    self.acpMetadataRefreshSummary = completedCount > 0
+                        ? "ACP metadata refresh for \(targetDescription) was cancelled after partial progress."
+                        : "ACP metadata refresh for \(targetDescription) was cancelled."
+                } else {
+                    self.acpMetadataRefreshSummary = completedCount > 0
+                        ? "ACP metadata refresh for \(targetDescription) was cancelled after \(completedCount) CLI(s)."
+                        : "ACP metadata refresh for \(targetDescription) was cancelled."
+                }
                 return
             }
 
             let refreshedCount = reports.values.filter { $0.status == .succeeded }.count
             let issueCount = reports.values.count - refreshedCount
-            let summary: String
-            switch (refreshedCount, issueCount) {
-            case (0, _):
-                summary = "No ACP metadata could be loaded."
-            case (_, 0):
-                summary = "ACP metadata refreshed for \(refreshedCount) CLI(s)."
-            default:
-                summary = "ACP metadata refreshed for \(refreshedCount) CLI(s); \(issueCount) need attention."
-            }
+            let summary = Self.acpDiscoveryCompletionSummary(
+                for: orderedTools,
+                refreshedCount: refreshedCount,
+                issueCount: issueCount
+            )
             self.acpMetadataRefreshSummary = summary
 
             if issueCount == 0 {
@@ -382,7 +399,64 @@ extension AppModel {
     func cancelACPMetadataRefresh() {
         guard isRefreshingACPMetadata else { return }
         acpMetadataRefreshSummary = "Cancelling ACP metadata refresh..."
+        isRefreshingACPMetadata = false
+        refreshingACPMetadataTools = []
         acpMetadataRefreshTask?.cancel()
+    }
+
+    static func preferredACPDiscoveryWorkingDirectoryURL(fileManager: FileManager = .default) -> URL {
+        let currentPath = fileManager.currentDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if currentPath.isEmpty == false,
+           fileManager.fileExists(atPath: currentPath) {
+            return URL(fileURLWithPath: currentPath, isDirectory: true)
+        }
+        return fileManager.homeDirectoryForCurrentUser
+    }
+
+    private static func orderedACPDiscoveryTools(from requestedTools: Set<AIAgentTool>?) -> [AIAgentTool] {
+        let supportedTools = AIAgentTool.allCases.filter(\.supportsACPDiscovery)
+        let targetTools = requestedTools ?? Set(supportedTools)
+        return supportedTools.filter { targetTools.contains($0) }
+    }
+
+    private static func acpDiscoveryTargetDescription(for tools: [AIAgentTool]) -> String {
+        if tools.isEmpty {
+            return "selected CLIs"
+        }
+        if tools.count == 1 {
+            return tools[0].displayName
+        }
+        if tools.count == orderedACPDiscoveryTools(from: nil).count {
+            return "all supported CLIs"
+        }
+        return "\(tools.count) CLIs"
+    }
+
+    private static func acpDiscoveryCompletionSummary(
+        for tools: [AIAgentTool],
+        refreshedCount: Int,
+        issueCount: Int
+    ) -> String {
+        let targetDescription = acpDiscoveryTargetDescription(for: tools)
+        if tools.count == 1 {
+            switch (refreshedCount, issueCount) {
+            case (0, _):
+                return "No ACP metadata could be loaded for \(targetDescription)."
+            case (_, 0):
+                return "ACP metadata refreshed for \(targetDescription)."
+            default:
+                return "ACP metadata refreshed for \(targetDescription); details need attention."
+            }
+        }
+
+        switch (refreshedCount, issueCount) {
+        case (0, _):
+            return "No ACP metadata could be loaded for \(targetDescription)."
+        case (_, 0):
+            return "ACP metadata refreshed for \(targetDescription)."
+        default:
+            return "ACP metadata refreshed for \(refreshedCount) of \(tools.count) CLIs; \(issueCount) need attention."
+        }
     }
 
     func launchFixWithAI(for run: RunRecord, using tool: AIAgentTool, in modelContext: ModelContext) async {

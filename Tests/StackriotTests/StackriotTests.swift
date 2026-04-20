@@ -413,7 +413,7 @@ struct StackriotTests {
 
         #expect(AIAgentTool.claudeCode.acpLaunchArguments == [])
         #expect(AIAgentTool.codex.acpLaunchArguments == [])
-        #expect(AIAgentTool.githubCopilot.acpLaunchArguments == ["--acp"])
+        #expect(AIAgentTool.githubCopilot.acpLaunchArguments == ["--acp", "--stdio"])
         #expect(AIAgentTool.cursorCLI.acpLaunchArguments == ["acp"])
         #expect(AIAgentTool.openCode.acpLaunchArguments == ["acp"])
 

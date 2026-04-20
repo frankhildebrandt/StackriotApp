@@ -55,11 +55,15 @@ final class AppModel: @unchecked Sendable {
     var acpAgentSnapshotsByTool: [AIAgentTool: ACPAgentSnapshot] = [:]
     var acpMetadataDiscoveryReportsByTool: [AIAgentTool: ACPMetadataDiscoveryReport] = [:]
     var isRefreshingACPMetadata = false
+    var refreshingACPMetadataTools: Set<AIAgentTool> = []
     var isACPMetadataConsolePresented = false
     var lastACPMetadataRefreshAt: Date?
+    var lastACPMetadataRefreshAtByTool: [AIAgentTool: Date] = [:]
     var acpMetadataRefreshSummary: String?
     @ObservationIgnored
     var acpMetadataRefreshTask: Task<Void, Never>?
+    @ObservationIgnored
+    var acpMetadataRefreshGeneration = 0
     var runningAgentWorktreeIDs: Set<UUID> = []
     var terminalTabs = TerminalTabBookkeeping()
     var summarizingRunIDs: Set<UUID> = []
@@ -199,7 +203,7 @@ final class AppModel: @unchecked Sendable {
                 availableAgents = await services.agentManager.checkAvailability()
                 acpAgentSnapshotsByTool = await services.acpDiscoveryService.snapshots(
                     for: availableAgents,
-                    workingDirectoryURL: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+                    workingDirectoryURL: Self.preferredACPDiscoveryWorkingDirectoryURL()
                 )
                 await refreshAllRepositories(force: false)
                 await refreshAllDevContainerStates()

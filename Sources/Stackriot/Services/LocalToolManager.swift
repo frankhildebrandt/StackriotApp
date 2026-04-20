@@ -849,6 +849,7 @@ private final class ACPJSONRPCTransport: @unchecked Sendable {
             group.addTask {
                 let timeoutNanoseconds = UInt64(max(self.requestTimeout, 0.1) * 1_000_000_000)
                 try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                self.diagnostics.markTimedOut()
                 self.terminate()
                 throw StackriotError.commandFailed(
                     self.diagnostics.failureMessage(fallback: "ACP discovery timed out.")
@@ -911,6 +912,7 @@ private final class ACPDiscoveryDiagnostics: @unchecked Sendable {
     private let lock = NSLock()
     private var stderrLines: [String] = []
     private var terminationStatus: Int32?
+    private var didTimeOut = false
 
     func append(lineData: Data) {
         guard let line = String(data: lineData, encoding: .utf8)?
@@ -930,9 +932,18 @@ private final class ACPDiscoveryDiagnostics: @unchecked Sendable {
         lock.unlock()
     }
 
+    func markTimedOut() {
+        lock.lock()
+        didTimeOut = true
+        lock.unlock()
+    }
+
     func failureMessage(fallback: String) -> String {
         lock.lock()
         defer { lock.unlock() }
+        if didTimeOut {
+            return "ACP discovery timed out."
+        }
         if let lastLine = stderrLines.last {
             return lastLine
         }
