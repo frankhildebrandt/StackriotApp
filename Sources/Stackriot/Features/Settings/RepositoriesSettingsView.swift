@@ -27,7 +27,7 @@ struct RepositoriesSettingsView: View {
     var body: some View {
         SettingsFormPage(category: .repositories) {
             Section {
-                Toggle("Automatically refresh repositories", isOn: $autoRefreshEnabled)
+                Toggle("Automatically refresh selected repository", isOn: $autoRefreshEnabled)
                 Picker("Refresh interval", selection: $autoRefreshInterval) {
                     Text("Every 5 minutes").tag(300.0)
                     Text("Every 15 minutes").tag(900.0)
@@ -36,7 +36,7 @@ struct RepositoriesSettingsView: View {
             } header: {
                 Text("Remote refresh")
             } footer: {
-                Text("Fetches from remotes and syncs default-branch worktrees. Runs in the background on the interval above.")
+                Text("Fetches from remotes and syncs default-branch worktrees for the repository selected in the sidebar, on the interval above.")
             }
 
             Section {

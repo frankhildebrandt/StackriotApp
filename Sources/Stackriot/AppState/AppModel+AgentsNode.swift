@@ -824,7 +824,11 @@ extension AppModel {
                 if Task.isCancelled {
                     return
                 }
-                await self.refreshAllRepositories(force: false)
+                guard AppPreferences.autoRefreshEnabled else { continue }
+                guard let modelContext = self.storedModelContext,
+                      let repository = self.selectedRepository()
+                else { continue }
+                await self.refresh(repository, in: modelContext)
             }
         }
     }

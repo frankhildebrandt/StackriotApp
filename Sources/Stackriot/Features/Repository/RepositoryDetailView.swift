@@ -220,7 +220,7 @@ struct RepositoryDetailView: View {
                 Button {
                     isRefreshingStatuses = true
                     Task {
-                        await appModel.refreshWorktreeStatuses(for: repository)
+                        await appModel.refresh(repository, in: modelContext)
                         isRefreshingStatuses = false
                     }
                 } label: {
