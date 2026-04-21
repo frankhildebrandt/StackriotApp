@@ -42,6 +42,11 @@ final class AppModel: @unchecked Sendable {
     var pullRequestUpstreamStatuses: [UUID: PullRequestUpstreamStatus] = [:]
     var syncLogs: [UUID: String] = [:]
     var activeRunIDs: Set<UUID> = []
+    /// Session logs written under the linked documentation repository (`session-logs/...`).
+    var activeSessionRecordingRunIDs: Set<UUID> = []
+    var runSessionLogFileURLByRunID: [UUID: URL] = [:]
+    @ObservationIgnored
+    var sessionRecordingFileHandlesByRunID: [UUID: FileHandle] = [:]
     var refreshingRepositoryIDs: Set<UUID> = []
     var isRepositoryCreationSheetPresented = false
     var isWorktreeSheetPresented = false

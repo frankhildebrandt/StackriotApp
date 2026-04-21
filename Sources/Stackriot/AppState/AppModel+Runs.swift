@@ -300,6 +300,7 @@ extension AppModel {
         }
 
         appendRawLogChunkBuffered(runID: runID, chunk: chunk)
+        appendRunSessionRecordingChunk(runID: runID, chunk: chunk)
         pendingRunOutputBuffer[runID, default: ""] += chunk
         scheduleRunOutputFlush(runID: runID)
     }
@@ -316,6 +317,11 @@ extension AppModel {
         run.exitCode = Int(exitCode)
         let finalStatus: RunStatusKind = wasCancelled ? .cancelled : (exitCode == 0 ? .succeeded : .failed)
         run.status = finalStatus
+        finalizeRunSessionRecordingIfNeeded(
+            runID: runID,
+            exitCode: Int(exitCode),
+            wasCancelled: wasCancelled
+        )
         notifyRunCompletionIfNeeded(run)
         await finalizeRawLogIfNeeded(runID: runID, endedAt: endedAt, status: finalStatus)
         activeRunIDs.remove(runID)
@@ -377,6 +383,12 @@ extension AppModel {
         let endedAt = Date.now
         run.endedAt = endedAt
         run.status = .failed
+        finalizeRunSessionRecordingIfNeeded(
+            runID: runID,
+            exitCode: run.exitCode,
+            wasCancelled: false,
+            failureMessage: message
+        )
         notifyRunCompletionIfNeeded(run, failureMessage: message)
         await finalizeRawLogIfNeeded(runID: runID, endedAt: endedAt, status: .failed)
         activeRunIDs.remove(runID)
