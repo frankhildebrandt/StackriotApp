@@ -55,6 +55,10 @@ struct RootView: View {
                 onConfigureProjectDocumentation: { project in
                     appModel.presentProjectDocumentationSourceEditor(for: project)
                 },
+                onConfigureDocumentationRemotes: { project in
+                    guard let repository = project.documentationRepository else { return }
+                    appModel.presentRemoteManagement(for: repository)
+                },
                 onOpenProjectDocumentation: appModel.openDocumentationRepository,
                 onRemoveProjectDocumentation: { project in
                     appModel.removeDocumentationRepository(from: project, in: modelContext)
