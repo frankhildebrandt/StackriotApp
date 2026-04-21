@@ -40,6 +40,9 @@ private struct SidebarRepositoryLayout {
         rootRepositories.reserveCapacity(repositories.count)
 
         for repository in repositories {
+            if repository.isDocumentationRepository {
+                continue
+            }
             if let projectID = repository.project?.id, allowedProjectIDs.contains(projectID) {
                 groupedRepositories[projectID, default: []].append(repository)
             } else if repository.project == nil {
@@ -69,6 +72,7 @@ struct SidebarView: View {
     let onMoveProject: (RepositoryProject, RepositoryNamespace) -> Void
     let onDeleteProject: (RepositoryProject) -> Void
     let onConfigureProjectDocumentation: (RepositoryProject) -> Void
+    let onConfigureDocumentationRemotes: (RepositoryProject) -> Void
     let onOpenProjectDocumentation: (RepositoryProject) -> Void
     let onRemoveProjectDocumentation: (RepositoryProject) -> Void
     let onAssignRepository: (ManagedRepository, RepositoryNamespace, RepositoryProject?) -> Void
@@ -313,7 +317,7 @@ struct SidebarView: View {
         Button("Refresh") {
             onRefreshRepository(repository)
         }
-        Button("Manage Remotes") {
+        Button(repository.isDocumentationRepository ? "Remotes konfigurieren" : "Manage Remotes") {
             onManageRemotes(repository)
         }
 
@@ -364,6 +368,10 @@ struct SidebarView: View {
         }
 
         if project.documentationRepository != nil {
+            Button("Remotes der Dokumentationsquelle konfigurieren") {
+                onConfigureDocumentationRemotes(project)
+            }
+
             Button("Dokumentations-Repository oeffnen") {
                 onOpenProjectDocumentation(project)
             }

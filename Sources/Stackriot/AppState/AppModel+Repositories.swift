@@ -482,10 +482,10 @@ extension AppModel {
             refreshRepositorySidebarSnapshot(for: repository)
         }
 
-        let status = services.repositoryManager.refreshStatus(for: URL(fileURLWithPath: repository.bareRepositoryPath))
-        guard status == .ready else {
+        let physicalStatus = services.repositoryManager.refreshStatus(for: URL(fileURLWithPath: repository.bareRepositoryPath))
+        guard physicalStatus == .ready else {
             stopRepositoryWorktreeMonitoring(for: repository.id)
-            repository.status = status
+            repository.status = physicalStatus
             repository.updatedAt = .now
             repository.lastErrorMessage = "Repository missing or invalid."
             save(modelContext)
@@ -506,6 +506,9 @@ extension AppModel {
         )
 
         repository.status = result.status
+        if repository.isDocumentationRepository, result.status == .broken {
+            repository.status = .ready
+        }
         repository.defaultBranch = result.defaultBranch
         repository.defaultRemoteName = defaultRemoteName
         repository.lastFetchedAt = result.fetchedAt ?? repository.lastFetchedAt

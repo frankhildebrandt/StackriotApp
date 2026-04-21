@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 import SwiftUI
 
@@ -106,6 +107,10 @@ struct RepositoryDetailView: View {
                     projectDocumentationSection
                 }
 
+                if repository.isDocumentationRepository {
+                    DocumentationRepositoryFileBrowser(repository: repository)
+                }
+
                 worktreeSection(worktrees: worktrees, buckets: worktreeBuckets, detailSnapshot: detailSnapshot)
 
                 if selectedWorktree == nil {
@@ -178,10 +183,17 @@ struct RepositoryDetailView: View {
 
                 HStack(spacing: 10) {
                     if let documentationRepository {
-                        Button("Dokumentations-Repository oeffnen") {
-                            appModel.openDocumentationRepository(for: project)
+                        if repository.id != documentationRepository.id {
+                            Button("Dokumentations-Repository oeffnen") {
+                                appModel.openDocumentationRepository(for: project)
+                            }
+                            .buttonStyle(.borderedProminent)
                         }
-                        .buttonStyle(.borderedProminent)
+
+                        Button("Remotes konfigurieren") {
+                            appModel.presentRemoteManagement(for: documentationRepository)
+                        }
+                        .buttonStyle(.bordered)
 
                         Text(documentationRepository.bareRepositoryPath)
                             .font(.caption)
@@ -1348,5 +1360,239 @@ private struct ActiveDevContainerRow: View {
                 .disabled(summary.activeOperation != nil)
             }
         }
+    }
+}
+
+// MARK: - Documentation repository file browser
+
+private struct DocumentationFileEntry: Identifiable {
+    let id: String
+    let name: String
+    let children: [DocumentationFileEntry]?
+}
+
+private struct DocumentationRepositoryFileBrowser: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(\.modelContext) private var modelContext
+
+    let repository: ManagedRepository
+
+    @State private var rootURL: URL?
+    @State private var tree: [DocumentationFileEntry] = []
+    @State private var loadError: String?
+    @State private var selectedRelativePath: String?
+    @State private var previewState: DocumentationFilePreviewState = .empty
+
+    private enum DocumentationFilePreviewState {
+        case empty
+        case loading
+        case message(String)
+        case text(String)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Dokumentation im Workspace")
+                .font(.title3.weight(.semibold))
+
+            if let loadError {
+                Text(loadError)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else if rootURL == nil, tree.isEmpty {
+                ProgressView("Workspace wird vorbereitet …")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HSplitView {
+                    List(selection: $selectedRelativePath) {
+                        outline(tree)
+                    }
+                    .frame(minWidth: 240, idealWidth: 280)
+
+                    previewPane
+                        .frame(minWidth: 320)
+                }
+                .frame(minHeight: 320, idealHeight: 440)
+            }
+        }
+        .padding(16)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .task(id: repository.id) {
+            await loadTree()
+        }
+        .onChange(of: selectedRelativePath) { _, newValue in
+            loadPreview(for: newValue)
+        }
+    }
+
+    private func outline(_ entries: [DocumentationFileEntry]) -> AnyView {
+        AnyView(
+            ForEach(entries) { entry in
+                if let children = entry.children {
+                    DisclosureGroup {
+                        outline(children)
+                    } label: {
+                        Label(entry.name, systemImage: "folder")
+                    }
+                } else {
+                    Label(entry.name, systemImage: "doc.text")
+                        .tag(Optional(entry.id))
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var previewPane: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Vorschau")
+                .font(.subheadline.weight(.semibold))
+
+            switch previewState {
+            case .empty:
+                Text("Waehle eine Datei aus der Liste.")
+                    .foregroundStyle(.secondary)
+            case .loading:
+                ProgressView()
+            case let .message(text):
+                Text(text)
+                    .foregroundStyle(.secondary)
+            case let .text(text):
+                ScrollView {
+                    Text(text)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func loadTree() async {
+        await MainActor.run {
+            loadError = nil
+            tree = []
+            rootURL = nil
+            selectedRelativePath = nil
+            previewState = .empty
+        }
+
+        _ = await appModel.ensureDefaultBranchWorkspace(for: repository, in: modelContext)
+        guard let worktree = appModel.defaultBranchWorkspace(for: repository),
+              let url = worktree.materializedURL
+        else {
+            await MainActor.run {
+                loadError = "Kein materialisierter Default-Workspace fuer dieses Dokumentations-Repository."
+            }
+            return
+        }
+
+        do {
+            let entries = try Self.buildEntries(at: url, relativePrefix: "")
+            await MainActor.run {
+                rootURL = url
+                tree = entries
+            }
+        } catch {
+            await MainActor.run {
+                loadError = error.localizedDescription
+            }
+        }
+    }
+
+    private func loadPreview(for relativePath: String?) {
+        guard let relativePath, let rootURL else {
+            previewState = .empty
+            return
+        }
+
+        let fileURL = rootURL.appendingPathComponent(relativePath)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
+            previewState = .message("Fuer Ordner gibt es keine Textvorschau.")
+            return
+        }
+
+        previewState = .loading
+        Task {
+            let state = Self.previewContents(at: fileURL)
+            await MainActor.run {
+                previewState = state
+            }
+        }
+    }
+
+    private static let maxPreviewBytes = 512_000
+
+    private static func buildEntries(at directoryURL: URL, relativePrefix: String) throws -> [DocumentationFileEntry] {
+        let fileManager = FileManager.default
+        let contents = try fileManager.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+        .sorted { lhs, rhs in
+            lhs.lastPathComponent.localizedStandardCompare(rhs.lastPathComponent) == .orderedAscending
+        }
+
+        var entries: [DocumentationFileEntry] = []
+        entries.reserveCapacity(contents.count)
+
+        for url in contents {
+            if url.lastPathComponent == ".git" {
+                continue
+            }
+
+            let values = try url.resourceValues(forKeys: [.isDirectoryKey])
+            let isDirectory = values.isDirectory ?? false
+            let name = url.lastPathComponent
+            let relativePath: String
+            if relativePrefix.isEmpty {
+                relativePath = name
+            } else {
+                relativePath = "\(relativePrefix)/\(name)"
+            }
+
+            if isDirectory {
+                let children = try buildEntries(at: url, relativePrefix: relativePath)
+                entries.append(DocumentationFileEntry(id: relativePath, name: name, children: children))
+            } else {
+                entries.append(DocumentationFileEntry(id: relativePath, name: name, children: nil))
+            }
+        }
+
+        return entries
+    }
+
+    private static func previewContents(at url: URL) -> DocumentationFilePreviewState {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let sizeNumber = attributes[.size] as? NSNumber
+        else {
+            return .message("Metadaten der Datei konnten nicht gelesen werden.")
+        }
+
+        let size = sizeNumber.intValue
+        guard size <= maxPreviewBytes else {
+            return .message("Datei ist zu gross fuer die Vorschau (\(size) Bytes).")
+        }
+
+        guard let data = try? Data(contentsOf: url) else {
+            return .message("Datei konnte nicht geoeffnet werden.")
+        }
+
+        if data.contains(where: { $0 == 0 }) {
+            return .message("Binaerdatei – keine Textvorschau.")
+        }
+
+        guard let text = String(data: data, encoding: .utf8) else {
+            return .message("Inhalt ist kein gueltiges UTF-8.")
+        }
+
+        return .text(text)
     }
 }
