@@ -21,8 +21,12 @@ final class AppModel: @unchecked Sendable {
     var selectedRepositoryID: UUID? {
         didSet {
             guard selectedRepositoryID != oldValue else { return }
+            if let previousID = oldValue {
+                stopRepositoryWorktreeMonitoring(for: previousID)
+            }
             beginRepositorySelectionTrace()
             primeSelectedRepositoryCachesIfNeeded()
+            scheduleRepositorySelectionSync(afterSelecting: selectedRepositoryID)
         }
     }
     var selectedWorktreeIDsByRepository: [UUID: UUID] = [:]
@@ -166,6 +170,8 @@ final class AppModel: @unchecked Sendable {
     var pendingAutoRebaseRepositoryIDs: Set<UUID> = []
     @ObservationIgnored
     var devContainerMonitoringTask: Task<Void, Never>?
+    @ObservationIgnored
+    var repositorySelectionSyncTask: Task<Void, Never>?
     @ObservationIgnored
     let selectionPerformanceMonitor = SelectionPerformanceMonitor()
 

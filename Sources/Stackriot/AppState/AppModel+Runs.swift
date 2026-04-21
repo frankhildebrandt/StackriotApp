@@ -340,7 +340,12 @@ extension AppModel {
         scheduleAutoHideIfNeeded(for: runID)
         if finalStatus == .succeeded, run.actionKind == .gitOperation, let repository = run.repository {
             Task { [weak self] in
-                await self?.refreshWorktreeStatuses(for: repository)
+                guard let self, let modelContext = self.storedModelContext else { return }
+                if run.title == "git push" {
+                    await self.refresh(repository, in: modelContext)
+                } else {
+                    await self.refreshWorktreeStatuses(for: repository)
+                }
             }
         }
         save(modelContext)

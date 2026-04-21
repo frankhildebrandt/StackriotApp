@@ -694,6 +694,11 @@ extension AppModel {
             return
         }
 
+        guard let selectedID = selectedRepositoryID, selectedID == repository.id else {
+            stopRepositoryWorktreeMonitoring(for: repository.id)
+            return
+        }
+
         let repositoryID = repository.id
         let monitor = repositoryWorktreeMonitoringByRepositoryID[repositoryID] ?? {
             let monitor = RepositoryWorktreeMonitor { [weak self] in
@@ -727,6 +732,26 @@ extension AppModel {
         repositoryWorktreeReconcileTasksByRepositoryID.removeValue(forKey: repositoryID)
         pendingRepositoryWorktreeReconcileRepositoryIDs.remove(repositoryID)
         repositoryWorktreeMonitoringByRepositoryID.removeValue(forKey: repositoryID)?.stop()
+    }
+
+    /// Debounced worktree list + status sync after the selected repository changes (no full `git fetch`).
+    func scheduleRepositorySelectionSync(afterSelecting newRepositoryID: UUID?) {
+        repositorySelectionSyncTask?.cancel()
+        repositorySelectionSyncTask = nil
+        guard let newRepositoryID else { return }
+
+        repositorySelectionSyncTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.repositorySelectionSyncTask = nil }
+            try? await Task.sleep(for: .milliseconds(280))
+            guard !Task.isCancelled, self.selectedRepositoryID == newRepositoryID else { return }
+            guard let modelContext = self.storedModelContext,
+                  let repository = self.repositoryRecord(with: newRepositoryID)
+            else { return }
+            await self.updateRepositoryWorktreeMonitoring(for: repository)
+            _ = await self.reconcileRepositoryWorktrees(for: repository, in: modelContext)
+            await self.refreshWorktreeStatuses(for: repository)
+        }
     }
 
     func scheduleRepositoryWorktreeReconciliation(for repositoryID: UUID) {

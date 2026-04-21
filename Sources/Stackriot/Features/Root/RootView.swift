@@ -70,6 +70,11 @@ struct RootView: View {
                         await appModel.refresh(repository, in: modelContext)
                     }
                 },
+                onRefreshAllRepositories: {
+                    Task {
+                        await appModel.refreshAllRepositories(force: true)
+                    }
+                },
                 onRevealRepository: { repository in
                     Task {
                         await appModel.revealRepositoryInFinder(repository)

@@ -74,6 +74,7 @@ struct SidebarView: View {
     let onAssignRepository: (ManagedRepository, RepositoryNamespace, RepositoryProject?) -> Void
     let onAddRepository: () -> Void
     let onRefreshRepository: (ManagedRepository) -> Void
+    let onRefreshAllRepositories: () -> Void
     let onRevealRepository: (ManagedRepository) -> Void
     let availableDevTools: (ManagedRepository) -> [SupportedDevTool]
     let availableExternalTerminals: [SupportedExternalTerminal]
@@ -194,53 +195,67 @@ struct SidebarView: View {
             .padding(.top, 12)
             .padding(.bottom, 8)
 */
-            Button {
-                showNamespacePicker.toggle()
-            } label: {
-                HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("NAMESPACE")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                        Text(currentNamespace?.name ?? "—")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.primary)
+            HStack(alignment: .center, spacing: 8) {
+                Button {
+                    showNamespacePicker.toggle()
+                } label: {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("NAMESPACE")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                            Text(currentNamespace?.name ?? "—")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
-                    Spacer()
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .frame(maxWidth: .infinity)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                .buttonStyle(.plain)
+                .popover(isPresented: $showNamespacePicker, arrowEdge: .bottom) {
+                    NamespacePickerPopover(
+                        namespaces: namespaces,
+                        selectedNamespaceID: selectedNamespaceID,
+                        onSelect: { namespace in
+                            onSelectNamespace(namespace)
+                            showNamespacePicker = false
+                        },
+                        onRename: { namespace in
+                            showNamespacePicker = false
+                            onEditNamespace(namespace)
+                        },
+                        onDelete: { namespace in
+                            showNamespacePicker = false
+                            onDeleteNamespace(namespace)
+                        },
+                        onCreateNamespace: {
+                            showNamespacePicker = false
+                            onCreateNamespace()
+                        }
+                    )
+                }
+
+                Button {
+                    onRefreshAllRepositories()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 32)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .help("Alle Repositories aktualisieren")
             }
-            .buttonStyle(.plain)
             .padding(.horizontal)
             .padding(.bottom, 8)
-            .popover(isPresented: $showNamespacePicker, arrowEdge: .bottom) {
-                NamespacePickerPopover(
-                    namespaces: namespaces,
-                    selectedNamespaceID: selectedNamespaceID,
-                    onSelect: { namespace in
-                        onSelectNamespace(namespace)
-                        showNamespacePicker = false
-                    },
-                    onRename: { namespace in
-                        showNamespacePicker = false
-                        onEditNamespace(namespace)
-                    },
-                    onDelete: { namespace in
-                        showNamespacePicker = false
-                        onDeleteNamespace(namespace)
-                    },
-                    onCreateNamespace: {
-                        showNamespacePicker = false
-                        onCreateNamespace()
-                    }
-                )
-            }
         }
         .background(.ultraThinMaterial)
     }
