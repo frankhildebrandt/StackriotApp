@@ -18,6 +18,7 @@
 		E00000000000000000000006 /* AppModel+RemotesSSH.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000006 /* AppModel+RemotesSSH.swift */; };
 		E00000000000000000000007 /* AppModel+Repositories.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000007 /* AppModel+Repositories.swift */; };
 		E00000000000000000000008 /* AppModel+Runs.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000008 /* AppModel+Runs.swift */; };
+		E00000000000000000000090 /* AppModel+RunConsoleRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000090 /* AppModel+RunConsoleRuntime.swift */; };
 		E00000000000000000000009 /* AppModel+Worktrees.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000009 /* AppModel+Worktrees.swift */; };
 		E0000000000000000000000A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000A /* AppModel.swift */; };
 		E0000000000000000000000B /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000B /* AppServices.swift */; };
@@ -150,6 +151,7 @@
 		D00000000000000000000006 /* AppModel+RemotesSSH.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+RemotesSSH.swift"; sourceTree = "<group>"; };
 		D00000000000000000000007 /* AppModel+Repositories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Repositories.swift"; sourceTree = "<group>"; };
 		D00000000000000000000008 /* AppModel+Runs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Runs.swift"; sourceTree = "<group>"; };
+		D00000000000000000000090 /* AppModel+RunConsoleRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+RunConsoleRuntime.swift"; sourceTree = "<group>"; };
 		D00000000000000000000009 /* AppModel+Worktrees.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Worktrees.swift"; sourceTree = "<group>"; };
 		D0000000000000000000000A /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		D0000000000000000000000B /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServices.swift; sourceTree = "<group>"; };
@@ -339,6 +341,7 @@
 				D00000000000000000000006 /* AppModel+RemotesSSH.swift */,
 				D00000000000000000000007 /* AppModel+Repositories.swift */,
 				D00000000000000000000008 /* AppModel+Runs.swift */,
+				D00000000000000000000090 /* AppModel+RunConsoleRuntime.swift */,
 				D00000000000000000000009 /* AppModel+Worktrees.swift */,
 				D00000000000000000000083 /* RepositoryWorktreeMonitor.swift */,
 				D0000000000000000000000A /* AppModel.swift */,
@@ -650,6 +653,7 @@
 				E00000000000000000000006 /* AppModel+RemotesSSH.swift in Sources */,
 				E00000000000000000000007 /* AppModel+Repositories.swift in Sources */,
 				E00000000000000000000008 /* AppModel+Runs.swift in Sources */,
+				E00000000000000000000090 /* AppModel+RunConsoleRuntime.swift in Sources */,
 				E00000000000000000000070 /* AppModel+RawLogs.swift in Sources */,
 				E00000000000000000000009 /* AppModel+Worktrees.swift in Sources */,
 				E0000000000000000000003F /* AppModel+Plans.swift in Sources */,

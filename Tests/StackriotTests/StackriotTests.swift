@@ -2024,6 +2024,13 @@ struct StackriotTests {
         #expect(FileManager.default.fileExists(atPath: result.destinationDirectory.appendingPathComponent("implementation-plan.md").path))
     }
 
+    @Test
+    func runConsoleSessionLogsBranchDirectoryMatchesDocumentationArchiveConvention() {
+        let service = ProjectDocumentationArchiveService()
+        let branch = "feature/nested"
+        #expect(service.archiveDirectoryName(for: branch) == AppPaths.sanitizedPathComponent("feature--nested"))
+    }
+
     @MainActor
     @Test
     func documentationSourceRejectsRepositoryAlreadyAssignedToProject() async throws {

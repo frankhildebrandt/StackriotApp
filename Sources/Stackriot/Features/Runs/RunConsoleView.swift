@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 import SwiftUI
 
@@ -11,10 +12,11 @@ struct RunConsoleView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if let run {
-                HStack {
-                    VStack(alignment: .leading, spacing: 6) {
-                    }
+                HStack(alignment: .center, spacing: 10) {
+                    runConsoleLeadingToolbar(for: run)
+
                     Spacer()
+
                     HStack(spacing: 8) {
                         if run.isFixableBuildFailure {
                             fixWithAIMenu(for: run)
@@ -95,6 +97,84 @@ struct RunConsoleView: View {
                     "outputLength": run.outputText.count
                 ]
             )
+        }
+    }
+
+    @ViewBuilder
+    private func runConsoleLeadingToolbar(for run: RunRecord) -> some View {
+        let isRunning = activeRunIDs.contains(run.id)
+        let supportsRuntime = appModel.supportsRunConsoleRuntimeTools(for: run)
+        let supportsRecorder = appModel.supportsSessionRecorder(for: run)
+        let isRecording = appModel.isSessionRecordingActive(for: run)
+        let logURL = appModel.sessionRecorderLogFileURL(for: run)
+        let logExists = logURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+
+        if supportsRuntime {
+            HStack(spacing: 6) {
+                Button {
+                    appModel.cancelRun(run, in: modelContext)
+                } label: {
+                    Image(systemName: "stop.fill")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!isRunning)
+                .help("Stop the running process (graceful terminal cancel / SIGTERM).")
+
+                Button {
+                    appModel.startRunConfigurationAgain(run, in: modelContext)
+                } label: {
+                    Image(systemName: "play.fill")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isRunning || !supportsRuntime)
+                .help("Start this run configuration again in a new tab (when not running).")
+
+                Button {
+                    appModel.rerunRunConfiguration(run, in: modelContext)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!supportsRuntime)
+                .help("Re-run: send Ctrl+C, wait, force kill if still running, then start again in a new tab.")
+            }
+        }
+
+        if supportsRecorder {
+            HStack(spacing: 6) {
+                Button {
+                    appModel.startRunSessionRecording(run, in: modelContext)
+                } label: {
+                    Image(systemName: "record.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isRecording)
+                .help("Append terminal output to a session log under the documentation repository (session-logs/…).")
+
+                Button {
+                    appModel.stopRunSessionRecording(run)
+                } label: {
+                    Image(systemName: "stop.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!isRecording)
+                .help("Stop recording and close the session log file.")
+
+                Button {
+                    appModel.openRunSessionRecording(run)
+                } label: {
+                    Image(systemName: "doc.text")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!logExists)
+                .help("Open the session log in the default app.")
+            }
         }
     }
 
