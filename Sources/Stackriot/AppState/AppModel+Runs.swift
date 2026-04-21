@@ -359,7 +359,8 @@ extension AppModel {
             summarizeAgentRun(runID: runID)
         }
         completePendingRunFixIfNeeded(afterAgentRunID: runID, succeeded: !wasCancelled && exitCode == 0)
-        if forceClosingTerminalRunIDs.remove(runID) != nil {
+        let forceClosed = forceClosingTerminalRunIDs.remove(runID) != nil
+        if wasCancelled || forceClosed {
             terminalSessions[runID] = nil
         }
     }
@@ -417,6 +418,106 @@ extension AppModel {
         completePendingRunFixIfNeeded(afterAgentRunID: runID, succeeded: false)
         if forceClosingTerminalRunIDs.remove(runID) != nil {
             terminalSessions[runID] = nil
+        }
+    }
+
+    /// Re-starts a run configuration in the same tab, reusing the existing `RunRecord` and `run.id`.
+    func relaunchRunWithSameRecord(
+        _ run: RunRecord,
+        descriptor: CommandExecutionDescriptor,
+        repository: ManagedRepository,
+        worktree: WorktreeRecord,
+        modelContext: ModelContext
+    ) async -> Bool {
+        let commandLine = descriptor.displayCommandLine ?? ([descriptor.executable] + descriptor.arguments).joined(separator: " ")
+
+        flushPendingRunOutput(runID: run.id)
+        flushBufferedRunOutputIfNeeded(runID: run.id)
+        runOutputFlushTasks[run.id]?.cancel()
+        runOutputFlushTasks.removeValue(forKey: run.id)
+        pendingRunOutputBuffer.removeValue(forKey: run.id)
+        await incomingRunOutputThrottle.cancel(runID: run.id)
+
+        terminalSessions[run.id] = nil
+
+        run.actionKind = descriptor.actionKind
+        run.title = descriptor.title
+        run.commandLine = commandLine
+        run.outputInterpreter = descriptor.outputInterpreter
+        run.runConfigurationID = descriptor.runConfigurationID
+        run.status = .running
+        run.endedAt = nil
+        run.exitCode = nil
+        run.startedAt = .now
+        run.outputText = "$ \(commandLine)\n"
+        run.aiSummaryTitle = nil
+        run.aiSummaryText = nil
+        dismissedAISummaryRunIDs.remove(run.id)
+        deliveredCursorAgentMarkdownSnapshotRunIDs.remove(run.id)
+
+        structuredOutputParsersByRunID.removeValue(forKey: run.id)
+        agentRunSegmentsByRunID.removeValue(forKey: run.id)
+
+        if let interpreter = descriptor.outputInterpreter {
+            let parser = StructuredAgentOutputParserFactory.makeParser(for: interpreter)
+            structuredOutputParsersByRunID[run.id] = parser
+            applyStructuredParsedChunk(parser.consume(run.outputText), to: run.id)
+        }
+
+        let rawLogRecord: AgentRawLogRecord?
+        do {
+            rawLogRecord = try prepareRawLogRecordIfNeeded(
+                for: run,
+                descriptor: descriptor,
+                repository: repository,
+                worktree: worktree,
+                initialOutput: run.outputText,
+                modelContext: modelContext
+            )
+        } catch {
+            pendingErrorMessage = "RAW log archive could not be created: \(error.localizedDescription)"
+            return false
+        }
+
+        do {
+            try modelContext.save()
+            let runID = run.id
+            if let rawLogRecord {
+                rawLogRecordIDsByRunID[runID] = rawLogRecord.id
+                rawLogFileURLsByRunID[runID] = rawLogRecord.logFileURL
+                Task {
+                    try? await rawLogAppendCoordinator.register(runID: runID, logURL: rawLogRecord.logFileURL)
+                }
+            }
+            cancelAutoHide(for: runID)
+            terminalTabs.markRunningAgain(runID: runID)
+            activeRunIDs.insert(runID)
+            if descriptor.actionKind == .aiAgent {
+                if descriptor.showsAgentIndicator {
+                    delegatedAgentRunIDs.insert(runID)
+                } else {
+                    delegatedAgentRunIDs.remove(runID)
+                }
+                refreshRunningAgentWorktrees()
+            }
+            selectedWorktreeIDsByRepository[repository.id] = worktree.id
+            if descriptor.activatesTerminalTab {
+                terminalTabs.deselectPlanTab(for: worktree.id)
+                terminalTabs.activate(runID: runID, worktreeID: worktree.id)
+            } else {
+                terminalTabs.showInBackground(runID: runID, worktreeID: worktree.id)
+            }
+            Task { [weak self] in
+                await self?.launchRun(runID: runID, descriptor: descriptor)
+            }
+            return true
+        } catch {
+            if let rawLogRecord {
+                try? services.rawLogArchive.delete(rawLogRecord)
+                modelContext.delete(rawLogRecord)
+            }
+            pendingErrorMessage = error.localizedDescription
+            return false
         }
     }
 

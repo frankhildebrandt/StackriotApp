@@ -139,7 +139,7 @@ struct RunConsoleView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(!supportsRuntime)
-                .help("Re-run: send Ctrl+C, wait, force kill if still running, then start again in a new tab.")
+                .help("Re-run: send Ctrl+C, wait, force kill if still running, then start again in this tab.")
             }
         }
 

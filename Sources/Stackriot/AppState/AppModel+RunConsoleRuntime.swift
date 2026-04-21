@@ -87,12 +87,19 @@ extension AppModel {
                 self.pendingErrorMessage = "This run configuration is no longer available to re-run."
                 return
             }
-            _ = self.startRun(context.descriptor, repository: context.repository, worktree: context.worktree, modelContext: modelContext)
+            _ = await self.relaunchRunWithSameRecord(
+                run,
+                descriptor: context.descriptor,
+                repository: context.repository,
+                worktree: context.worktree,
+                modelContext: modelContext
+            )
         }
     }
 
     private func stopRunForRerunIfNeeded(_ run: RunRecord, in modelContext: ModelContext) async {
         guard activeRunIDs.contains(run.id) else { return }
+        forceClosingTerminalRunIDs.insert(run.id)
 
         if let session = terminalSessions[run.id] {
             session.send(text: "\u{3}")
