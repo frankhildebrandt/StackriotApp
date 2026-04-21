@@ -1852,6 +1852,13 @@ struct TerminalTabBookkeeping: Sendable {
         tabs[runID] = tab
     }
 
+    /// Clears completion so a re-run in the same tab is treated as active again (chip / retention).
+    mutating func markRunningAgain(runID: UUID) {
+        guard var tab = tabs[runID] else { return }
+        tab.completedAt = nil
+        tabs[runID] = tab
+    }
+
     mutating func setPinned(_ isPinned: Bool, for runID: UUID) {
         guard var tab = tabs[runID] else { return }
         tab.isPinned = isPinned
