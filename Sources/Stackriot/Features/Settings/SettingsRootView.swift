@@ -62,8 +62,11 @@ private struct ShortcutsSettingsView: View {
     @AppStorage(AppPreferences.quickIntentHotkeyEnabledKey) private var isQuickIntentEnabled = AppPreferences.defaultQuickIntentHotkey.isEnabled
     @AppStorage(AppPreferences.quickIntentHotkeyKeyCodeKey) private var quickIntentKeyCode = Int(AppPreferences.defaultQuickIntentHotkey.keyCode)
     @AppStorage(AppPreferences.quickIntentHotkeyModifiersKey) private var quickIntentModifiers = AppPreferences.defaultQuickIntentHotkey.modifiers.rawValue
+    @AppStorage(AppPreferences.commandBarHotkeyEnabledKey) private var isCommandBarEnabled = AppPreferences.defaultCommandBarHotkey.isEnabled
+    @AppStorage(AppPreferences.commandBarHotkeyKeyCodeKey) private var commandBarKeyCode = Int(AppPreferences.defaultCommandBarHotkey.keyCode)
+    @AppStorage(AppPreferences.commandBarHotkeyModifiersKey) private var commandBarModifiers = AppPreferences.defaultCommandBarHotkey.modifiers.rawValue
 
-    @State private var isCapturingShortcut = false
+    @State private var capturingTarget: ShortcutCaptureTarget?
     @State private var localMonitor: Any?
 
     private var configuration: QuickIntentHotkeyConfiguration {
@@ -74,8 +77,50 @@ private struct ShortcutsSettingsView: View {
         )
     }
 
+    private var commandBarConfiguration: GlobalHotKeyConfiguration {
+        GlobalHotKeyConfiguration(
+            isEnabled: isCommandBarEnabled,
+            keyCode: UInt16(commandBarKeyCode),
+            modifiers: QuickIntentModifierSet(rawValue: commandBarModifiers)
+        )
+    }
+
     var body: some View {
         SettingsFormPage(category: .shortcuts) {
+            Section("CommandBar") {
+                Toggle("Globalen Hotkey aktivieren", isOn: $isCommandBarEnabled)
+                    .onChange(of: isCommandBarEnabled) { _, _ in
+                        appModel.configureCommandBarHotKey()
+                    }
+
+                LabeledContent("Aktueller Shortcut") {
+                    Text(commandBarConfiguration.displayString)
+                        .font(.system(.body, design: .monospaced))
+                }
+
+                HStack {
+                    Button(capturingTarget == .commandBar ? "Taste jetzt druecken…" : "Shortcut aufnehmen") {
+                        if capturingTarget == .commandBar {
+                            stopCapture()
+                        } else {
+                            startCapture(.commandBar)
+                        }
+                    }
+
+                    Button("Auf Standard") {
+                        let defaults = AppPreferences.defaultCommandBarHotkey
+                        isCommandBarEnabled = defaults.isEnabled
+                        commandBarKeyCode = Int(defaults.keyCode)
+                        commandBarModifiers = defaults.modifiers.rawValue
+                        appModel.configureCommandBarHotKey()
+                    }
+                }
+
+                Text("Der globale CommandBar-Hotkey oeffnet eine kontextabhaengige Suche fuer Run Targets, Repository-Aktionen und schnelle Navigation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Quick Intent") {
                 Toggle("Globalen Hotkey aktivieren", isOn: $isQuickIntentEnabled)
                     .onChange(of: isQuickIntentEnabled) { _, _ in
@@ -88,11 +133,11 @@ private struct ShortcutsSettingsView: View {
                 }
 
                 HStack {
-                    Button(isCapturingShortcut ? "Taste jetzt druecken…" : "Shortcut aufnehmen") {
-                        if isCapturingShortcut {
+                    Button(capturingTarget == .quickIntent ? "Taste jetzt druecken…" : "Shortcut aufnehmen") {
+                        if capturingTarget == .quickIntent {
                             stopCapture()
                         } else {
-                            startCapture()
+                            startCapture(.quickIntent)
                         }
                     }
 
@@ -111,8 +156,9 @@ private struct ShortcutsSettingsView: View {
             }
 
             Section("Kontextquellen") {
-                Text("Beim globalen Trigger versucht Stackriot zuerst die aktuelle Textmarkierung aus der aktiven App zu lesen und faellt ansonsten auf die Zwischenablage zurueck.")
-                Text("Fuer Markierungstext benoetigt Stackriot Bedienungshilfe-Berechtigungen unter Systemeinstellungen > Datenschutz & Sicherheit > Bedienungshilfen.")
+                Text("Die CommandBar versucht zuerst, den frontmost Cursor-Workspace einem Stackriot-Worktree zuzuordnen, und faellt danach auf die aktuelle Stackriot-Auswahl zurueck.")
+                Text("Quick Intent liest beim globalen Trigger zuerst die aktuelle Textmarkierung aus der aktiven App und faellt ansonsten auf die Zwischenablage zurueck.")
+                Text("Fuer Markierungstext und bessere Fenster-Kontexterkennung benoetigt Stackriot Bedienungshilfe-Berechtigungen unter Systemeinstellungen > Datenschutz & Sicherheit > Bedienungshilfen.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -121,16 +167,24 @@ private struct ShortcutsSettingsView: View {
         }
     }
 
-    private func startCapture() {
+    private func startCapture(_ target: ShortcutCaptureTarget) {
         stopCapture()
-        isCapturingShortcut = true
+        capturingTarget = target
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let modifiers = Self.quickIntentModifiers(from: event.modifierFlags)
             guard modifiers.isEmpty == false else { return nil }
-            quickIntentKeyCode = Int(event.keyCode)
-            quickIntentModifiers = modifiers.rawValue
-            isQuickIntentEnabled = true
-            appModel.configureQuickIntentHotKey()
+            switch target {
+            case .quickIntent:
+                quickIntentKeyCode = Int(event.keyCode)
+                quickIntentModifiers = modifiers.rawValue
+                isQuickIntentEnabled = true
+                appModel.configureQuickIntentHotKey()
+            case .commandBar:
+                commandBarKeyCode = Int(event.keyCode)
+                commandBarModifiers = modifiers.rawValue
+                isCommandBarEnabled = true
+                appModel.configureCommandBarHotKey()
+            }
             stopCapture()
             return nil
         }
@@ -141,7 +195,7 @@ private struct ShortcutsSettingsView: View {
             NSEvent.removeMonitor(localMonitor)
             self.localMonitor = nil
         }
-        isCapturingShortcut = false
+        capturingTarget = nil
     }
 
     private static func quickIntentModifiers(from flags: NSEvent.ModifierFlags) -> QuickIntentModifierSet {
@@ -152,6 +206,11 @@ private struct ShortcutsSettingsView: View {
         if flags.contains(.shift) { modifiers.insert(.shift) }
         return modifiers
     }
+}
+
+private enum ShortcutCaptureTarget {
+    case quickIntent
+    case commandBar
 }
 
 #Preview {

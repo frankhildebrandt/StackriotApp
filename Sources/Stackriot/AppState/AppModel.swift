@@ -83,6 +83,8 @@ final class AppModel: @unchecked Sendable {
     var pendingAgentExecutionDraft: PendingAgentExecutionDraft?
     var quickIntentSession: QuickIntentSession?
     var pendingQuickIntentActivationID: UUID?
+    var commandBarSession: CommandBarSession?
+    var pendingCommandBarActivationID: UUID?
     var intentContentVersionsByWorktreeID: [UUID: Int] = [:]
     var implementationPlanContentVersionsByWorktreeID: [UUID: Int] = [:]
     @ObservationIgnored
@@ -200,6 +202,7 @@ final class AppModel: @unchecked Sendable {
             storedModelContext = modelContext
             prepareNotificationsIfNeeded()
             configureQuickIntentHotKey()
+            configureCommandBarHotKey()
             migrateLegacyRepositoriesIfNeeded(in: modelContext)
             migrateWorktreePrimaryContextsIfNeeded(in: modelContext)
             startAutoRefreshLoopIfNeeded()
@@ -939,15 +942,43 @@ private final class PerformanceDebugArtifactRecorder {
 
 extension AppModel {
     func configureQuickIntentHotKey() {
-        services.globalHotKeyManager.register(AppPreferences.quickIntentHotkeyConfiguration) { [weak self] in
+        services.globalHotKeyManager.register(AppPreferences.quickIntentHotkeyConfiguration, for: .quickIntent) { [weak self] in
             guard let self else { return }
             self.presentQuickIntentFromSystemTrigger()
+        }
+    }
+
+    func configureCommandBarHotKey() {
+        services.globalHotKeyManager.register(AppPreferences.commandBarHotkeyConfiguration, for: .commandBar) { [weak self] in
+            guard let self else { return }
+            self.presentCommandBarFromSystemTrigger()
         }
     }
 
     func presentQuickIntentFromSystemTrigger() {
         let capture = services.quickIntentContextService.captureCurrentContext()
         presentQuickIntent(capture)
+    }
+
+    func presentCommandBarFromSystemTrigger() {
+        presentCommandBar(triggerSource: .globalHotkey)
+    }
+
+    func presentCommandBarFromMenu() {
+        presentCommandBar(triggerSource: .menu)
+    }
+
+    func dismissCommandBarSession() {
+        commandBarSession = nil
+    }
+
+    private func presentCommandBar(triggerSource: CommandBarTriggerSource) {
+        commandBarSession = CommandBarSession(
+            triggerSource: triggerSource,
+            context: commandBarWorkspaceContext()
+        )
+        pendingCommandBarActivationID = UUID()
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func presentQuickIntentFromURL(_ url: URL) {

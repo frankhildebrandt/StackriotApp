@@ -63,8 +63,8 @@ protocol UserNotificationCentering: Sendable {
 
 @MainActor
 protocol GlobalHotKeyRegistering: AnyObject {
-    func register(_ configuration: QuickIntentHotkeyConfiguration, handler: @escaping @MainActor () -> Void)
-    func unregister()
+    func register(_ configuration: GlobalHotKeyConfiguration, for action: GlobalHotKeyAction, handler: @escaping @MainActor () -> Void)
+    func unregister(_ action: GlobalHotKeyAction)
 }
 
 struct QuickIntentCapture: Sendable, Equatable {
@@ -81,6 +81,24 @@ protocol QuickIntentContextServing: Sendable {
 
     @MainActor
     func captureContext(from url: URL) throws -> QuickIntentCapture
+}
+
+struct FrontmostWorkspaceContext: Sendable, Equatable {
+    let applicationName: String?
+    let bundleIdentifier: String?
+    let windowTitle: String?
+    let candidatePaths: [String]
+
+    var isCursor: Bool {
+        guard let bundleIdentifier else { return false }
+        return bundleIdentifier.localizedCaseInsensitiveContains("cursor")
+            || bundleIdentifier.localizedCaseInsensitiveContains("todesktop")
+    }
+}
+
+protocol FrontmostWorkspaceContextServing: Sendable {
+    @MainActor
+    func captureFrontmostWorkspaceContext() -> FrontmostWorkspaceContext
 }
 
 struct SystemUserNotificationCenter: UserNotificationCentering, @unchecked Sendable {
@@ -129,17 +147,17 @@ final class CarbonGlobalHotKeyManager: GlobalHotKeyRegistering {
     private static var installedHandler = false
     private static var activeHandlers: [UInt32: @MainActor () -> Void] = [:]
 
-    private var hotKeyRef: EventHotKeyRef?
-    private let hotKeyIDValue: UInt32 = 1
+    private var hotKeyRefs: [GlobalHotKeyAction: EventHotKeyRef] = [:]
 
-    func register(_ configuration: QuickIntentHotkeyConfiguration, handler: @escaping @MainActor () -> Void) {
-        unregister()
+    func register(_ configuration: GlobalHotKeyConfiguration, for action: GlobalHotKeyAction, handler: @escaping @MainActor () -> Void) {
+        unregister(action)
         guard configuration.isEnabled else { return }
 
         Self.installHandlerIfNeeded()
-        Self.activeHandlers[hotKeyIDValue] = handler
+        Self.activeHandlers[action.rawValue] = handler
 
-        let hotKeyID = EventHotKeyID(signature: Self.signature, id: hotKeyIDValue)
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: action.rawValue)
+        var hotKeyRef: EventHotKeyRef?
         let status = RegisterEventHotKey(
             UInt32(configuration.keyCode),
             carbonModifiers(from: configuration.modifiers),
@@ -149,16 +167,17 @@ final class CarbonGlobalHotKeyManager: GlobalHotKeyRegistering {
             &hotKeyRef
         )
         if status != noErr {
-            Self.activeHandlers.removeValue(forKey: hotKeyIDValue)
+            Self.activeHandlers.removeValue(forKey: action.rawValue)
+        } else if let hotKeyRef {
+            hotKeyRefs[action] = hotKeyRef
         }
     }
 
-    func unregister() {
-        if let hotKeyRef {
+    func unregister(_ action: GlobalHotKeyAction) {
+        if let hotKeyRef = hotKeyRefs.removeValue(forKey: action) {
             UnregisterEventHotKey(hotKeyRef)
-            self.hotKeyRef = nil
         }
-        Self.activeHandlers.removeValue(forKey: hotKeyIDValue)
+        Self.activeHandlers.removeValue(forKey: action.rawValue)
     }
 
     private func carbonModifiers(from modifiers: QuickIntentModifierSet) -> UInt32 {
@@ -203,6 +222,49 @@ final class CarbonGlobalHotKeyManager: GlobalHotKeyRegistering {
             }
         }
         return noErr
+    }
+}
+
+struct FrontmostWorkspaceContextService: FrontmostWorkspaceContextServing {
+    @MainActor
+    func captureFrontmostWorkspaceContext() -> FrontmostWorkspaceContext {
+        let app = NSWorkspace.shared.frontmostApplication
+        let bundleIdentifier = app?.bundleIdentifier
+        let applicationName = app?.localizedName
+        let windowTitle = AXIsProcessTrusted() ? focusedWindowTitle() : nil
+        let candidatePaths = Self.extractCandidatePaths(from: windowTitle)
+
+        return FrontmostWorkspaceContext(
+            applicationName: applicationName,
+            bundleIdentifier: bundleIdentifier,
+            windowTitle: windowTitle,
+            candidatePaths: candidatePaths
+        )
+    }
+
+    private func focusedWindowTitle() -> String? {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedAppValue: CFTypeRef?
+        let appStatus = AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppValue)
+        guard appStatus == .success, let focusedApp = focusedAppValue else { return nil }
+
+        var focusedWindowValue: CFTypeRef?
+        let windowStatus = AXUIElementCopyAttributeValue(focusedApp as! AXUIElement, kAXFocusedWindowAttribute as CFString, &focusedWindowValue)
+        guard windowStatus == .success, let focusedWindow = focusedWindowValue else { return nil }
+
+        var titleValue: CFTypeRef?
+        let titleStatus = AXUIElementCopyAttributeValue(focusedWindow as! AXUIElement, kAXTitleAttribute as CFString, &titleValue)
+        return titleStatus == .success ? titleValue as? String : nil
+    }
+
+    static func extractCandidatePaths(from text: String?) -> [String] {
+        guard let text else { return [] }
+        let expanded = NSString(string: text).expandingTildeInPath
+        let separators = CharacterSet(charactersIn: " \n\t\r\"'()[]{}")
+        return expanded
+            .components(separatedBy: separators)
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ",;:")) }
+            .filter { $0.hasPrefix("/") && $0.count > 1 }
     }
 }
 
@@ -425,6 +487,7 @@ struct AppServices {
     let projectDocumentationArchiveService: ProjectDocumentationArchiveService
     let notificationService: any AppNotificationServing
     let quickIntentContextService: any QuickIntentContextServing
+    let frontmostWorkspaceContextService: any FrontmostWorkspaceContextServing
     let globalHotKeyManager: any GlobalHotKeyRegistering
 
     init(
@@ -451,6 +514,7 @@ struct AppServices {
         projectDocumentationArchiveService: ProjectDocumentationArchiveService = ProjectDocumentationArchiveService(),
         notificationService: any AppNotificationServing = AppNotificationService(),
         quickIntentContextService: any QuickIntentContextServing = QuickIntentContextService(),
+        frontmostWorkspaceContextService: any FrontmostWorkspaceContextServing = FrontmostWorkspaceContextService(),
         globalHotKeyManager: any GlobalHotKeyRegistering = CarbonGlobalHotKeyManager()
     ) {
         let localToolManager = localToolManager ?? LocalToolManager(nodeRuntimeManager: nodeRuntimeManager)
@@ -479,6 +543,7 @@ struct AppServices {
         self.projectDocumentationArchiveService = projectDocumentationArchiveService
         self.notificationService = notificationService
         self.quickIntentContextService = quickIntentContextService
+        self.frontmostWorkspaceContextService = frontmostWorkspaceContextService
         self.globalHotKeyManager = globalHotKeyManager
     }
 
@@ -506,6 +571,7 @@ struct AppServices {
         projectDocumentationArchiveService: ProjectDocumentationArchiveService(),
         notificationService: AppNotificationService(),
         quickIntentContextService: QuickIntentContextService(),
+        frontmostWorkspaceContextService: FrontmostWorkspaceContextService(),
         globalHotKeyManager: CarbonGlobalHotKeyManager()
     )
 }

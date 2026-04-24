@@ -241,17 +241,30 @@ enum QuickIntentCaptureSource: String, Codable, Sendable {
     }
 }
 
-struct QuickIntentHotkeyConfiguration: Codable, Equatable, Sendable {
+enum GlobalHotKeyAction: UInt32, Codable, CaseIterable, Sendable {
+    case quickIntent = 1
+    case commandBar = 2
+}
+
+struct GlobalHotKeyConfiguration: Codable, Equatable, Sendable {
     var isEnabled: Bool
     var keyCode: UInt16
     var modifiers: QuickIntentModifierSet
 
-    static let `default` = QuickIntentHotkeyConfiguration(
+    static let quickIntentDefault = GlobalHotKeyConfiguration(
         isEnabled: true,
         keyCode: 34,
         modifiers: [.command, .option]
     )
+
+    static let commandBarDefault = GlobalHotKeyConfiguration(
+        isEnabled: true,
+        keyCode: 40,
+        modifiers: [.command, .option]
+    )
 }
+
+typealias QuickIntentHotkeyConfiguration = GlobalHotKeyConfiguration
 
 struct AgentLaunchOptions: Sendable, Equatable {
     let copilotModelOverride: String?
@@ -2073,6 +2086,11 @@ enum AppPreferences {
     static let quickIntentHotkeyEnabledKey = "shortcuts.quickIntent.enabled"
     static let quickIntentHotkeyKeyCodeKey = "shortcuts.quickIntent.keyCode"
     static let quickIntentHotkeyModifiersKey = "shortcuts.quickIntent.modifiers"
+    static let commandBarHotkeyEnabledKey = "shortcuts.commandBar.enabled"
+    static let commandBarHotkeyKeyCodeKey = "shortcuts.commandBar.keyCode"
+    static let commandBarHotkeyModifiersKey = "shortcuts.commandBar.modifiers"
+    static let commandBarFavoriteCommandIDsKey = "commandBar.favoriteCommandIDs"
+    static let commandBarCommandUsageKey = "commandBar.commandUsage"
     static let autoRefreshEnabledKey = "repositories.autoRefreshEnabled"
     static let autoRefreshIntervalKey = "repositories.autoRefreshIntervalSeconds"
     static let worktreeStatusPollingEnabledKey = "repositories.worktreeStatusPollingEnabled"
@@ -2086,7 +2104,8 @@ enum AppPreferences {
     static let defaultWorktreeStatusPollingEnabled = true
     static let defaultWorktreeStatusPollingInterval: Double = 120
     static let defaultPathLocation: AppPathLocation = .applicationSupport
-    static let defaultQuickIntentHotkey = QuickIntentHotkeyConfiguration.default
+    static let defaultQuickIntentHotkey = GlobalHotKeyConfiguration.quickIntentDefault
+    static let defaultCommandBarHotkey = GlobalHotKeyConfiguration.commandBarDefault
     static let terminalTabRetentionModeKey = "terminal.tabs.retentionMode"
     static let externalTerminalKey = "terminal.externalApp"
     static let performanceDebugModeEnabledKey = "debug.performance.enabled"
@@ -2137,24 +2156,20 @@ enum AppPreferences {
     }
 
     static var quickIntentHotkeyConfiguration: QuickIntentHotkeyConfiguration {
-        let defaults = UserDefaults.standard
-        let isEnabled: Bool
-        if defaults.object(forKey: quickIntentHotkeyEnabledKey) == nil {
-            isEnabled = defaultQuickIntentHotkey.isEnabled
-        } else {
-            isEnabled = defaults.bool(forKey: quickIntentHotkeyEnabledKey)
-        }
+        hotkeyConfiguration(
+            enabledKey: quickIntentHotkeyEnabledKey,
+            keyCodeKey: quickIntentHotkeyKeyCodeKey,
+            modifiersKey: quickIntentHotkeyModifiersKey,
+            defaultConfiguration: defaultQuickIntentHotkey
+        )
+    }
 
-        let storedKeyCode = defaults.object(forKey: quickIntentHotkeyKeyCodeKey) as? NSNumber
-        let keyCode = storedKeyCode.map(\.uint16Value) ?? defaultQuickIntentHotkey.keyCode
-
-        let storedModifiers = defaults.object(forKey: quickIntentHotkeyModifiersKey) as? NSNumber
-        let modifiers = QuickIntentModifierSet(rawValue: storedModifiers.map(\.intValue) ?? defaultQuickIntentHotkey.modifiers.rawValue)
-
-        return QuickIntentHotkeyConfiguration(
-            isEnabled: isEnabled,
-            keyCode: keyCode,
-            modifiers: modifiers
+    static var commandBarHotkeyConfiguration: GlobalHotKeyConfiguration {
+        hotkeyConfiguration(
+            enabledKey: commandBarHotkeyEnabledKey,
+            keyCodeKey: commandBarHotkeyKeyCodeKey,
+            modifiersKey: commandBarHotkeyModifiersKey,
+            defaultConfiguration: defaultCommandBarHotkey
         )
     }
 
@@ -2162,6 +2177,33 @@ enum AppPreferences {
         let defaults = UserDefaults.standard
         let value = defaults.double(forKey: autoRefreshIntervalKey)
         return value > 0 ? value : defaultAutoRefreshInterval
+    }
+
+    private static func hotkeyConfiguration(
+        enabledKey: String,
+        keyCodeKey: String,
+        modifiersKey: String,
+        defaultConfiguration: GlobalHotKeyConfiguration
+    ) -> GlobalHotKeyConfiguration {
+        let defaults = UserDefaults.standard
+        let isEnabled: Bool
+        if defaults.object(forKey: enabledKey) == nil {
+            isEnabled = defaultConfiguration.isEnabled
+        } else {
+            isEnabled = defaults.bool(forKey: enabledKey)
+        }
+
+        let storedKeyCode = defaults.object(forKey: keyCodeKey) as? NSNumber
+        let keyCode = storedKeyCode.map(\.uint16Value) ?? defaultConfiguration.keyCode
+
+        let storedModifiers = defaults.object(forKey: modifiersKey) as? NSNumber
+        let modifiers = QuickIntentModifierSet(rawValue: storedModifiers.map(\.intValue) ?? defaultConfiguration.modifiers.rawValue)
+
+        return GlobalHotKeyConfiguration(
+            isEnabled: isEnabled,
+            keyCode: keyCode,
+            modifiers: modifiers
+        )
     }
 
     static var worktreeStatusPollingEnabled: Bool {

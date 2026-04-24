@@ -569,6 +569,7 @@ extension AppModel {
     func handleAppDidBecomeActive() async {
         let now = Date.now
         configureQuickIntentHotKey()
+        configureCommandBarHotKey()
         if let last = lastForegroundLightRefreshAt, now.timeIntervalSince(last) < 2 {
             return
         }

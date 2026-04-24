@@ -12,6 +12,11 @@ struct StackriotAppCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
+            Button("CommandBar") {
+                appModel.presentCommandBarFromMenu()
+            }
+            .keyboardShortcut("k", modifiers: [.command])
+
             Button("Quick Intent") {
                 appModel.presentQuickIntentFromSystemTrigger()
             }
@@ -38,6 +43,11 @@ struct StackriotAppCommands: Commands {
         }
 
         CommandMenu("Repositories") {
+            Button("CommandBar") {
+                appModel.presentCommandBarFromMenu()
+            }
+            .keyboardShortcut("k", modifiers: [.command, .shift])
+
             Button("Quick Intent") {
                 appModel.presentQuickIntentFromSystemTrigger()
             }
@@ -78,6 +88,11 @@ struct StackriotAppCommands: Commands {
                 openWindow(id: "quick-intent")
             }
             .keyboardShortcut("3", modifiers: [.command])
+
+            Button("CommandBar") {
+                appModel.presentCommandBarFromMenu()
+            }
+            .keyboardShortcut("4", modifiers: [.command])
 
             Button("Show About") {
                 openWindow(id: "about")

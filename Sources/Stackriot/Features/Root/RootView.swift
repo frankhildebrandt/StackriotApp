@@ -129,6 +129,11 @@ struct RootView: View {
             openWindow(id: "quick-intent")
             appModel.pendingQuickIntentActivationID = nil
         }
+        .onChange(of: appModel.pendingCommandBarActivationID) { _, activationID in
+            guard activationID != nil else { return }
+            openWindow(id: "command-bar")
+            appModel.pendingCommandBarActivationID = nil
+        }
         .task {
             appModel.configure(modelContext: modelContext)
             await appModel.checkAgentAvailability()

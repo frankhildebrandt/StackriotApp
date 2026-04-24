@@ -54,6 +54,15 @@ struct StackriotApp: App {
         .windowStyle(.hiddenTitleBar)
         .modelContainer(for: StackriotModelContainer.persistentModelTypes)
 
+        Window("CommandBar", id: "command-bar") {
+            CommandBarWindow()
+                .environment(appModel)
+        }
+        .defaultSize(width: 780, height: 560)
+        .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
+        .modelContainer(for: StackriotModelContainer.persistentModelTypes)
+
         WindowGroup("Antwort", id: "cursor-agent-markdown", for: AgentMarkdownWindowPayload.self) { $payload in
             if let payload {
                 AgentMarkdownReadOnlyWindow(payload: payload)
@@ -61,6 +70,235 @@ struct StackriotApp: App {
             }
         }
         .defaultSize(width: 560, height: 720)
+    }
+}
+
+private struct CommandBarWindow: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @FocusState private var isSearchFocused: Bool
+    @State private var query = ""
+    @State private var selectedCommandID: String?
+
+    private var rankedCommands: [CommandBarRankedCommand] {
+        appModel.rankedCommandBarCommands(query: query)
+    }
+
+    var body: some View {
+        let session = appModel.commandBarSession
+        let context = session?.context
+
+        ZStack {
+            Color.clear
+
+            VStack(alignment: .leading, spacing: 14) {
+                header(context: context)
+
+                TextField("Command suchen oder Run Target eingeben...", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 22, weight: .semibold))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 13)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .focused($isSearchFocused)
+
+                commandList
+
+                footer(context: context)
+            }
+            .padding(20)
+            .frame(minWidth: 720, minHeight: 500)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .strokeBorder(.white.opacity(0.12))
+            )
+            .shadow(color: .black.opacity(0.2), radius: 32, y: 18)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(QuickIntentWindowAccessor(presentationID: session?.id))
+        .onAppear {
+            appModel.refreshCommandBarContext()
+            focusSearch()
+            selectFirstCommand()
+        }
+        .onChange(of: query) { _, newValue in
+            appModel.commandBarSession?.query = newValue
+            selectFirstCommand()
+        }
+        .onChange(of: session?.id) { _, _ in
+            query = appModel.commandBarSession?.query ?? ""
+            focusSearch()
+            selectFirstCommand()
+        }
+        .onMoveCommand { direction in
+            moveSelection(direction)
+        }
+        .onExitCommand {
+            close()
+        }
+        .commandEnterAction(disabled: selectedCommand == nil) {
+            executeSelectedCommand()
+        }
+    }
+
+    private var commandList: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                if rankedCommands.isEmpty {
+                    ContentUnavailableView(
+                        "Keine Commands",
+                        systemImage: "command",
+                        description: Text("Passe die Suche an oder waehle im Stackriot-Hauptfenster einen Workspace.")
+                    )
+                    .padding(.vertical, 44)
+                } else {
+                    ForEach(rankedCommands) { ranked in
+                        commandRow(ranked.command, isSelected: ranked.id == selectedCommandID)
+                            .onTapGesture {
+                                selectedCommandID = ranked.id
+                                executeSelectedCommand()
+                            }
+                    }
+                }
+            }
+            .padding(4)
+        }
+        .frame(maxWidth: .infinity, maxHeight: 330)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var selectedCommand: CommandBarCommand? {
+        rankedCommands.first(where: { $0.id == selectedCommandID })?.command ?? rankedCommands.first?.command
+    }
+
+    private func header(context: CommandBarWorkspaceContext?) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "command")
+                .font(.title2.weight(.semibold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("CommandBar")
+                    .font(.headline)
+                Text(context?.contextLabel ?? "Kontext wird ermittelt")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                close()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .padding(8)
+            }
+            .buttonStyle(.plain)
+            .background(.thinMaterial, in: Circle())
+            .keyboardShortcut(.cancelAction)
+        }
+    }
+
+    private func commandRow(_ command: CommandBarCommand, isSelected: Bool) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: command.systemImage)
+                .font(.headline)
+                .foregroundStyle(command.isEnabled ? .primary : .secondary)
+                .frame(width: 28)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(command.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(command.isEnabled ? .primary : .secondary)
+                    if command.isFavorite {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(.yellow)
+                            .font(.caption)
+                    }
+                }
+                Text(command.isEnabled ? command.subtitle : (command.disabledReason ?? command.subtitle))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer()
+
+            Text(command.category.displayName)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.thinMaterial, in: Capsule())
+
+            Button {
+                appModel.toggleCommandBarFavorite(command)
+            } label: {
+                Image(systemName: command.isFavorite ? "star.fill" : "star")
+            }
+            .buttonStyle(.plain)
+            .help(command.isFavorite ? "Favorit entfernen" : "Als Favorit merken")
+        }
+        .padding(12)
+        .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(isSelected ? Color.accentColor.opacity(0.45) : Color.clear)
+        )
+        .contentShape(Rectangle())
+    }
+
+    private func footer(context: CommandBarWorkspaceContext?) -> some View {
+        HStack(spacing: 10) {
+            Label(context?.source.displayName ?? "Kontext", systemImage: context?.source == .frontmostCursor ? "cursorarrow.motionlines" : "square.stack.3d.up")
+            if let applicationName = context?.frontmostApplicationName {
+                Text(applicationName)
+            }
+            Spacer()
+            Text("↑↓ Auswahl")
+            Text("Return ausfuehren")
+            Text("Esc schliessen")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private func focusSearch() {
+        DispatchQueue.main.async {
+            isSearchFocused = true
+        }
+    }
+
+    private func selectFirstCommand() {
+        DispatchQueue.main.async {
+            selectedCommandID = rankedCommands.first?.id
+        }
+    }
+
+    private func moveSelection(_ direction: MoveCommandDirection) {
+        guard !rankedCommands.isEmpty else { return }
+        let currentIndex = rankedCommands.firstIndex(where: { $0.id == selectedCommandID }) ?? 0
+        let nextIndex: Int
+        switch direction {
+        case .down:
+            nextIndex = min(currentIndex + 1, rankedCommands.count - 1)
+        case .up:
+            nextIndex = max(currentIndex - 1, 0)
+        default:
+            return
+        }
+        selectedCommandID = rankedCommands[nextIndex].id
+    }
+
+    private func executeSelectedCommand() {
+        guard let selectedCommand else { return }
+        appModel.executeCommandBarCommand(selectedCommand, in: modelContext)
+    }
+
+    private func close() {
+        appModel.dismissCommandBarSession()
+        dismiss()
     }
 }
 
