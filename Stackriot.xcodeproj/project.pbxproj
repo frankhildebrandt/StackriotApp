@@ -136,6 +136,8 @@
 		E00000000000000000000087 /* ProjectDocumentationRepositorySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000087 /* ProjectDocumentationRepositorySheet.swift */; };
 		E00000000000000000000089 /* ACPAgentRunService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000089 /* ACPAgentRunService.swift */; };
 		E0000000000000000000008A /* ACPEventJSONLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000008A /* ACPEventJSONLParser.swift */; };
+		E00000000000000000000091 /* CommandBarDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000091 /* CommandBarDomain.swift */; };
+		E00000000000000000000092 /* AppModel+CommandBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000092 /* AppModel+CommandBar.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -269,6 +271,8 @@
 		D00000000000000000000087 /* ProjectDocumentationRepositorySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDocumentationRepositorySheet.swift; sourceTree = "<group>"; };
 		D00000000000000000000089 /* ACPAgentRunService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ACPAgentRunService.swift; sourceTree = "<group>"; };
 		D0000000000000000000008A /* ACPEventJSONLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ACPEventJSONLParser.swift; sourceTree = "<group>"; };
+		D00000000000000000000091 /* CommandBarDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandBarDomain.swift; sourceTree = "<group>"; };
+		D00000000000000000000092 /* AppModel+CommandBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+CommandBar.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -342,6 +346,7 @@
 				D00000000000000000000007 /* AppModel+Repositories.swift */,
 				D00000000000000000000008 /* AppModel+Runs.swift */,
 				D00000000000000000000090 /* AppModel+RunConsoleRuntime.swift */,
+				D00000000000000000000092 /* AppModel+CommandBar.swift */,
 				D00000000000000000000009 /* AppModel+Worktrees.swift */,
 				D00000000000000000000083 /* RepositoryWorktreeMonitor.swift */,
 				D0000000000000000000000A /* AppModel.swift */,
@@ -355,6 +360,7 @@
 			isa = PBXGroup;
 			children = (
 				D0000000000000000000000E /* Domain.swift */,
+				D00000000000000000000091 /* CommandBarDomain.swift */,
 				D00000000000000000000075 /* DevContainerDomain.swift */,
 				D00000000000000000000048 /* GeneratedCommitMessage.swift */,
 				D0000000000000000000006B /* MCPDomain.swift */,
@@ -654,6 +660,7 @@
 				E00000000000000000000007 /* AppModel+Repositories.swift in Sources */,
 				E00000000000000000000008 /* AppModel+Runs.swift in Sources */,
 				E00000000000000000000090 /* AppModel+RunConsoleRuntime.swift in Sources */,
+				E00000000000000000000092 /* AppModel+CommandBar.swift in Sources */,
 				E00000000000000000000070 /* AppModel+RawLogs.swift in Sources */,
 				E00000000000000000000009 /* AppModel+Worktrees.swift in Sources */,
 				E0000000000000000000003F /* AppModel+Plans.swift in Sources */,
@@ -662,6 +669,7 @@
 				E0000000000000000000000B /* AppServices.swift in Sources */,
 				E0000000000000000000000C /* Drafts.swift in Sources */,
 				E00000000000000000000075 /* DevContainerDomain.swift in Sources */,
+				E00000000000000000000091 /* CommandBarDomain.swift in Sources */,
 				E0000000000000000000000E /* Domain.swift in Sources */,
 				E0000000000000000000006B /* MCPDomain.swift in Sources */,
 				E00000000000000000000064 /* WorktreeContext.swift in Sources */,
