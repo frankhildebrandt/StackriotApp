@@ -255,7 +255,9 @@ enum AppPaths {
             return documentsDirectory(fileManager: fileManager)
                 .appendingPathComponent(userVisibleRootFolderName, isDirectory: true)
         case .custom:
-            guard let customPath else { return applicationSupportDirectory }
+            guard let customPath = customPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !customPath.isEmpty
+            else { return applicationSupportDirectory }
             let expandedPath = (customPath as NSString).expandingTildeInPath
             return URL(fileURLWithPath: expandedPath, isDirectory: true)
         }

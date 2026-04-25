@@ -70,12 +70,19 @@ struct RootView: View {
                     appModel.presentRepositoryCreationSheet()
                 },
                 onRefreshRepository: { repository in
-                    Task {
+                    appModel.runUIAction(
+                        key: .repository(repository.id, AsyncUIActionKey.Operation.refreshRepository),
+                        title: "Refreshing repository"
+                    ) {
                         await appModel.refresh(repository, in: modelContext)
                     }
                 },
                 onRefreshAllRepositories: {
-                    Task {
+                    guard let repository = selectedRepository else { return }
+                    appModel.runUIAction(
+                        key: .repository(repository.id, AsyncUIActionKey.Operation.refreshRepository),
+                        title: "Refreshing repository"
+                    ) {
                         await appModel.refreshAllRepositories(force: true)
                     }
                 },

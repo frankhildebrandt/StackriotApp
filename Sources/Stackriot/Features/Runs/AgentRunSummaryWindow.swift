@@ -163,9 +163,20 @@ struct AgentRunSummaryWindow: View {
             diffSnapshot = WorkspaceDiffSnapshot(files: [])
             return
         }
+        guard resolvedRepository?.id == appModel.selectedRepositoryID else {
+            diffSnapshot = WorkspaceDiffSnapshot(files: [])
+            return
+        }
+        let key = AsyncUIActionKey.worktree(resolvedWorktree.id, AsyncUIActionKey.Operation.loadChangelogDiff)
+        guard appModel.beginUIAction(key, title: "Loading changelog") else { return }
 
         isLoadingDiff = true
-        diffSnapshot = await appModel.loadDiff(for: resolvedWorktree)
-        isLoadingDiff = false
+        defer {
+            isLoadingDiff = false
+            appModel.endUIAction(key)
+        }
+        let loadedSnapshot = await appModel.loadDiff(for: resolvedWorktree)
+        guard !Task.isCancelled, resolvedRepository?.id == appModel.selectedRepositoryID else { return }
+        diffSnapshot = loadedSnapshot
     }
 }

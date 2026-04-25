@@ -25,11 +25,10 @@ struct WorktreeRunConfigurationMenuItems: View {
 
     @ViewBuilder
     private func runConfigurationMenuItem(for configuration: RunConfiguration) -> some View {
-        let label = Label(runConfigurationTitle(for: configuration), systemImage: iconName(for: configuration))
-
         if configuration.isDirectlyRunnable {
             Button {
-                Task {
+                let key = AsyncUIActionKey.worktree(worktree.id, "\(AsyncUIActionKey.Operation.launchRunConfiguration).\(configuration.id)")
+                appModel.runUIAction(key: key, title: "Starting \(configuration.name)") {
                     await appModel.launchRunConfiguration(
                         configuration,
                         in: worktree,
@@ -38,11 +37,16 @@ struct WorktreeRunConfigurationMenuItems: View {
                     )
                 }
             } label: {
-                label
+                AsyncActionLabel(
+                    title: runConfigurationTitle(for: configuration),
+                    systemImage: iconName(for: configuration),
+                    isRunning: appModel.isUIActionRunning(AsyncUIActionKey.worktree(worktree.id, "\(AsyncUIActionKey.Operation.launchRunConfiguration).\(configuration.id)"))
+                )
             }
         } else if let preferredDevTool = configuration.preferredDevTool, availableDevTools.contains(preferredDevTool) {
             Button {
-                Task {
+                let key = AsyncUIActionKey.worktree(worktree.id, "\(AsyncUIActionKey.Operation.launchRunConfiguration).\(configuration.id)")
+                appModel.runUIAction(key: key, title: "Starting \(configuration.name)") {
                     await appModel.launchRunConfiguration(
                         configuration,
                         in: worktree,
@@ -51,9 +55,10 @@ struct WorktreeRunConfigurationMenuItems: View {
                     )
                 }
             } label: {
-                Label(
-                    "\(configuration.name) · Open in \(preferredDevTool.displayName)",
-                    systemImage: preferredDevTool.systemImageName
+                AsyncActionLabel(
+                    title: "\(configuration.name) · Open in \(preferredDevTool.displayName)",
+                    systemImage: preferredDevTool.systemImageName,
+                    isRunning: appModel.isUIActionRunning(AsyncUIActionKey.worktree(worktree.id, "\(AsyncUIActionKey.Operation.launchRunConfiguration).\(configuration.id)"))
                 )
             }
         } else if let preferredDevTool = configuration.preferredDevTool {
@@ -210,11 +215,18 @@ struct WorktreeActionBar: View {
         Menu {
             ForEach(availableDevTools) { tool in
                 Button {
-                    Task {
+                    appModel.runUIAction(
+                        key: worktreeActionKey("\(AsyncUIActionKey.Operation.openDevTool).\(tool.rawValue)"),
+                        title: "Opening \(tool.displayName)"
+                    ) {
                         await appModel.openDevTool(tool, for: worktree, in: modelContext)
                     }
                 } label: {
-                    Label("Open in \(tool.displayName)", systemImage: tool.systemImageName)
+                    AsyncActionLabel(
+                        title: "Open in \(tool.displayName)",
+                        systemImage: tool.systemImageName,
+                        isRunning: isWorktreeActionRunning("\(AsyncUIActionKey.Operation.openDevTool).\(tool.rawValue)")
+                    )
                 }
             }
             if availableDevTools.isEmpty {
@@ -233,15 +245,22 @@ struct WorktreeActionBar: View {
         Menu {
             ForEach(installedAgents) { tool in
                 Button {
-                    Task {
+                    appModel.runUIAction(
+                        key: worktreeActionKey("\(AsyncUIActionKey.Operation.launchAgent).\(tool.rawValue)"),
+                        title: "Starting \(tool.displayName)"
+                    ) {
                         _ = await appModel.launchAgent(tool, for: worktree, in: modelContext)
                     }
                 } label: {
-                    Label(tool.displayName, systemImage: tool.systemImageName)
+                    AsyncActionLabel(
+                        title: tool.displayName,
+                        systemImage: tool.systemImageName,
+                        isRunning: isWorktreeActionRunning("\(AsyncUIActionKey.Operation.launchAgent).\(tool.rawValue)")
+                    )
                 }
             }
         } label: {
-            Image(systemName: worktree.assignedAgent.systemImageName)
+            AsyncIconLabel(systemImage: worktree.assignedAgent.systemImageName, isRunning: isAnyWorktreeActionRunning(AsyncUIActionKey.Operation.launchAgent))
         }
         .menuStyle(.button)
         .buttonStyle(.bordered)
@@ -251,14 +270,14 @@ struct WorktreeActionBar: View {
 
     private var terminalButton: some View {
         Button {
-            Task {
+            appModel.runUIAction(key: worktreeActionKey(AsyncUIActionKey.Operation.openTerminal), title: "Opening terminal") {
                 await appModel.openTerminal(for: worktree, in: modelContext)
             }
         } label: {
-            Image(systemName: "terminal")
+            AsyncIconLabel(systemImage: "terminal", isRunning: isWorktreeActionRunning(AsyncUIActionKey.Operation.openTerminal))
         }
         .buttonStyle(.bordered)
-        .disabled(worktree.isDefaultBranchWorkspace)
+        .disabled(worktree.isDefaultBranchWorkspace || isWorktreeActionRunning(AsyncUIActionKey.Operation.openTerminal))
         .help("Neues Terminal öffnen")
     }
 
@@ -267,55 +286,55 @@ struct WorktreeActionBar: View {
 
         return HStack(spacing: 6) {
             Button {
-                Task {
+                appModel.runUIAction(key: worktreeActionKey("\(AsyncUIActionKey.Operation.devContainer).start"), title: "Starting devcontainer") {
                     await appModel.startDevContainer(for: worktree)
                 }
             } label: {
-                Image(systemName: DevContainerOperation.start.systemImage)
+                AsyncIconLabel(systemImage: DevContainerOperation.start.systemImage, isRunning: state.isBusy)
             }
             .buttonStyle(.bordered)
             .disabled(!state.canStart)
             .help("Devcontainer starten")
 
             Button {
-                Task {
+                appModel.runUIAction(key: worktreeActionKey("\(AsyncUIActionKey.Operation.devContainer).stop"), title: "Stopping devcontainer") {
                     await appModel.stopDevContainer(for: worktree)
                 }
             } label: {
-                Image(systemName: DevContainerOperation.stop.systemImage)
+                AsyncIconLabel(systemImage: DevContainerOperation.stop.systemImage, isRunning: state.isBusy)
             }
             .buttonStyle(.bordered)
             .disabled(!state.canStop)
             .help("Devcontainer stoppen")
 
             Button {
-                Task {
+                appModel.runUIAction(key: worktreeActionKey("\(AsyncUIActionKey.Operation.devContainer).restart"), title: "Restarting devcontainer") {
                     await appModel.restartDevContainer(for: worktree)
                 }
             } label: {
-                Image(systemName: DevContainerOperation.restart.systemImage)
+                AsyncIconLabel(systemImage: DevContainerOperation.restart.systemImage, isRunning: state.isBusy)
             }
             .buttonStyle(.bordered)
             .disabled(!state.canRestart)
             .help("Devcontainer neu starten")
 
             Button {
-                Task {
+                appModel.runUIAction(key: worktreeActionKey("\(AsyncUIActionKey.Operation.devContainer).rebuild"), title: "Rebuilding devcontainer") {
                     await appModel.rebuildDevContainer(for: worktree)
                 }
             } label: {
-                Image(systemName: DevContainerOperation.rebuild.systemImage)
+                AsyncIconLabel(systemImage: DevContainerOperation.rebuild.systemImage, isRunning: state.isBusy)
             }
             .buttonStyle(.bordered)
             .disabled(!state.canRebuild)
             .help("Devcontainer ohne Build-Cache neu aufbauen")
 
             Button(role: .destructive) {
-                Task {
+                appModel.runUIAction(key: worktreeActionKey("\(AsyncUIActionKey.Operation.devContainer).delete"), title: "Deleting devcontainer") {
                     await appModel.deleteDevContainer(for: worktree)
                 }
             } label: {
-                Image(systemName: DevContainerOperation.delete.systemImage)
+                AsyncIconLabel(systemImage: DevContainerOperation.delete.systemImage, isRunning: state.isBusy)
             }
             .buttonStyle(.bordered)
             .disabled(!state.canDelete)
@@ -333,7 +352,7 @@ struct WorktreeActionBar: View {
                 showsEmptyMessage: true
             )
         } label: {
-            Image(systemName: "play.fill")
+            AsyncIconLabel(systemImage: "play.fill", isRunning: isAnyWorktreeActionRunning(AsyncUIActionKey.Operation.launchRunConfiguration))
         }
         .menuStyle(.button)
         .buttonStyle(.bordered)
@@ -349,7 +368,7 @@ struct WorktreeActionBar: View {
                 }
             }
         } label: {
-            Image(systemName: "shippingbox")
+            AsyncIconLabel(systemImage: "shippingbox", isRunning: isAnyWorktreeActionRunning(AsyncUIActionKey.Operation.installDependencies))
         }
         .menuStyle(.button)
         .buttonStyle(.bordered)
@@ -363,13 +382,18 @@ struct WorktreeActionBar: View {
                 pendingGitCommit = true
             }
             Button("Push") {
-                Task {
+                appModel.runUIAction(key: worktreeActionKey(AsyncUIActionKey.Operation.gitPush), title: "Pushing branch") {
                     await appModel.runGitPush(in: worktree, repository: repository, modelContext: modelContext)
+                }
+            }
+            Button("Pull") {
+                appModel.runUIAction(key: worktreeActionKey(AsyncUIActionKey.Operation.gitPull), title: "Pulling branch") {
+                    await appModel.runGitPull(in: worktree, repository: repository, modelContext: modelContext)
                 }
             }
             if !worktree.isDefaultBranchWorkspace {
                 Button("Integrate into Main/Default") {
-                    Task {
+                    appModel.runUIAction(key: worktreeActionKey(AsyncUIActionKey.Operation.integrate), title: "Integrating branch") {
                         await appModel.integrateIntoDefaultBranch(
                             worktree,
                             repository: repository,
@@ -387,7 +411,7 @@ struct WorktreeActionBar: View {
                 showDiscardAIChangesConfirmation = true
             }
         } label: {
-            Image(systemName: "arrow.triangle.branch")
+            AsyncIconLabel(systemImage: "arrow.triangle.branch", isRunning: isAnyGitActionRunning)
         }
         .menuStyle(.button)
         .buttonStyle(.bordered)
@@ -411,13 +435,40 @@ struct WorktreeActionBar: View {
     }
 
     private func executeDependencyAction(_ mode: DependencyInstallMode) {
-        Task {
+        appModel.runUIAction(
+            key: worktreeActionKey("\(AsyncUIActionKey.Operation.installDependencies).\(mode.rawValue)"),
+            title: mode.displayName
+        ) {
             await appModel.installDependencies(
                 mode: mode,
                 in: worktree,
                 repository: repository,
                 modelContext: modelContext
             )
+        }
+    }
+
+    private var isAnyGitActionRunning: Bool {
+        [
+            AsyncUIActionKey.Operation.gitPush,
+            AsyncUIActionKey.Operation.gitPull,
+            AsyncUIActionKey.Operation.integrate
+        ].contains(where: isWorktreeActionRunning)
+    }
+
+    private func worktreeActionKey(_ operation: String) -> AsyncUIActionKey {
+        AsyncUIActionKey.worktree(worktree.id, operation)
+    }
+
+    private func isWorktreeActionRunning(_ operation: String) -> Bool {
+        appModel.isUIActionRunning(worktreeActionKey(operation))
+    }
+
+    private func isAnyWorktreeActionRunning(_ operationPrefix: String) -> Bool {
+        appModel.activeUIActionKeys.contains { key in
+            key.scope == .worktree
+                && key.id == worktree.id.uuidString
+                && key.operation.hasPrefix(operationPrefix)
         }
     }
 }

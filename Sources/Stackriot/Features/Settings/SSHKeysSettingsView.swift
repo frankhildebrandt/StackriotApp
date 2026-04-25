@@ -10,6 +10,7 @@ struct SSHKeysSettingsView: View {
     @State private var isImportingKey = false
     @State private var isGenerateSheetPresented = false
     @State private var expandedKeyIDs: Set<UUID> = []
+    @State private var isImportingKeyMaterial = false
 
     var body: some View {
         SettingsFormPage(category: .sshKeys) {
@@ -45,8 +46,13 @@ struct SSHKeysSettingsView: View {
                 Button {
                     isImportingKey = true
                 } label: {
-                    Label("Import existing key", systemImage: "square.and.arrow.down")
+                    AsyncActionLabel(
+                        title: "Import existing key",
+                        systemImage: "square.and.arrow.down",
+                        isRunning: isImportingKeyMaterial
+                    )
                 }
+                .disabled(isImportingKeyMaterial)
 
                 Button {
                     isGenerateSheetPresented = true
@@ -64,7 +70,11 @@ struct SSHKeysSettingsView: View {
             case let .success(urls):
                 guard let url = urls.first else { return }
                 Task {
-                    await appModel.importSSHKey(from: url, in: modelContext)
+                    isImportingKeyMaterial = true
+                    await appModel.performUIAction(key: .global(AsyncUIActionKey.Operation.sshKey), title: "Importing SSH key") {
+                        await appModel.importSSHKey(from: url, in: modelContext)
+                    }
+                    isImportingKeyMaterial = false
                 }
             case let .failure(error):
                 appModel.pendingErrorMessage = error.localizedDescription
@@ -153,6 +163,7 @@ private struct GenerateSSHKeySheet: View {
 
     @State private var displayName = ""
     @State private var comment = ""
+    @State private var isGenerating = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -169,14 +180,20 @@ private struct GenerateSSHKeySheet: View {
                 Button("Cancel") {
                     dismiss()
                 }
-                Button("Generate") {
+                Button {
+                    isGenerating = true
                     Task {
-                        await appModel.generateSSHKey(displayName: displayName, comment: comment, in: modelContext)
+                        await appModel.performUIAction(key: .global(AsyncUIActionKey.Operation.sshKey), title: "Generating SSH key") {
+                            await appModel.generateSSHKey(displayName: displayName, comment: comment, in: modelContext)
+                        }
+                        isGenerating = false
                         dismiss()
                     }
+                } label: {
+                    AsyncActionLabel(title: "Generate", systemImage: "wand.and.stars", isRunning: isGenerating)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(isGenerating || displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(24)

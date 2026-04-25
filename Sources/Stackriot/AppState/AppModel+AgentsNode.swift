@@ -245,6 +245,7 @@ extension AppModel {
     }
 
     func runGitPush(in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) async {
+        guard selectedRepositoryID == repository.id else { return }
         do {
             guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
                   let worktreeURL = worktree.materializedURL
@@ -279,6 +280,7 @@ extension AppModel {
     }
 
     func runGitPull(in worktree: WorktreeRecord, repository: ManagedRepository, modelContext: ModelContext) async {
+        guard selectedRepositoryID == repository.id else { return }
         guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
               let worktreeURL = worktree.materializedURL
         else {
@@ -780,36 +782,32 @@ extension AppModel {
     }
 
     func rebuildManagedNodeRuntime() {
-        Task {
-            await services.nodeRuntimeManager.rebuildManagedRuntime()
-            nodeRuntimeStatus = await services.nodeRuntimeManager.statusSnapshot()
+        runUIAction(key: .global(AsyncUIActionKey.Operation.nodeRuntime), title: "Rebuilding Node runtime") {
+            await self.services.nodeRuntimeManager.rebuildManagedRuntime()
+            self.nodeRuntimeStatus = await self.services.nodeRuntimeManager.statusSnapshot()
         }
     }
 
     func refreshLocalToolStatuses() {
-        Task {
-            localToolStatuses = await services.localToolManager.allStatuses()
-            availableAgents = await services.agentManager.checkAvailability()
-            acpAgentSnapshotsByTool = await services.acpDiscoveryService.snapshots(
-                for: availableAgents,
+        runUIAction(key: .global(AsyncUIActionKey.Operation.localToolStatus), title: "Refreshing local tool status") {
+            self.localToolStatuses = await self.services.localToolManager.allStatuses()
+            self.availableAgents = await self.services.agentManager.checkAvailability()
+            self.acpAgentSnapshotsByTool = await self.services.acpDiscoveryService.snapshots(
+                for: self.availableAgents,
                 workingDirectoryURL: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
             )
         }
     }
 
     func installLocalTool(_ tool: AppManagedTool) {
-        Task {
-            do {
-                _ = try await services.localToolManager.install(tool)
-                localToolStatuses = await services.localToolManager.allStatuses()
-                availableAgents = await services.agentManager.checkAvailability()
-                acpAgentSnapshotsByTool = await services.acpDiscoveryService.snapshots(
-                    for: availableAgents,
-                    workingDirectoryURL: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-                )
-            } catch {
-                pendingErrorMessage = error.localizedDescription
-            }
+        runUIAction(key: .tool(tool.rawValue, AsyncUIActionKey.Operation.installLocalTool), title: "Installing \(tool.displayName)") {
+            _ = try await self.services.localToolManager.install(tool)
+            self.localToolStatuses = await self.services.localToolManager.allStatuses()
+            self.availableAgents = await self.services.agentManager.checkAvailability()
+            self.acpAgentSnapshotsByTool = await self.services.acpDiscoveryService.snapshots(
+                for: self.availableAgents,
+                workingDirectoryURL: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            )
         }
     }
 

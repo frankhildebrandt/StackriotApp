@@ -474,6 +474,7 @@ extension AppModel {
     }
 
     func refresh(_ repository: ManagedRepository, in modelContext: ModelContext) async {
+        guard selectedRepositoryID == repository.id else { return }
         guard !refreshingRepositoryIDs.contains(repository.id) else { return }
         refreshingRepositoryIDs.insert(repository.id)
         refreshRepositorySidebarSnapshot(for: repository)
@@ -550,19 +551,19 @@ extension AppModel {
             return
         }
 
-        Task {
-            await refresh(repository, in: modelContext)
+        runUIAction(
+            key: .repository(repository.id, AsyncUIActionKey.Operation.refreshRepository),
+            title: "Refreshing repository"
+        ) {
+            await self.refresh(repository, in: modelContext)
         }
     }
 
     func refreshAllRepositories(force: Bool) async {
         guard let modelContext = storedModelContext else { return }
         if !force, !AppPreferences.autoRefreshEnabled { return }
-        let descriptor = FetchDescriptor<ManagedRepository>(sortBy: [SortDescriptor(\.displayName)])
-        guard let repositories = try? modelContext.fetch(descriptor) else { return }
-        for repository in repositories {
-            await refresh(repository, in: modelContext)
-        }
+        guard let repository = selectedRepository() else { return }
+        await refresh(repository, in: modelContext)
     }
 
     /// Lightweight status refresh when the app returns to the foreground (no full `git fetch` for every repo).

@@ -10,6 +10,7 @@ struct RemoteManagementSheet: View {
     let repository: ManagedRepository
     @State private var editingRemote: RepositoryRemote?
     @State private var isEditorPresented = false
+    @State private var removingRemoteIDs: Set<UUID> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -56,11 +57,25 @@ struct RemoteManagementSheet: View {
                                     editingRemote = remote
                                     isEditorPresented = true
                                 }
-                                Button("Remove", role: .destructive) {
+                                Button(role: .destructive) {
                                     Task {
-                                        await appModel.removeRemote(remote, from: repository, in: modelContext)
+                                        removingRemoteIDs.insert(remote.id)
+                                        await appModel.performUIAction(
+                                            key: .remote(remote.id, AsyncUIActionKey.Operation.remoteManagement),
+                                            title: "Removing remote"
+                                        ) {
+                                            await appModel.removeRemote(remote, from: repository, in: modelContext)
+                                        }
+                                        removingRemoteIDs.remove(remote.id)
                                     }
+                                } label: {
+                                    AsyncActionLabel(
+                                        title: "Remove",
+                                        systemImage: "trash",
+                                        isRunning: removingRemoteIDs.contains(remote.id)
+                                    )
                                 }
+                                .disabled(removingRemoteIDs.contains(remote.id))
                             }
                             Text(remote.url)
                                 .font(.caption)

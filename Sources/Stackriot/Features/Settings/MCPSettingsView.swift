@@ -62,17 +62,30 @@ struct MCPSettingsView: View {
             }
 
             HStack {
-                Button(appModel.mcpServerStatus.isRunning ? "Stop Server" : "Start Server") {
+                Button {
                     persistDraftConfiguration()
                     appModel.mcpServerStatus.isRunning ? appModel.stopMCPServer() : appModel.startMCPServer()
+                } label: {
+                    AsyncActionLabel(
+                        title: appModel.mcpServerStatus.isRunning ? "Stop Server" : "Start Server",
+                        systemImage: appModel.mcpServerStatus.isRunning ? "stop.fill" : "play.fill",
+                        isRunning: isMCPServerActionRunning
+                    )
                 }
                 .keyboardShortcut(.defaultAction)
+                .disabled(isMCPServerActionRunning)
 
-                Button("Restart") {
+                Button {
                     persistDraftConfiguration()
                     appModel.restartMCPServer()
+                } label: {
+                    AsyncActionLabel(
+                        title: "Restart",
+                        systemImage: "arrow.clockwise",
+                        isRunning: appModel.isUIActionRunning(.global("\(AsyncUIActionKey.Operation.mcpServer).restart"))
+                    )
                 }
-                .disabled(!storedEnabled)
+                .disabled(!storedEnabled || isMCPServerActionRunning)
 
                 Spacer()
 
@@ -85,6 +98,12 @@ struct MCPSettingsView: View {
         }
         .padding(20)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var isMCPServerActionRunning: Bool {
+        appModel.activeUIActionKeys.contains { key in
+            key.scope == .global && key.operation.hasPrefix(AsyncUIActionKey.Operation.mcpServer)
+        }
     }
 
     private var configurationCard: some View {

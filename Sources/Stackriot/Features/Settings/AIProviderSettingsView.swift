@@ -139,18 +139,14 @@ struct AIProviderSettingsView: View {
         let configuration = formAIConfiguration
         let service = appModel.services.aiProviderService
         Task {
-            do {
+            await appModel.performUIAction(key: .global(AsyncUIActionKey.Operation.aiProvider), title: "Verifying AI provider") {
                 try await service.verifyConfiguration(configuration)
-                await MainActor.run {
-                    configurationVerifySuccess = "Verbindung OK."
-                    isVerifyingConfiguration = false
-                }
-            } catch {
-                await MainActor.run {
-                    configurationVerifyError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                    isVerifyingConfiguration = false
-                }
+                configurationVerifySuccess = "Verbindung OK."
             }
+            if configurationVerifySuccess == nil {
+                configurationVerifyError = appModel.pendingErrorMessage
+            }
+            isVerifyingConfiguration = false
         }
     }
 }

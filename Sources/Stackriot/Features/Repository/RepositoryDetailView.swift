@@ -230,20 +230,18 @@ struct RepositoryDetailView: View {
                     .font(.title3.weight(.semibold))
                 Spacer()
                 Button {
-                    isRefreshingStatuses = true
-                    Task {
+                    appModel.runUIAction(key: repositoryActionKey(AsyncUIActionKey.Operation.refreshRepository), title: "Refreshing repository") {
                         await appModel.refresh(repository, in: modelContext)
-                        isRefreshingStatuses = false
                     }
                 } label: {
-                    if isRefreshingStatuses {
+                    if isRefreshingRepository {
                         ProgressView()
                             .controlSize(.small)
                     } else {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
-                .disabled(isRefreshingStatuses)
+                .disabled(isRefreshingRepository)
                 Button {
                     appModel.presentPullRequestCheckoutSheet(for: repository)
                 } label: {
@@ -336,6 +334,23 @@ struct RepositoryDetailView: View {
         appModel.selectedWorktree(for: repository)
     }
 
+    private var isRefreshingRepository: Bool {
+        appModel.isUIActionRunning(repositoryActionKey(AsyncUIActionKey.Operation.refreshRepository))
+            || appModel.refreshingRepositoryIDs.contains(repository.id)
+    }
+
+    private func repositoryActionKey(_ operation: String) -> AsyncUIActionKey {
+        AsyncUIActionKey.repository(repository.id, operation)
+    }
+
+    private func worktreeActionKey(_ worktree: WorktreeRecord, _ operation: String) -> AsyncUIActionKey {
+        AsyncUIActionKey.worktree(worktree.id, operation)
+    }
+
+    private func isWorktreeActionRunning(_ worktree: WorktreeRecord, _ operation: String) -> Bool {
+        appModel.isUIActionRunning(worktreeActionKey(worktree, operation))
+    }
+
     private func autoSyncAvailable(for worktree: WorktreeRecord, detailSnapshot: RepositoryDetailSnapshot) -> Bool {
         guard !worktree.isDefaultBranchWorkspace else { return false }
         guard worktree.allowsSyncFromDefaultBranch else { return false }
@@ -414,7 +429,7 @@ struct RepositoryDetailView: View {
             HStack(alignment: .top, spacing: 12) {
                 if autoSyncAvailable(for: worktree, detailSnapshot: detailSnapshot) {
                     Button {
-                        Task {
+                        appModel.runUIAction(key: worktreeActionKey(worktree, AsyncUIActionKey.Operation.rebase), title: "Rebasing worktree") {
                             await appModel.syncWorktreeFromMain(
                                 worktree,
                                 repository: repository,
@@ -423,13 +438,13 @@ struct RepositoryDetailView: View {
                             )
                         }
                     } label: {
-                        Image(systemName: "arrow.clockwise")
+                        AsyncIconLabel(systemImage: "arrow.clockwise", isRunning: isWorktreeActionRunning(worktree, AsyncUIActionKey.Operation.rebase))
                             .foregroundStyle(.orange)
                             .imageScale(.medium)
                             .frame(width: 18, height: 18)
                     }
                     .buttonStyle(.plain)
-                    .disabled(isRemovingWorktree(worktree))
+                    .disabled(isRemovingWorktree(worktree) || isWorktreeActionRunning(worktree, AsyncUIActionKey.Operation.rebase))
                     .help("\(worktree.branchName) jetzt mit \(repository.defaultBranch) synchronisieren")
                 }
 
@@ -536,15 +551,16 @@ struct RepositoryDetailView: View {
                            rowSnapshot.pullRequestStatus?.hasRemoteUpdate == true
                         {
                             Button {
-                                Task {
+                                appModel.runUIAction(key: worktreeActionKey(worktree, "updatePullRequest"), title: "Updating pull request") {
                                     await appModel.updateCheckedOutPullRequest(worktree, repository: repository, modelContext: modelContext)
                                 }
                             } label: {
-                                Image(systemName: "arrow.down.circle.fill")
+                                AsyncIconLabel(systemImage: "arrow.down.circle.fill", isRunning: isWorktreeActionRunning(worktree, "updatePullRequest"))
                                     .foregroundStyle(.orange)
                                     .imageScale(.large)
                             }
                             .buttonStyle(.plain)
+                            .disabled(isWorktreeActionRunning(worktree, "updatePullRequest"))
                             .help("PR-Head aktualisieren")
                         }
 
@@ -700,7 +716,7 @@ struct RepositoryDetailView: View {
                 }
                 .disabled(isMovingWorktree(worktree) || isRemovingWorktree(worktree))
                 Button {
-                    Task {
+                    appModel.runUIAction(key: worktreeActionKey(worktree, AsyncUIActionKey.Operation.rebase), title: "Rebasing worktree") {
                         await appModel.syncWorktreeFromMain(
                             worktree,
                             repository: repository,
@@ -709,8 +725,13 @@ struct RepositoryDetailView: View {
                         )
                     }
                 } label: {
-                    Label("Mit \(repository.defaultBranch) synchronisieren", systemImage: "arrow.triangle.2.circlepath")
+                    AsyncActionLabel(
+                        title: "Mit \(repository.defaultBranch) synchronisieren",
+                        systemImage: "arrow.triangle.2.circlepath",
+                        isRunning: isWorktreeActionRunning(worktree, AsyncUIActionKey.Operation.rebase)
+                    )
                 }
+                .disabled(isWorktreeActionRunning(worktree, AsyncUIActionKey.Operation.rebase))
                 Button {
                     appModel.integrationDraft = IntegrationDraft(
                         prTitle: worktree.branchName
@@ -744,7 +765,9 @@ struct RepositoryDetailView: View {
     private func removeWorktree(_ worktree: WorktreeRecord) {
         removingWorktreeIDs.insert(worktree.id)
         Task {
-            await appModel.removeWorktree(worktree, in: modelContext)
+            await appModel.performUIAction(key: worktreeActionKey(worktree, "removeWorktree"), title: "Removing worktree") {
+                await appModel.removeWorktree(worktree, in: modelContext)
+            }
             removingWorktreeIDs.remove(worktree.id)
         }
     }
@@ -752,7 +775,9 @@ struct RepositoryDetailView: View {
     private func moveWorktree(_ worktree: WorktreeRecord, to destinationRoot: URL) {
         movingWorktreeIDs.insert(worktree.id)
         Task {
-            await appModel.moveWorktree(worktree, in: repository, to: destinationRoot, modelContext: modelContext)
+            await appModel.performUIAction(key: worktreeActionKey(worktree, "moveWorktree"), title: "Moving worktree") {
+                await appModel.moveWorktree(worktree, in: repository, to: destinationRoot, modelContext: modelContext)
+            }
             movingWorktreeIDs.remove(worktree.id)
         }
     }
@@ -985,13 +1010,11 @@ struct RepositoryDetailView: View {
             Spacer()
 
             Button {
-                isRefreshingStatuses = true
-                Task {
+                appModel.runUIAction(key: repositoryActionKey(AsyncUIActionKey.Operation.refreshRepository), title: "Syncing default branch") {
                     await appModel.refresh(repository, in: modelContext)
-                    isRefreshingStatuses = false
                 }
             } label: {
-                if isRefreshingStatuses {
+                if isRefreshingRepository {
                     Label("Sync…", systemImage: "arrow.down.to.line")
                 } else {
                     Label(behind == 0 ? "Sync" : "Sync (\(behind))", systemImage: "arrow.down.to.line")
@@ -999,17 +1022,15 @@ struct RepositoryDetailView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(isRefreshingStatuses)
+            .disabled(isRefreshingRepository)
             .help("Den periodischen Fetch- und Sync-Ablauf für \(repository.defaultBranch) sofort ausführen")
 
             Button {
-                isPushingDefaultBranch = true
-                Task {
+                appModel.runUIAction(key: worktreeActionKey(worktree, AsyncUIActionKey.Operation.gitPush), title: "Pushing default branch") {
                     await appModel.runGitPush(in: worktree, repository: repository, modelContext: modelContext)
-                    isPushingDefaultBranch = false
                 }
             } label: {
-                if isPushingDefaultBranch {
+                if isWorktreeActionRunning(worktree, AsyncUIActionKey.Operation.gitPush) {
                     Label("Push…", systemImage: "arrow.up.to.line")
                 } else {
                     Label(ahead == 0 ? "Push" : "Push \(ahead)", systemImage: "arrow.up.to.line")
@@ -1017,7 +1038,7 @@ struct RepositoryDetailView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(ahead == 0 || isPushingDefaultBranch || isRefreshingStatuses)
+            .disabled(ahead == 0 || isWorktreeActionRunning(worktree, AsyncUIActionKey.Operation.gitPush) || isRefreshingRepository)
             .opacity(ahead > 0 ? 1 : 0.6)
             .help(
                 ahead == 0

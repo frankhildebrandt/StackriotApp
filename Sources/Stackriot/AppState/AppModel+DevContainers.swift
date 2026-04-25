@@ -329,7 +329,11 @@ extension AppModel {
     private func makeRepositoryDetailSnapshot(for repository: ManagedRepository) -> RepositoryDetailSnapshot {
         let selectedWorktreeID = selectedWorktreeIDsByRepository[repository.id] ?? worktrees(for: repository).first?.id
         let defaultRemoteName = resolvedDefaultRemote(for: repository)?.name
-        let activeRunCount = activeRunIDs.count
+        let activeRunCount = repository.runs.reduce(into: 0) { result, run in
+            if activeRunIDs.contains(run.id) {
+                result += 1
+            }
+        }
         let activeDevContainerCount = repository.worktrees.reduce(into: 0) { result, worktree in
             let state = devContainerStatesByWorktreeID[worktree.id]
             if state?.isRunning == true || state?.activeOperation != nil {

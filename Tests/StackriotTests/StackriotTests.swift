@@ -246,7 +246,10 @@ struct StackriotTests {
         modelContext.insert(repository)
         try modelContext.save()
 
-        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        let appModel = AppModel(
+            services: AppServices(notificationService: RecordingNotificationService()),
+            userDefaults: try makeUserDefaultsSuite()
+        )
         let tools = appModel.availableDevTools(for: worktree)
         let templates = appModel.defaultTemplates(for: repository)
 
@@ -1325,6 +1328,7 @@ struct StackriotTests {
         modelContext.insert(defaultWorktree)
         modelContext.insert(featureWorktree)
         try modelContext.save()
+        appModel.selectedRepositoryID = repository.id
 
         let intentURL = AppPaths.intentFile(for: featureWorktree.id)
         let planURL = AppPaths.implementationPlanFile(for: featureWorktree.id)
@@ -1827,6 +1831,7 @@ struct StackriotTests {
 
         let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
         appModel.storedModelContext = modelContext
+        appModel.selectedRepositoryID = repository.id
 
         await appModel.refreshAllRepositories(force: false)
 
@@ -1853,7 +1858,10 @@ struct StackriotTests {
         modelContext.insert(repository)
         try modelContext.save()
 
-        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        let appModel = AppModel(
+            services: AppServices(notificationService: RecordingNotificationService()),
+            userDefaults: try makeUserDefaultsSuite()
+        )
         appModel.storedModelContext = modelContext
 
         appModel.migrateLegacyRepositoriesIfNeeded(in: modelContext)
@@ -2412,7 +2420,7 @@ struct StackriotTests {
         appModel.repositoryCreationDraft = RepositoryCreationDraft(
             mode: .aiReadme,
             remoteURLString: "",
-            displayName: "AIReadmeRepo",
+            displayName: "AIReadmeRepo-\(UUID().uuidString)",
             npxCommand: "",
             readmePrompt: "README aus Test erzeugen",
             archiveFileURL: nil
@@ -2422,7 +2430,7 @@ struct StackriotTests {
 
         let repositories = try modelContext.fetch(FetchDescriptor<ManagedRepository>())
         #expect(repositories.count == 1)
-        #expect(repositories[0].displayName == "AIReadmeRepo")
+        #expect(repositories[0].displayName.hasPrefix("AIReadmeRepo-"))
         #expect(appModel.pendingErrorMessage == nil)
         #expect(!repositories[0].worktrees.isEmpty)
     }
@@ -2460,7 +2468,8 @@ struct StackriotTests {
             makeTooling: MakeToolingService(),
             worktreeStatusService: WorktreeStatusService(),
             devToolDiscovery: DevToolDiscoveryService(),
-            runConfigurationDiscovery: RunConfigurationDiscoveryService()
+            runConfigurationDiscovery: RunConfigurationDiscoveryService(),
+            notificationService: RecordingNotificationService()
         )
         let appModel = AppModel(services: services)
         let issue = GitHubIssueDetails(
@@ -2720,7 +2729,8 @@ struct StackriotTests {
             makeTooling: MakeToolingService(),
             worktreeStatusService: WorktreeStatusService(),
             devToolDiscovery: DevToolDiscoveryService(),
-            runConfigurationDiscovery: RunConfigurationDiscoveryService()
+            runConfigurationDiscovery: RunConfigurationDiscoveryService(),
+            notificationService: RecordingNotificationService()
         )
         let appModel = AppModel(services: services)
         appModel.storedModelContext = modelContext
@@ -2771,7 +2781,10 @@ struct StackriotTests {
             }
         }
 
-        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        let appModel = AppModel(
+            services: AppServices(notificationService: RecordingNotificationService()),
+            userDefaults: try makeUserDefaultsSuite()
+        )
         appModel.storedModelContext = modelContext
         await appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
 
@@ -2915,7 +2928,9 @@ struct StackriotTests {
         try modelContext.save()
 
         await appModel.handleRunTermination(runID: run.id, exitCode: 0, wasCancelled: false)
-        try? await Task.sleep(for: .milliseconds(50))
+        for _ in 0..<20 where await recorder.deliveredRequests.isEmpty {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
 
         let notifications = await recorder.deliveredRequests
         #expect(notifications.count == 1)
@@ -3134,7 +3149,8 @@ struct StackriotTests {
                     AIRunSummary(title: title, summary: "Exit-Code \(exitCode ?? -1)")
                 }
             ),
-            rawLogArchive: AgentRawLogArchiveService(rootDirectoryProvider: { archiveRoot })
+            rawLogArchive: AgentRawLogArchiveService(rootDirectoryProvider: { archiveRoot }),
+            notificationService: RecordingNotificationService()
         )
         let appModel = AppModel(services: services)
         appModel.storedModelContext = modelContext
@@ -3193,7 +3209,10 @@ struct StackriotTests {
     func deletingArchivedRawLogsRemovesMetadataAndFile() async throws {
         let modelContext = try makeInMemoryModelContext()
         let archiveRoot = try temporaryDirectory(named: "raw-log-delete")
-        let services = AppServices(rawLogArchive: AgentRawLogArchiveService(rootDirectoryProvider: { archiveRoot }))
+        let services = AppServices(
+            rawLogArchive: AgentRawLogArchiveService(rootDirectoryProvider: { archiveRoot }),
+            notificationService: RecordingNotificationService()
+        )
         let appModel = AppModel(services: services)
         appModel.storedModelContext = modelContext
 
@@ -4073,7 +4092,9 @@ struct StackriotTests {
         #expect(worktree.materializedAt != nil)
         #expect(FileManager.default.fileExists(atPath: worktree.materializedPath ?? ""))
 
-        try? await Task.sleep(for: .milliseconds(100))
+        for _ in 0..<30 where await recorder.deliveredRequests.isEmpty {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
         let deliveredRequests = await recorder.deliveredRequests
         #expect(deliveredRequests.contains(where: { $0.title == "Worktree created" }))
 
@@ -4675,7 +4696,9 @@ struct StackriotTests {
         #expect(appModel.agentPlanDraft(for: worktree.id) == nil)
         #expect(appModel.activeAgentPlanDraftWorktreeID == nil)
 
-        try await Task.sleep(for: .milliseconds(50))
+        for _ in 0..<20 where await recorder.deliveredRequests.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         let notifications = await recorder.deliveredRequests
         #expect(notifications.contains(where: {
             $0.title == "Cursor plan imported"
@@ -5263,6 +5286,7 @@ struct StackriotTests {
             worktreeStatusService: statusService,
             notificationService: RecordingNotificationService()
         ))
+        appModel.selectedRepositoryID = repository.id
 
         let firstRefresh = Task { @MainActor in
             await appModel.refreshWorktreeStatuses(for: repository)
@@ -5273,6 +5297,74 @@ struct StackriotTests {
 
         #expect(await recorder.maxConcurrent == 1)
         #expect(await recorder.commandCount == 6)
+    }
+
+    @MainActor
+    @Test
+    func refreshWorktreeStatusesSkipsUnselectedRepository() async throws {
+        let tempRoot = try temporaryDirectory(named: "status-unselected")
+        let selectedRepository = makeRepository(name: "SelectedStatus")
+        let otherRepository = makeRepository(name: "OtherStatus")
+        let otherWorktree = WorktreeRecord(branchName: "feature/other", path: tempRoot.path, repository: otherRepository)
+        otherRepository.worktrees = [otherWorktree]
+
+        let recorder = StatusRefreshCommandRecorder()
+        let statusService = WorktreeStatusService(
+            runCommand: { _, _, _, _ in
+                await recorder.beginCommand()
+                await recorder.endCommand()
+                return CommandResult(stdout: "", stderr: "", exitCode: 0)
+            }
+        )
+        let appModel = AppModel(services: AppServices(
+            worktreeStatusService: statusService,
+            notificationService: RecordingNotificationService()
+        ))
+        appModel.selectedRepositoryID = selectedRepository.id
+
+        await appModel.refreshWorktreeStatuses(for: otherRepository)
+
+        #expect(await recorder.commandCount == 0)
+    }
+
+    @MainActor
+    @Test
+    func uiActionStatePreventsDuplicateStartsAndClearsAfterCompletion() async {
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        let key = AsyncUIActionKey.global("testAction")
+        var executionCount = 0
+
+        let first = Task { @MainActor in
+            await appModel.performUIAction(key: key, title: "Testing") {
+                executionCount += 1
+                try await Task.sleep(for: .milliseconds(30))
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(5))
+        await appModel.performUIAction(key: key, title: "Testing") {
+            executionCount += 1
+        }
+        #expect(appModel.isUIActionRunning(key))
+        await first.value
+
+        #expect(executionCount == 1)
+        #expect(!appModel.isUIActionRunning(key))
+        #expect(appModel.activeUIActionTitle(for: key) == nil)
+    }
+
+    @MainActor
+    @Test
+    func loadDiffSkipsUnselectedRepository() async {
+        let selectedRepository = makeRepository(name: "SelectedDiff")
+        let otherRepository = makeRepository(name: "OtherDiff")
+        let worktree = WorktreeRecord(branchName: "feature/diff", path: "/path/that/should/not/be/read", repository: otherRepository)
+        otherRepository.worktrees = [worktree]
+        let appModel = AppModel(services: AppServices(notificationService: RecordingNotificationService()))
+        appModel.selectedRepositoryID = selectedRepository.id
+
+        let snapshot = await appModel.loadDiff(for: worktree)
+
+        #expect(snapshot.files.isEmpty)
     }
 
     @MainActor
@@ -5431,6 +5523,7 @@ struct StackriotTests {
             worktreeStatusService: statusService,
             notificationService: RecordingNotificationService()
         ))
+        appModel.selectedRepositoryID = repository.id
 
         await appModel.refreshWorktreeStatuses(for: repository)
 
@@ -5468,6 +5561,7 @@ struct StackriotTests {
             notificationService: RecordingNotificationService()
         ))
         successAppModel.storedModelContext = modelContext
+        successAppModel.selectedRepositoryID = repository.id
         let successfulRun = RunRecord(
             actionKind: .gitOperation,
             title: "git push",
@@ -5503,6 +5597,7 @@ struct StackriotTests {
             notificationService: RecordingNotificationService()
         ))
         failureAppModel.storedModelContext = modelContext
+        failureAppModel.selectedRepositoryID = repository.id
         let failedRun = RunRecord(
             actionKind: .gitOperation,
             title: "git push",

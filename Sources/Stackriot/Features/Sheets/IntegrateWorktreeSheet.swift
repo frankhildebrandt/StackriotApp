@@ -194,38 +194,19 @@ struct IntegrateWorktreeSheet: View {
                 }
                 .keyboardShortcut(.cancelAction)
 
-                Button(draft.method == .githubPR ? "PR erstellen" : "Jetzt integrieren") {
-                    guard let worktree else {
-                        dismiss()
-                        return
-                    }
-                    isRunning = true
-                    Task {
-                        await appModel.startIntegration(
-                            worktree,
-                            repository: repository,
-                            draft: draft,
-                            modelContext: modelContext
-                        )
-                        isRunning = false
-                        dismiss()
-                    }
+                Button {
+                    startIntegration()
+                } label: {
+                    AsyncActionLabel(
+                        title: draft.method == .githubPR ? "PR erstellen" : "Jetzt integrieren",
+                        systemImage: draft.method == .githubPR ? "arrow.triangle.merge" : "arrow.up.circle.fill",
+                        isRunning: isRunning
+                    )
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isRunning || targetUnavailableMessage != nil || (draft.method == .githubPR && !canUseGitHubPR) || (draft.method == .githubPR && draft.prTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
                 .commandEnterAction(disabled: isRunning || targetUnavailableMessage != nil || (draft.method == .githubPR && !canUseGitHubPR) || (draft.method == .githubPR && draft.prTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)) {
-                    guard let worktree else { dismiss(); return }
-                    isRunning = true
-                    Task {
-                        await appModel.startIntegration(
-                            worktree,
-                            repository: repository,
-                            draft: draft,
-                            modelContext: modelContext
-                        )
-                        isRunning = false
-                        dismiss()
-                    }
+                    startIntegration()
                 }
             }
         }
@@ -245,6 +226,29 @@ struct IntegrateWorktreeSheet: View {
             if isPinnedWorktree {
                 draft.deleteAfterIntegration = false
             }
+        }
+    }
+
+    private func startIntegration() {
+        guard let worktree else {
+            dismiss()
+            return
+        }
+        isRunning = true
+        Task {
+            await appModel.performUIAction(
+                key: .worktree(worktree.id, AsyncUIActionKey.Operation.integrate),
+                title: draft.method == .githubPR ? "Creating pull request" : "Integrating worktree"
+            ) {
+                await appModel.startIntegration(
+                    worktree,
+                    repository: repository,
+                    draft: draft,
+                    modelContext: modelContext
+                )
+            }
+            isRunning = false
+            dismiss()
         }
     }
 }

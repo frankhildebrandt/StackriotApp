@@ -55,9 +55,16 @@ struct NodeSettingsView: View {
             }
 
             Section {
-                Button("Rebuild managed runtime") {
+                Button {
                     appModel.rebuildManagedNodeRuntime()
+                } label: {
+                    AsyncActionLabel(
+                        title: "Rebuild managed runtime",
+                        systemImage: "arrow.clockwise",
+                        isRunning: appModel.isUIActionRunning(.global(AsyncUIActionKey.Operation.nodeRuntime))
+                    )
                 }
+                .disabled(appModel.isUIActionRunning(.global(AsyncUIActionKey.Operation.nodeRuntime)))
             } header: {
                 Text("Maintenance")
             } footer: {
@@ -87,9 +94,16 @@ struct NodeSettingsView: View {
                         }
 
                         HStack {
-                            Button("Install locally") {
+                            Button {
                                 appModel.installLocalTool(status.tool)
+                            } label: {
+                                AsyncActionLabel(
+                                    title: "Install locally",
+                                    systemImage: "square.and.arrow.down",
+                                    isRunning: appModel.isUIActionRunning(.tool(status.tool.rawValue, AsyncUIActionKey.Operation.installLocalTool))
+                                )
                             }
+                            .disabled(appModel.isUIActionRunning(.tool(status.tool.rawValue, AsyncUIActionKey.Operation.installLocalTool)))
 
                             if let installHint = status.installHint?.nonEmpty {
                                 Text(installHint)
@@ -101,9 +115,16 @@ struct NodeSettingsView: View {
                     .padding(.vertical, 4)
                 }
 
-                Button("Refresh local CLI status") {
+                Button {
                     appModel.refreshLocalToolStatuses()
+                } label: {
+                    AsyncActionLabel(
+                        title: "Refresh local CLI status",
+                        systemImage: "arrow.clockwise",
+                        isRunning: appModel.isUIActionRunning(.global(AsyncUIActionKey.Operation.localToolStatus))
+                    )
                 }
+                .disabled(appModel.isUIActionRunning(.global(AsyncUIActionKey.Operation.localToolStatus)))
             }
         }
         .task {

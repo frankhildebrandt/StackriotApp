@@ -42,6 +42,8 @@ final class AppModel: @unchecked Sendable {
     var pullRequestUpstreamStatuses: [UUID: PullRequestUpstreamStatus] = [:]
     var syncLogs: [UUID: String] = [:]
     var activeRunIDs: Set<UUID> = []
+    var activeUIActionKeys: Set<AsyncUIActionKey> = []
+    var activeUIActionTitlesByKey: [AsyncUIActionKey: String] = [:]
     /// Session logs written under the linked documentation repository (`session-logs/...`).
     var activeSessionRecordingRunIDs: Set<UUID> = []
     var runSessionLogFileURLByRunID: [UUID: URL] = [:]

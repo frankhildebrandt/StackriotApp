@@ -141,6 +141,18 @@ struct SystemUserNotificationCenter: UserNotificationCentering, @unchecked Senda
     }
 }
 
+struct UnsupportedUserNotificationCenter: UserNotificationCentering {
+    func authorizationStatus() async -> UNAuthorizationStatus {
+        .denied
+    }
+
+    func requestAuthorization(options _: UNAuthorizationOptions) async throws -> Bool {
+        false
+    }
+
+    func add(_: UNNotificationRequest) async throws {}
+}
+
 @MainActor
 final class CarbonGlobalHotKeyManager: GlobalHotKeyRegistering {
     private static let signature = OSType(0x53545254)
@@ -383,8 +395,16 @@ actor AppNotificationService: AppNotificationServing {
     private let logger = Logger(subsystem: "Stackriot", category: "notifications")
     private var cachedAuthorizationState: AppNotificationAuthorizationState?
 
-    init(center: any UserNotificationCentering = SystemUserNotificationCenter()) {
-        self.center = center
+    init(center: (any UserNotificationCentering)? = nil) {
+        self.center = center ?? Self.defaultNotificationCenter()
+    }
+
+    private static func defaultNotificationCenter() -> any UserNotificationCentering {
+        // SwiftPM test bundles can crash inside UNUserNotificationCenter.current().
+        if Bundle.main.bundleURL.path.contains("/usr/libexec/swift/pm") {
+            return UnsupportedUserNotificationCenter()
+        }
+        return SystemUserNotificationCenter()
     }
 
     @discardableResult

@@ -8,6 +8,7 @@ struct PublishBranchSheet: View {
 
     let repository: ManagedRepository
     let worktree: WorktreeRecord
+    @State private var isPublishing = false
 
     var body: some View {
         @Bindable var appModel = appModel
@@ -34,24 +35,34 @@ struct PublishBranchSheet: View {
                 Button("Cancel") {
                     dismiss()
                 }
-                Button("Publish") {
-                    Task {
-                        await appModel.publishSelectedBranch(in: modelContext)
-                        dismiss()
-                    }
+                Button {
+                    publish()
+                } label: {
+                    AsyncActionLabel(title: "Publish", systemImage: "icloud.and.arrow.up", isRunning: isPublishing)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(appModel.publishDraft.remoteName.isEmpty)
-                .commandEnterAction(disabled: appModel.publishDraft.remoteName.isEmpty) {
-                    Task {
-                        await appModel.publishSelectedBranch(in: modelContext)
-                        dismiss()
-                    }
+                .disabled(appModel.publishDraft.remoteName.isEmpty || isPublishing)
+                .commandEnterAction(disabled: appModel.publishDraft.remoteName.isEmpty || isPublishing) {
+                    publish()
                 }
             }
         }
         .padding(24)
         .frame(width: 560)
         .background(.regularMaterial)
+    }
+
+    private func publish() {
+        isPublishing = true
+        Task {
+            await appModel.performUIAction(
+                key: .worktree(worktree.id, AsyncUIActionKey.Operation.publishBranch),
+                title: "Publishing branch"
+            ) {
+                await appModel.publishSelectedBranch(in: modelContext)
+            }
+            isPublishing = false
+            dismiss()
+        }
     }
 }
