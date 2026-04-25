@@ -80,6 +80,7 @@ private struct CommandBarWindow: View {
     @FocusState private var isSearchFocused: Bool
     @State private var query = ""
     @State private var selectedCommandID: String?
+    @State private var isExecutingCommand = false
 
     private var rankedCommands: [CommandBarRankedCommand] {
         appModel.rankedCommandBarCommands(query: query)
@@ -109,15 +110,9 @@ private struct CommandBarWindow: View {
             }
             .padding(20)
             .frame(minWidth: 720, minHeight: 500)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .strokeBorder(.white.opacity(0.12))
-            )
-            .shadow(color: .black.opacity(0.2), radius: 32, y: 18)
         }
-        .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.regularMaterial)
         .background(QuickIntentWindowAccessor(presentationID: session?.id))
         .onAppear {
             appModel.refreshCommandBarContext()
@@ -139,7 +134,7 @@ private struct CommandBarWindow: View {
         .onExitCommand {
             close()
         }
-        .commandEnterAction(disabled: selectedCommand == nil) {
+        .commandEnterAction(disabled: selectedCommand == nil || isExecutingCommand) {
             executeSelectedCommand()
         }
     }
@@ -225,6 +220,11 @@ private struct CommandBarWindow: View {
 
             Spacer()
 
+            if isExecutingCommand, isSelected {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
             Text(command.category.displayName)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
@@ -292,8 +292,18 @@ private struct CommandBarWindow: View {
     }
 
     private func executeSelectedCommand() {
-        guard let selectedCommand else { return }
-        appModel.executeCommandBarCommand(selectedCommand, in: modelContext)
+        guard let selectedCommand, !isExecutingCommand else { return }
+        isExecutingCommand = true
+        appModel.runUIAction(key: .global(AsyncUIActionKey.Operation.commandBar), title: selectedCommand.title) {
+            appModel.executeCommandBarCommand(selectedCommand, in: modelContext)
+            await Task.yield()
+        }
+        Task { @MainActor in
+            await Task.yield()
+            if appModel.commandBarSession != nil {
+                isExecutingCommand = false
+            }
+        }
     }
 
     private func close() {

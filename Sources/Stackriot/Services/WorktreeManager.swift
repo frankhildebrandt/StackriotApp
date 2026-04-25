@@ -427,7 +427,7 @@ struct WorktreeManager {
     private static func normalizedWorktreeSegment(from value: String) -> String {
         let transliterated = value
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "", with: "ss")
+            .replacingOccurrences(of: "ß", with: "ss")
             .folding(options: [.diacriticInsensitive], locale: .current)
         let whitespaceCollapsed = transliterated.replacingOccurrences(
             of: #"\s+"#,

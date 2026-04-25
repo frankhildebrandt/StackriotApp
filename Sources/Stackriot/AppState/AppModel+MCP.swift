@@ -48,30 +48,30 @@ extension AppModel {
     }
 
     func refreshMCPServerConfiguration() {
-        Task {
-            await services.mcpServerManager.refreshConfiguration()
-            mcpServerStatus = await services.mcpServerManager.statusSnapshot()
+        runUIAction(key: .global("\(AsyncUIActionKey.Operation.mcpServer).refresh"), title: "Refreshing MCP server") {
+            await self.services.mcpServerManager.refreshConfiguration()
+            self.mcpServerStatus = await self.services.mcpServerManager.statusSnapshot()
         }
     }
 
     func startMCPServer() {
-        Task {
-            await services.mcpServerManager.start()
-            mcpServerStatus = await services.mcpServerManager.statusSnapshot()
+        runUIAction(key: .global("\(AsyncUIActionKey.Operation.mcpServer).start"), title: "Starting MCP server") {
+            await self.services.mcpServerManager.start()
+            self.mcpServerStatus = await self.services.mcpServerManager.statusSnapshot()
         }
     }
 
     func stopMCPServer() {
-        Task {
-            await services.mcpServerManager.stop()
-            mcpServerStatus = await services.mcpServerManager.statusSnapshot()
+        runUIAction(key: .global("\(AsyncUIActionKey.Operation.mcpServer).stop"), title: "Stopping MCP server") {
+            await self.services.mcpServerManager.stop()
+            self.mcpServerStatus = await self.services.mcpServerManager.statusSnapshot()
         }
     }
 
     func restartMCPServer() {
-        Task {
-            await services.mcpServerManager.restart()
-            mcpServerStatus = await services.mcpServerManager.statusSnapshot()
+        runUIAction(key: .global("\(AsyncUIActionKey.Operation.mcpServer).restart"), title: "Restarting MCP server") {
+            await self.services.mcpServerManager.restart()
+            self.mcpServerStatus = await self.services.mcpServerManager.statusSnapshot()
         }
     }
 

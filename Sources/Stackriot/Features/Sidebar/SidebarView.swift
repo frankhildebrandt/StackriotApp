@@ -249,19 +249,32 @@ struct SidebarView: View {
                 Button {
                     onRefreshAllRepositories()
                 } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 32)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                    Group {
+                        if selectedRepositoryIsRefreshing {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
-                .help("Alle Repositories aktualisieren")
+                .disabled(selectedRepositoryID == nil || selectedRepositoryIsRefreshing)
+                .help("Ausgewähltes Repository aktualisieren")
             }
             .padding(.horizontal)
             .padding(.bottom, 8)
         }
         .background(.ultraThinMaterial)
+    }
+
+    private var selectedRepositoryIsRefreshing: Bool {
+        guard let selectedRepositoryID else { return false }
+        return sidebarSnapshotsByRepositoryID[selectedRepositoryID]?.isRefreshing == true
     }
 
     private var footer: some View {

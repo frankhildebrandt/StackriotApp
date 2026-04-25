@@ -1084,6 +1084,7 @@ extension AppModel {
     }
 
     func refreshWorktreeStatuses(for repository: ManagedRepository, allowAutoRebase: Bool = true) async {
+        guard selectedRepositoryID == repository.id else { return }
         recordWorktreeStatusRefreshStart(for: repository.id)
         let repositoryID = repository.id
         if worktreeStatusRefreshTasksByRepositoryID[repositoryID] != nil {
@@ -1135,6 +1136,7 @@ extension AppModel {
         repository: ManagedRepository,
         modelContext: ModelContext
     ) async {
+        guard selectedRepositoryID == repository.id else { return }
         guard !sourceWorktree.isDefaultBranchWorkspace else { return }
         _ = await performLocalMerge(sourceWorktree, repository: repository, modelContext: modelContext)
         // Success is reflected by the refreshed worktree state; avoid a post-merge confirmation dialog.
@@ -1149,6 +1151,7 @@ extension AppModel {
         draft: IntegrationDraft,
         modelContext: ModelContext
     ) async {
+        guard selectedRepositoryID == repository.id else { return }
         guard !worktree.isDefaultBranchWorkspace else { return }
         let deleteAfterIntegration = draft.deleteAfterIntegration && !worktree.isPinned
 
@@ -1521,6 +1524,9 @@ extension AppModel {
     }
 
     func loadDiff(for worktree: WorktreeRecord) async -> WorkspaceDiffSnapshot {
+        guard worktree.repository?.id == selectedRepositoryID else {
+            return WorkspaceDiffSnapshot(files: [])
+        }
         guard let worktreeURL = worktree.materializedURL else {
             return WorkspaceDiffSnapshot(files: [])
         }
@@ -1540,6 +1546,7 @@ extension AppModel {
         strategy: SyncStrategy,
         modelContext: ModelContext
     ) async {
+        guard selectedRepositoryID == repository.id else { return }
         guard await materializeIdeaTreeIfNeeded(worktree, in: repository, modelContext: modelContext) != nil,
               let worktreeURL = worktree.materializedURL
         else {

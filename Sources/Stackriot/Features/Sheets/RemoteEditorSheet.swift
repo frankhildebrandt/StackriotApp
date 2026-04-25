@@ -15,6 +15,7 @@ struct RemoteEditorSheet: View {
     @State private var fetchEnabled = true
     @State private var isDefaultRemote = false
     @State private var selectedSSHKeyID: UUID?
+    @State private var isSaving = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -48,39 +49,15 @@ struct RemoteEditorSheet: View {
                 Button("Cancel") {
                     dismiss()
                 }
-                Button("Save") {
-                    Task {
-                        let key = sshKeys.first(where: { $0.id == selectedSSHKeyID })
-                        await appModel.saveRemote(
-                            name: name,
-                            url: url,
-                            fetchEnabled: fetchEnabled,
-                            isDefaultRemote: isDefaultRemote,
-                            sshKey: key,
-                            for: repository,
-                            editing: remote,
-                            in: modelContext
-                        )
-                        dismiss()
-                    }
+                Button {
+                    save()
+                } label: {
+                    AsyncActionLabel(title: "Save", systemImage: "checkmark", isRunning: isSaving)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .commandEnterAction(disabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
-                    Task {
-                        let key = sshKeys.first(where: { $0.id == selectedSSHKeyID })
-                        await appModel.saveRemote(
-                            name: name,
-                            url: url,
-                            fetchEnabled: fetchEnabled,
-                            isDefaultRemote: isDefaultRemote,
-                            sshKey: key,
-                            for: repository,
-                            editing: remote,
-                            in: modelContext
-                        )
-                        dismiss()
-                    }
+                .disabled(isSaveDisabled)
+                .commandEnterAction(disabled: isSaveDisabled) {
+                    save()
                 }
             }
         }
@@ -93,6 +70,37 @@ struct RemoteEditorSheet: View {
             fetchEnabled = remote?.fetchEnabled ?? true
             isDefaultRemote = repository.defaultRemoteName == remote?.name || (remote == nil && repository.defaultRemoteName == nil)
             selectedSSHKeyID = remote?.sshKey?.id
+        }
+    }
+
+    private var isSaveDisabled: Bool {
+        isSaving
+            || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func save() {
+        let actionID = remote?.id.uuidString ?? repository.id.uuidString
+        isSaving = true
+        Task {
+            let key = sshKeys.first(where: { $0.id == selectedSSHKeyID })
+            await appModel.performUIAction(
+                key: .tool(actionID, AsyncUIActionKey.Operation.remoteManagement),
+                title: remote == nil ? "Adding remote" : "Saving remote"
+            ) {
+                await appModel.saveRemote(
+                    name: name,
+                    url: url,
+                    fetchEnabled: fetchEnabled,
+                    isDefaultRemote: isDefaultRemote,
+                    sshKey: key,
+                    for: repository,
+                    editing: remote,
+                    in: modelContext
+                )
+            }
+            isSaving = false
+            dismiss()
         }
     }
 }

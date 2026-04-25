@@ -80,6 +80,13 @@ enum CommandBarCommandAction: Equatable, Sendable {
     case startRunConfiguration(repositoryID: UUID, worktreeID: UUID, configurationID: String)
     case openQuickIntent
     case refreshRepository(repositoryID: UUID)
+    case selectRepository(repositoryID: UUID)
+    case selectWorktree(repositoryID: UUID, worktreeID: UUID)
+    case presentNewWorktree(repositoryID: UUID)
+    case openDevTool(repositoryID: UUID, worktreeID: UUID, tool: SupportedDevTool)
+    case openExternalTerminal(repositoryID: UUID, worktreeID: UUID, terminal: SupportedExternalTerminal)
+    case syncRepository(repositoryID: UUID)
+    case pushDefaultBranch(repositoryID: UUID, worktreeID: UUID)
 }
 
 struct CommandBarCommand: Identifiable, Equatable, Sendable {

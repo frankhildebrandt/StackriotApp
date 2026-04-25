@@ -8,6 +8,7 @@ struct RunConsoleColumn: View {
     let repository: ManagedRepository
 
     @State private var showLogDrawer = false
+    @State private var isOpeningLogDrawer = false
 
     var body: some View {
         let worktree = appModel.selectedWorktree(for: repository)
@@ -141,13 +142,15 @@ struct RunConsoleColumn: View {
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Button {
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
-                        showLogDrawer.toggle()
-                    }
+                    toggleLogDrawer(for: worktree)
                 } label: {
-                    Label("History", systemImage: "clock.arrow.circlepath")
+                    AsyncActionLabel(
+                        title: "History",
+                        systemImage: "clock.arrow.circlepath",
+                        isRunning: isOpeningLogDrawer
+                    )
                 }
-                .disabled(worktree == nil)
+                .disabled(worktree == nil || isOpeningLogDrawer)
                 .help("Run-History anzeigen")
             }
             ToolbarItem(placement: .primaryAction) {
@@ -166,7 +169,9 @@ struct RunConsoleColumn: View {
 
     @ViewBuilder
     private func logDrawer(worktree: WorktreeRecord) -> some View {
-        let runs = appModel.runs(forWorktreeID: worktree.id, in: repository)
+        let runs = appModel.selectedRepositoryID == repository.id
+            ? appModel.runs(forWorktreeID: worktree.id, in: repository)
+            : []
 
         VStack(spacing: 0) {
             HStack {
@@ -219,6 +224,28 @@ struct RunConsoleColumn: View {
             Rectangle()
                 .fill(Color.primary.opacity(0.08))
                 .frame(height: 1)
+        }
+    }
+
+    private func toggleLogDrawer(for worktree: WorktreeRecord?) {
+        guard let worktree, appModel.selectedRepositoryID == repository.id else { return }
+        if showLogDrawer {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                showLogDrawer = false
+            }
+            return
+        }
+
+        let key = AsyncUIActionKey.worktree(worktree.id, AsyncUIActionKey.Operation.loadHistory)
+        guard appModel.beginUIAction(key, title: "Loading history") else { return }
+        isOpeningLogDrawer = true
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+            showLogDrawer = true
+        }
+        Task { @MainActor in
+            await Task.yield()
+            isOpeningLogDrawer = false
+            appModel.endUIAction(key)
         }
     }
 

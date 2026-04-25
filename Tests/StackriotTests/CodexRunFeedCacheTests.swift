@@ -109,6 +109,21 @@ struct StructuredAgentOutputCacheTests {
         let suiteName = "CodexRunFeedCacheTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
-        return AppModel(userDefaults: defaults)
+        return AppModel(
+            services: AppServices(notificationService: CacheNoopNotificationService()),
+            userDefaults: defaults
+        )
+    }
+}
+
+private actor CacheNoopNotificationService: AppNotificationServing {
+    @discardableResult
+    func prepareAuthorization() async -> AppNotificationAuthorizationState {
+        .unsupported
+    }
+
+    @discardableResult
+    func deliver(_: AppNotificationRequest) async -> AppNotificationDeliveryResult {
+        .skipped(.unsupported)
     }
 }

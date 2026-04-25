@@ -10,6 +10,7 @@ struct DevContainerSettingsView: View {
     @AppStorage(AppPreferences.devContainerGlobalVisibilityEnabledKey) private var globalVisibilityEnabled = AppPreferences.defaultDevContainerGlobalVisibilityEnabled
 
     @State private var toolingStatus = DevContainerToolingStatus()
+    @State private var isRefreshingToolingStatus = false
 
     private var selectedStrategy: DevContainerCLIStrategy {
         DevContainerCLIStrategy(rawValue: cliStrategy) ?? AppPreferences.defaultDevContainerCLIStrategy
@@ -59,11 +60,20 @@ struct DevContainerSettingsView: View {
                 LabeledContent("devcontainer", value: toolingStatus.devcontainerInstalled ? "Installed" : "Missing")
                 LabeledContent("npx", value: toolingStatus.npxInstalled ? "Installed" : "Missing")
                 LabeledContent("Effective CLI", value: toolingStatus.resolvedCLI?.displayName ?? "Unavailable")
-                Button("Refresh tooling status") {
+                Button {
                     Task {
+                        isRefreshingToolingStatus = true
                         toolingStatus = await appModel.services.devContainerService.toolingStatus()
+                        isRefreshingToolingStatus = false
                     }
+                } label: {
+                    AsyncActionLabel(
+                        title: "Refresh tooling status",
+                        systemImage: "arrow.clockwise",
+                        isRunning: isRefreshingToolingStatus
+                    )
                 }
+                .disabled(isRefreshingToolingStatus)
             }
 
             Section("Install help") {

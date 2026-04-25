@@ -51,9 +51,11 @@ struct DiffInspectorView: View {
                 Button {
                     Task { await reloadDiff() }
                 } label: {
-                    Image(systemName: "arrow.clockwise").font(.caption)
+                    AsyncIconLabel(systemImage: "arrow.clockwise", isRunning: isLoading)
+                        .font(.caption)
                 }
                 .buttonStyle(.borderless)
+                .disabled(isLoading)
                 .help("Refresh diff")
             }
 
@@ -74,8 +76,19 @@ struct DiffInspectorView: View {
 
     @MainActor
     private func reloadDiff() async {
+        guard appModel.selectedRepositoryID == repository.id else { return }
+        guard !isLoading else { return }
+        let key = AsyncUIActionKey.worktree(worktree.id, AsyncUIActionKey.Operation.loadDiff)
+        guard appModel.beginUIAction(key, title: "Loading diff") else { return }
         isLoading = true
-        diffSnapshot = await appModel.loadDiff(for: worktree)
-        isLoading = false
+        defer {
+            isLoading = false
+            appModel.endUIAction(key)
+        }
+        let loadedSnapshot = await appModel.loadDiff(for: worktree)
+        guard !Task.isCancelled, appModel.selectedRepositoryID == repository.id else {
+            return
+        }
+        diffSnapshot = loadedSnapshot
     }
 }

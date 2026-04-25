@@ -148,6 +148,7 @@ extension AppModel {
             else {
                 throw StackriotError.worktreeUnavailable
             }
+            guard selectedRepositoryID == repository.id else { return }
 
             guard let remote = repository.remotes.first(where: { $0.name == publishDraft.remoteName }) else {
                 throw StackriotError.remoteNameRequired

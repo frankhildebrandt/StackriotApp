@@ -62,25 +62,29 @@ struct DevContainerConsolePanel: View {
             }
 
             Button {
-                Task {
+                appModel.runUIAction(key: .worktree(worktree.id, "\(AsyncUIActionKey.Operation.devContainer).refresh"), title: "Refreshing devcontainer") {
                     await appModel.refreshDevContainerState(for: worktree)
                 }
             } label: {
-                Image(systemName: "arrow.clockwise")
+                AsyncIconLabel(systemImage: "arrow.clockwise", isRunning: appModel.isUIActionRunning(.worktree(worktree.id, "\(AsyncUIActionKey.Operation.devContainer).refresh")))
             }
             .buttonStyle(.bordered)
-            .disabled(state.isBusy)
+            .disabled(state.isBusy || appModel.isUIActionRunning(.worktree(worktree.id, "\(AsyncUIActionKey.Operation.devContainer).refresh")))
             .help("Devcontainer-Status aktualisieren")
 
             Button {
-                Task {
+                appModel.runUIAction(key: .worktree(worktree.id, "\(AsyncUIActionKey.Operation.devContainer).terminal"), title: "Opening devcontainer terminal") {
                     await appModel.openDevContainerTerminal(for: worktree, in: modelContext)
                 }
             } label: {
-                Label("Terminal", systemImage: "terminal")
+                AsyncActionLabel(
+                    title: "Terminal",
+                    systemImage: "terminal",
+                    isRunning: appModel.isUIActionRunning(.worktree(worktree.id, "\(AsyncUIActionKey.Operation.devContainer).terminal"))
+                )
             }
             .buttonStyle(.bordered)
-            .disabled(!state.canOpenTerminal)
+            .disabled(!state.canOpenTerminal || appModel.isUIActionRunning(.worktree(worktree.id, "\(AsyncUIActionKey.Operation.devContainer).terminal")))
 
             Button {
                 guard let repository = worktree.repository else { return }
